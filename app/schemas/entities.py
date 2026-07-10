@@ -4,21 +4,37 @@ from pydantic import BaseModel, Field, model_validator
 from app.models.entities import TransactionType, UserRole
 
 
-class UserCreate(BaseModel):
+class UserBase(BaseModel):
     name: str
     email: str | None = None
     phone: str | None = None
     role: UserRole = UserRole.ENGINEER
 
 
-class UserRead(UserCreate):
+class UserCreate(UserBase):
+    password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class UserRead(UserBase):
     id: int
     organization_id: int
+    is_active: bool
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class PasswordSet(BaseModel):
+    password: str = Field(min_length=10, max_length=128)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserRead
 
 
 class WarehouseCreate(BaseModel):

@@ -6,6 +6,15 @@ export interface User {
   email?: string | null;
   phone?: string | null;
   role: UserRole;
+  organization_id: number;
+  is_active: boolean;
+}
+
+export interface AuthToken {
+  access_token: string;
+  token_type: "bearer";
+  expires_in: number;
+  user: User;
 }
 
 export interface Warehouse {

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { api } from "@/lib/api";
 
 const links = [
   { href: "/", label: "Dashboard", roles: ["manager", "admin"] },
@@ -31,15 +32,32 @@ export default function Nav() {
   const pathname = usePathname();
   const [role, setRole] = useState("admin");
   const [userId, setUserId] = useState("");
+  const [authenticated, setAuthenticated] = useState(false);
+  const legacyAuth = process.env.NEXT_PUBLIC_LEGACY_AUTH === "true";
 
   useEffect(() => {
     const saved = window.localStorage.getItem("opf_role");
     const savedUserId = window.localStorage.getItem("opf_user_id");
+    const token = window.localStorage.getItem("opf_access_token");
     if (saved) {
       setRole(saved);
     }
     if (savedUserId) {
       setUserId(savedUserId);
+    }
+    if (token) {
+      api.getMe()
+        .then((user) => {
+          setAuthenticated(true);
+          setRole(user.role);
+          setUserId(String(user.id));
+          window.localStorage.setItem("opf_role", user.role);
+          window.localStorage.setItem("opf_user_id", String(user.id));
+        })
+        .catch(() => {
+          window.localStorage.removeItem("opf_access_token");
+          setAuthenticated(false);
+        });
     }
   }, []);
 
@@ -53,17 +71,18 @@ export default function Nav() {
   }, [role]);
 
   const visibleLinks = useMemo(() => {
+    if (!authenticated && !legacyAuth) return [];
     const items = links.filter((link) => link.roles.includes(role));
     if (role === "engineer") {
       return sortEngineerLinks(items);
     }
     return items;
-  }, [role]);
+  }, [authenticated, legacyAuth, role]);
 
   return (
     <>
       <div className="topbar container" style={{ marginBottom: 0, paddingTop: 4 }}>
-        <select
+        {legacyAuth && !authenticated && <select
           value={role}
           onChange={(e) => {
             setRole(e.target.value);
@@ -76,8 +95,8 @@ export default function Nav() {
           <option value="warehouse">warehouse</option>
           <option value="manager">manager</option>
           <option value="admin">admin</option>
-        </select>
-        <input
+        </select>}
+        {legacyAuth && !authenticated && <input
           placeholder="X-User-Id"
           value={userId}
           onChange={(e) => {
@@ -92,7 +111,21 @@ export default function Nav() {
           style={{ maxWidth: 160 }}
           inputMode="numeric"
           aria-label="User id for API"
-        />
+        />}
+        {!authenticated && !legacyAuth && <Link href="/login">Sign in</Link>}
+        {authenticated && (
+          <button
+            type="button"
+            onClick={() => {
+              window.localStorage.removeItem("opf_access_token");
+              window.localStorage.removeItem("opf_role");
+              window.localStorage.removeItem("opf_user_id");
+              window.location.href = "/login";
+            }}
+          >
+            Sign out
+          </button>
+        )}
       </div>
       <nav
         className={role === "engineer" ? "mobile-bottom-nav" : "topbar container"}

@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import event
 from sqlalchemy.orm import Session, with_loader_criteria
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import decode_access_token
 from app.models import (
     AuditLog,
     InventoryTransaction,
@@ -33,6 +35,8 @@ TENANT_MODELS = (
     ReturnEquipment,
     AuditLog,
 )
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
 @event.listens_for(Session, "do_orm_execute")
@@ -76,22 +80,40 @@ class Actor:
 
 def get_current_actor(
     db: Session = Depends(get_db),
+    token: str | None = Depends(oauth2_scheme),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
 ) -> Actor:
     if not settings.rbac_enforce:
         db.info["organization_id"] = 1
         return Actor(user_id=None, role=UserRole.ADMIN, organization_id=1)
 
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail="Missing X-User-Id header")
-    try:
-        user_id = int(x_user_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid X-User-Id header") from exc
+    token_organization_id: int | None = None
+    if token:
+        try:
+            user_id, token_organization_id = decode_access_token(token)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=401,
+                detail=str(exc),
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+    elif settings.legacy_header_auth and x_user_id:
+        try:
+            user_id = int(x_user_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid X-User-Id header") from exc
+    else:
+        raise HTTPException(
+            status_code=401,
+            detail="Bearer authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     user = db.get(User, user_id)
-    if not user:
+    if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found")
+    if token_organization_id is not None and token_organization_id != user.organization_id:
+        raise HTTPException(status_code=401, detail="Token organization is invalid")
     db.info["organization_id"] = user.organization_id
     return Actor(user_id=user.id, role=user.role, organization_id=user.organization_id)
 

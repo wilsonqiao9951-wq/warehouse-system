@@ -12,6 +12,7 @@ import {
   WorkOrder,
   WorkOrderPart,
   AbnormalUsageRow,
+  AuthToken,
   WorkOrderProfit
 } from "@/types";
 
@@ -39,9 +40,11 @@ async function xhrUploadPartPhoto(
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     throw new Error("You are offline. Connect to the network and try again.");
   }
+  const token = typeof window !== "undefined" ? window.localStorage.getItem("opf_access_token") : null;
   const userId = typeof window !== "undefined" ? window.localStorage.getItem("opf_user_id") : null;
   const headers: Record<string, string> = {};
-  if (userId) headers["X-User-Id"] = userId;
+  if (token) headers.Authorization = `Bearer ${token}`;
+  else if (userId) headers["X-User-Id"] = userId;
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -90,8 +93,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isFormData = init?.body instanceof FormData;
   let authHeaders: Record<string, string> = {};
   if (typeof window !== "undefined") {
+    const token = window.localStorage.getItem("opf_access_token");
     const userId = window.localStorage.getItem("opf_user_id");
-    if (userId) {
+    if (token) {
+      authHeaders = { Authorization: `Bearer ${token}` };
+    } else if (userId) {
       authHeaders = { "X-User-Id": userId };
     }
   }
@@ -130,6 +136,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  login: (email: string, password: string) => {
+    const form = new URLSearchParams({ username: email, password });
+    return request<AuthToken>("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString()
+    });
+  },
+  getMe: () => request<User>("/auth/me"),
   listWorkOrders: (params?: {
     skip?: number;
     limit?: number;

@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import func, select
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.rbac import Actor, get_current_actor, require_roles, require_work_order_scope
+from app.core.security import create_access_token, hash_password, verify_password
 from app.models import (
     AuditLog,
     InventoryTransaction,
@@ -41,7 +43,9 @@ from app.schemas import (
     EngineerDashboard,
     PartCreate,
     PartRead,
+    PasswordSet,
     StockBalance,
+    TokenResponse,
     UserCreate,
     UserRead,
     WarehouseCreate,
@@ -63,6 +67,32 @@ from app.services.inventory import (
 )
 
 router = APIRouter()
+
+
+@router.post("/auth/login", response_model=TokenResponse)
+def login(
+    form: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    user = db.scalar(select(User).where(func.lower(User.email) == form.username.strip().lower()))
+    if not user or not user.is_active or not verify_password(form.password, user.password_hash):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token, expires_in = create_access_token(user.id, user.organization_id)
+    return TokenResponse(access_token=token, expires_in=expires_in, user=user)
+
+
+@router.get("/auth/me", response_model=UserRead)
+def auth_me(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
+    if actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Authenticated user required")
+    user = db.get(User, actor.user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 
 def _require_tenant_user(db: Session, user_id: int | None, field_name: str) -> None:
@@ -134,11 +164,28 @@ async def upload_work_order_part_photo(
 @router.post("/users", response_model=UserRead)
 def create_user(payload: UserCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN)
-    item = User(**payload.model_dump())
+    data = payload.model_dump(exclude={"password"})
+    item = User(**data, password_hash=hash_password(payload.password) if payload.password else None)
     db.add(item)
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.post("/users/{user_id}/set-password", status_code=204)
+def set_user_password(
+    user_id: int,
+    payload: PasswordSet,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.password_hash = hash_password(payload.password)
+    db.add(user)
+    db.commit()
 
 
 @router.get("/users", response_model=list[UserRead])
