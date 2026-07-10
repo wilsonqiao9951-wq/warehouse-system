@@ -65,6 +65,11 @@ from app.services.inventory import (
 router = APIRouter()
 
 
+def _require_tenant_user(db: Session, user_id: int | None, field_name: str) -> None:
+    if user_id is not None and not db.get(User, user_id):
+        raise HTTPException(status_code=400, detail=f"{field_name} must reference a user in the current organization")
+
+
 def _audit(
     db: Session,
     actor: Actor,
@@ -150,6 +155,7 @@ def list_users(
 @router.post("/warehouses", response_model=WarehouseRead)
 def create_warehouse(payload: WarehouseCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    _require_tenant_user(db, payload.assigned_user_id, "assigned_user_id")
     item = Warehouse(**payload.model_dump())
     db.add(item)
     db.commit()
@@ -192,6 +198,9 @@ def list_parts(
 @router.post("/work-orders", response_model=WorkOrderRead)
 def create_work_order(payload: WorkOrderCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    _require_tenant_user(db, payload.assigned_user_id, "assigned_user_id")
+    _require_tenant_user(db, payload.engineer_id, "engineer_id")
+    _require_tenant_user(db, payload.assistant_id, "assistant_id")
     data = payload.model_dump()
     if not data.get("ticket_number"):
         data["ticket_number"] = data.get("wo_number")
@@ -293,6 +302,10 @@ def update_work_order(
         updates["assigned_user_id"] = updates["engineer_id"]
     if "assigned_user_id" in updates and "engineer_id" not in updates:
         updates["engineer_id"] = updates["assigned_user_id"]
+
+    _require_tenant_user(db, updates.get("assigned_user_id"), "assigned_user_id")
+    _require_tenant_user(db, updates.get("engineer_id"), "engineer_id")
+    _require_tenant_user(db, updates.get("assistant_id"), "assistant_id")
 
     for key, value in updates.items():
         setattr(item, key, value)
