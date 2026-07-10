@@ -11,6 +11,7 @@ from app.core.security import decode_access_token
 from app.models import (
     AuditLog,
     InventoryTransaction,
+    ImportBatch,
     JobStatus,
     Organization,
     Part,
@@ -35,6 +36,7 @@ TENANT_MODELS = (
     JobStatus,
     ReturnEquipment,
     AuditLog,
+    ImportBatch,
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)

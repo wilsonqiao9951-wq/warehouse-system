@@ -17,6 +17,7 @@ const links = [
   { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
   { href: "/platform", label: "Customers", roles: ["admin"] },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },
+  { href: "/parts-import", label: "Parts Import", roles: ["warehouse", "manager", "admin"] },
   { href: "/work-order-details", label: "WO Details", roles: ["admin"] },
   { href: "/today", label: "Today", roles: ["engineer"] },
   { href: "/my-jobs", label: "My Jobs", roles: ["engineer"] },

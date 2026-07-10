@@ -1,5 +1,7 @@
 from datetime import date, datetime, timedelta
+from hashlib import sha256
 from io import BytesIO
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,6 +19,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.models import (
     AuditLog,
     InventoryTransaction,
+    ImportBatch,
     JobStatus,
     Organization,
     Part,
@@ -40,6 +43,7 @@ from app.schemas import (
     LowStockAlert,
     WorkOrderFlowAction,
     InventoryTransactionRead,
+    ImportBatchRead,
     AdminWarehouseDashboard,
     EngineerDashboard,
     PartCreate,
@@ -71,6 +75,55 @@ from app.services.inventory import (
 )
 
 router = APIRouter()
+
+PART_IMPORT_FIELDS = {
+    "part_number",
+    "name",
+    "english_name",
+    "machine_type",
+    "unit",
+    "default_cost",
+    "safety_stock",
+    "min_stock",
+    "supplier",
+    "image_url",
+    "notes",
+}
+
+
+def _import_batch_read(batch: ImportBatch) -> ImportBatchRead:
+    payload = json.loads(batch.payload_json or "[]")
+    return ImportBatchRead(
+        id=batch.id,
+        organization_id=batch.organization_id,
+        import_type=batch.import_type,
+        filename=batch.filename,
+        file_sha256=batch.file_sha256,
+        status=batch.status,
+        total_rows=batch.total_rows,
+        valid_rows=batch.valid_rows,
+        error_rows=batch.error_rows,
+        created_count=batch.created_count,
+        updated_count=batch.updated_count,
+        errors=json.loads(batch.errors_json or "[]"),
+        preview_rows=payload[:20],
+        created_by=batch.created_by,
+        committed_at=batch.committed_at,
+        created_at=batch.created_at,
+    )
+
+
+def _normalize_import_header(value) -> str:
+    return str(value or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _parse_non_negative_number(value, cast, field_name: str):
+    if value in (None, ""):
+        return cast(0)
+    number = cast(value)
+    if number < 0:
+        raise ValueError(f"{field_name} cannot be negative")
+    return number
 
 
 @router.post("/auth/login", response_model=TokenResponse)
@@ -805,6 +858,169 @@ def export_parts_excel(db: Session = Depends(get_db), actor: Actor = Depends(get
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=parts.xlsx"},
     )
+
+
+@router.post("/imports/parts/preview", response_model=ImportBatchRead)
+async def preview_parts_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Please upload an .xlsx file")
+    content = await file.read(settings.max_import_upload_bytes + 1)
+    if len(content) > settings.max_import_upload_bytes:
+        raise HTTPException(status_code=413, detail="Import file exceeds the configured upload limit")
+
+    file_hash = sha256(content).hexdigest()
+    existing_batch = db.scalar(
+        select(ImportBatch)
+        .where(ImportBatch.import_type == "parts", ImportBatch.file_sha256 == file_hash)
+        .order_by(ImportBatch.id.desc())
+    )
+    if existing_batch:
+        return _import_batch_read(existing_batch)
+
+    try:
+        workbook = load_workbook(filename=BytesIO(content), data_only=True, read_only=True)
+        worksheet = workbook.active
+        raw_headers = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="The uploaded workbook could not be read") from exc
+    if not raw_headers:
+        raise HTTPException(status_code=400, detail="The workbook is empty")
+
+    headers = [_normalize_import_header(value) for value in raw_headers]
+    if len(set(filter(None, headers))) != len(list(filter(None, headers))):
+        raise HTTPException(status_code=400, detail="The workbook contains duplicate column names")
+    missing = [field for field in ("part_number", "name") if field not in headers]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing required columns: {', '.join(missing)}")
+
+    field_indexes = {field: headers.index(field) for field in PART_IMPORT_FIELDS if field in headers}
+    normalized_rows: list[dict] = []
+    errors: list[dict] = []
+    seen_numbers: set[str] = set()
+    total_rows = 0
+    for row_number, row in enumerate(worksheet.iter_rows(min_row=2, values_only=True), start=2):
+        if not row or not any(value not in (None, "") for value in row):
+            continue
+        total_rows += 1
+        values = {field: row[index] if index < len(row) else None for field, index in field_indexes.items()}
+        part_number = str(values.get("part_number") or "").strip()
+        name = str(values.get("name") or "").strip()
+        row_errors: list[str] = []
+        if not part_number:
+            row_errors.append("part_number is required")
+        if not name:
+            row_errors.append("name is required")
+        if part_number and part_number in seen_numbers:
+            row_errors.append("duplicate part_number in file")
+        if part_number:
+            seen_numbers.add(part_number)
+        try:
+            default_cost = _parse_non_negative_number(values.get("default_cost"), float, "default_cost")
+            safety_stock = _parse_non_negative_number(values.get("safety_stock"), int, "safety_stock")
+            min_stock = _parse_non_negative_number(values.get("min_stock"), int, "min_stock")
+        except (TypeError, ValueError) as exc:
+            row_errors.append(str(exc))
+            default_cost, safety_stock, min_stock = 0.0, 0, 0
+
+        if row_errors:
+            errors.append({"row": row_number, "part_number": part_number or None, "messages": row_errors})
+            continue
+        normalized_rows.append(
+            {
+                "row_number": row_number,
+                "part_number": part_number,
+                "name": name,
+                "english_name": str(values.get("english_name") or "").strip() or None,
+                "machine_type": str(values.get("machine_type") or "").strip() or None,
+                "unit": str(values.get("unit") or "pcs").strip() or "pcs",
+                "default_cost": default_cost,
+                "safety_stock": safety_stock,
+                "min_stock": min_stock,
+                "supplier": str(values.get("supplier") or "").strip() or None,
+                "image_url": str(values.get("image_url") or "").strip() or None,
+                "notes": str(values.get("notes") or "").strip() or None,
+            }
+        )
+
+    part_numbers = [row["part_number"] for row in normalized_rows]
+    existing_numbers = set(
+        db.scalars(select(Part.part_number).where(Part.part_number.in_(part_numbers))).all()
+    ) if part_numbers else set()
+    batch = ImportBatch(
+        import_type="parts",
+        filename=Path(file.filename).name,
+        file_sha256=file_hash,
+        status="ready" if not errors else "invalid",
+        total_rows=total_rows,
+        valid_rows=len(normalized_rows),
+        error_rows=len(errors),
+        created_count=sum(1 for number in part_numbers if number not in existing_numbers),
+        updated_count=sum(1 for number in part_numbers if number in existing_numbers),
+        payload_json=json.dumps(normalized_rows, ensure_ascii=False),
+        errors_json=json.dumps(errors, ensure_ascii=False),
+        created_by=actor.user_id,
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return _import_batch_read(batch)
+
+
+@router.post("/imports/parts/{batch_id}/commit", response_model=ImportBatchRead)
+def commit_parts_import(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    batch = db.get(ImportBatch, batch_id)
+    if not batch or batch.import_type != "parts":
+        raise HTTPException(status_code=404, detail="Import batch not found")
+    if batch.status == "committed":
+        return _import_batch_read(batch)
+    if batch.status != "ready":
+        raise HTTPException(status_code=409, detail="Import batch has validation errors")
+
+    rows = json.loads(batch.payload_json or "[]")
+    created = 0
+    updated = 0
+    for row in rows:
+        data = {key: value for key, value in row.items() if key != "row_number"}
+        item = db.scalar(select(Part).where(Part.part_number == data["part_number"]))
+        if item:
+            for key, value in data.items():
+                setattr(item, key, value)
+            updated += 1
+        else:
+            db.add(Part(**data))
+            created += 1
+    batch.status = "committed"
+    batch.created_count = created
+    batch.updated_count = updated
+    batch.committed_at = datetime.utcnow()
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return _import_batch_read(batch)
+
+
+@router.get("/imports/parts", response_model=list[ImportBatchRead])
+def list_parts_imports(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    batches = db.scalars(
+        select(ImportBatch).where(ImportBatch.import_type == "parts").order_by(ImportBatch.id.desc()).offset(skip).limit(limit)
+    ).all()
+    return [_import_batch_read(batch) for batch in batches]
 
 
 @router.post("/import/parts.xlsx")

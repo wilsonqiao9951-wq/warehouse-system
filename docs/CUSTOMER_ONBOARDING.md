@@ -56,6 +56,18 @@ Import into a staging database first. Validate:
 
 Store the original file, mapping version and import result as an auditable onboarding record.
 
+### Parts Import workbench
+
+Authorized organization administrators, managers and warehouse users can open `/parts-import`:
+
+1. Upload an `.xlsx` file up to the configured `MAX_IMPORT_UPLOAD_BYTES` limit.
+2. Review valid/error row counts, predicted creates/updates and the normalized preview.
+3. Correct and re-upload files marked `invalid`; invalid batches cannot be committed.
+4. Confirm a `ready` batch to upsert Parts inside the current organization.
+5. Review the organization-scoped import history.
+
+The workbook columns may appear in any order. Duplicate uploads return the existing batch, and confirming an already committed batch does not import it again. `part_number` is unique inside an organization, so different customers may use the same SKU without sharing records.
+
 ## 5. Customer acceptance and cutover
 
 The customer signs off on the part catalog and opening balances. Then import users, warehouses, parts, stock and open work orders in that order. Run a limited pilot before broad rollout.

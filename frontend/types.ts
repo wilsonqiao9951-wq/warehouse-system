@@ -29,6 +29,25 @@ export interface Organization {
   created_at: string;
 }
 
+export interface ImportBatch {
+  id: number;
+  organization_id: number;
+  import_type: string;
+  filename: string;
+  file_sha256: string;
+  status: "ready" | "invalid" | "committed";
+  total_rows: number;
+  valid_rows: number;
+  error_rows: number;
+  created_count: number;
+  updated_count: number;
+  errors: Array<{ row: number; part_number?: string | null; messages: string[] }>;
+  preview_rows: Array<Record<string, string | number | null>>;
+  created_by?: number | null;
+  committed_at?: string | null;
+  created_at: string;
+}
+
 export interface Warehouse {
   id: number;
   name: string;

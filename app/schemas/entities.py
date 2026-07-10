@@ -105,6 +105,25 @@ class PartRead(PartCreate):
         from_attributes = True
 
 
+class ImportBatchRead(BaseModel):
+    id: int
+    organization_id: int
+    import_type: str
+    filename: str
+    file_sha256: str
+    status: str
+    total_rows: int
+    valid_rows: int
+    error_rows: int
+    created_count: int
+    updated_count: int
+    errors: list[dict]
+    preview_rows: list[dict] = Field(default_factory=list)
+    created_by: int | None = None
+    committed_at: datetime | None = None
+    created_at: datetime
+
+
 class WorkOrderCreate(BaseModel):
     ticket_number: str | None = None
     wo_number: str | None = None

@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
     max_image_upload_bytes: int = 10 * 1024 * 1024
+    max_import_upload_bytes: int = 5 * 1024 * 1024
     # Comma-separated browser origins for CORS (e.g. Cloudflare Tunnel https://xxx.trycloudflare.com)
     cors_extra_origins: str = ""
 

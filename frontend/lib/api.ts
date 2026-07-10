@@ -14,6 +14,7 @@ import {
   WorkOrderPart,
   AbnormalUsageRow,
   AuthToken,
+  ImportBatch,
   WorkOrderProfit
 } from "@/types";
 
@@ -159,6 +160,14 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ is_active: isActive })
     }),
+  previewPartsImport: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<ImportBatch>("/imports/parts/preview", { method: "POST", body: form });
+  },
+  commitPartsImport: (batchId: number) =>
+    request<ImportBatch>(`/imports/parts/${batchId}/commit`, { method: "POST", body: JSON.stringify({}) }),
+  listPartsImports: () => request<ImportBatch[]>("/imports/parts?limit=50"),
   listWorkOrders: (params?: {
     skip?: number;
     limit?: number;
