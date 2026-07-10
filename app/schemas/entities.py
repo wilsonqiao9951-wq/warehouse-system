@@ -13,6 +13,7 @@ class UserCreate(BaseModel):
 
 class UserRead(UserCreate):
     id: int
+    organization_id: int
     created_at: datetime
     updated_at: datetime
 
@@ -29,6 +30,7 @@ class WarehouseCreate(BaseModel):
 
 class WarehouseRead(WarehouseCreate):
     id: int
+    organization_id: int
     created_at: datetime
     updated_at: datetime
 
@@ -52,6 +54,7 @@ class PartCreate(BaseModel):
 
 class PartRead(PartCreate):
     id: int
+    organization_id: int
     created_at: datetime
     updated_at: datetime
 
@@ -113,6 +116,7 @@ class WorkOrderUpdate(BaseModel):
 
 class WorkOrderRead(WorkOrderCreate):
     id: int
+    organization_id: int
     started_at: datetime | None = None
     completed_at: datetime | None = None
     is_locked: bool = False
@@ -137,6 +141,7 @@ class InventoryTransactionCreate(BaseModel):
 
 class InventoryTransactionRead(InventoryTransactionCreate):
     id: int
+    organization_id: int
     created_at: datetime
     updated_at: datetime
 
@@ -158,6 +163,7 @@ class WorkOrderPartCreate(BaseModel):
 
 class WorkOrderPartRead(WorkOrderPartCreate):
     id: int
+    organization_id: int
     total_cost: float
     created_at: datetime
     updated_at: datetime
@@ -252,6 +258,7 @@ class QCPictureCreate(BaseModel):
 
 class QCPictureRead(QCPictureCreate):
     id: int
+    organization_id: int
     created_at: datetime
     updated_at: datetime
 
@@ -267,6 +274,7 @@ class JobStatusCreate(BaseModel):
 
 class JobStatusRead(JobStatusCreate):
     id: int
+    organization_id: int
     created_at: datetime
     updated_at: datetime
 
@@ -282,6 +290,7 @@ class ReturnEquipmentCreate(BaseModel):
 
 class ReturnEquipmentRead(ReturnEquipmentCreate):
     id: int
+    organization_id: int
     created_at: datetime
     updated_at: datetime
 

@@ -1,6 +1,7 @@
 from app.core.database import Base, SessionLocal, engine
 from app.models import (
     InventoryTransaction,
+    Organization,
     Part,
     TransactionType,
     User,
@@ -14,6 +15,11 @@ Base.metadata.create_all(bind=engine)
 
 db = SessionLocal()
 try:
+    organization = db.get(Organization, 1)
+    if not organization:
+        organization = Organization(id=1, name="Default Organization", slug="default")
+        db.add(organization)
+        db.flush()
     if not db.query(User).first():
         wilson = User(name="Wilson", email="wilson@example.com", role=UserRole.ADMIN)
         manager = User(name="Mia", email="mia@example.com", role=UserRole.MANAGER)
