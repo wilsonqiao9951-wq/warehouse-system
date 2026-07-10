@@ -1,0 +1,11 @@
+services:
+  openpartsflow-api:
+    build: .
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./openpartsflow.db}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app

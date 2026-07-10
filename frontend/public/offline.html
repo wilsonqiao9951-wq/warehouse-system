@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111827" />
+    <title>OpenPartsFlow — Offline</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #ffffff;
+        color: #111827;
+        display: grid;
+        place-items: center;
+        min-height: 100dvh;
+        padding: 20px;
+        padding-bottom: calc(20px + env(safe-area-inset-bottom));
+      }
+      .card {
+        max-width: 420px;
+        width: 100%;
+        background: #f9fafb;
+        border: 1px solid #e5e7eb;
+        border-radius: 14px;
+        padding: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2 style="margin-top: 0">You are offline</h2>
+      <p>OpenPartsFlow cannot reach the network. Cached pages may still open; saving changes requires connectivity.</p>
+      <p style="margin-bottom: 0; color: #6b7280; font-size: 14px">Reconnect and pull to refresh, or close and reopen the app.</p>
+    </div>
+  </body>
+</html>
