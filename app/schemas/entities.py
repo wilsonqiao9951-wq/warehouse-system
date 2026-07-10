@@ -19,6 +19,7 @@ class UserRead(UserBase):
     id: int
     organization_id: int
     is_active: bool
+    is_platform_admin: bool
     created_at: datetime
     updated_at: datetime
 
@@ -35,6 +36,32 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserRead
+
+
+class OrganizationCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", min_length=2, max_length=120)
+    admin_name: str = Field(min_length=2, max_length=120)
+    admin_email: str = Field(min_length=3, max_length=255)
+    admin_password: str = Field(min_length=10, max_length=128)
+
+
+class OrganizationUpdate(BaseModel):
+    is_active: bool
+
+
+class OrganizationRead(BaseModel):
+    id: int
+    name: str
+    slug: str
+    is_active: bool
+    total_users: int = 0
+    total_parts: int = 0
+    total_work_orders: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class WarehouseCreate(BaseModel):

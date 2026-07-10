@@ -12,12 +12,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.rbac import Actor, get_current_actor, require_roles, require_work_order_scope
+from app.core.rbac import Actor, get_current_actor, require_platform_admin, require_roles, require_work_order_scope
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import (
     AuditLog,
     InventoryTransaction,
     JobStatus,
+    Organization,
     Part,
     QCPicture,
     ReturnEquipment,
@@ -43,6 +44,9 @@ from app.schemas import (
     EngineerDashboard,
     PartCreate,
     PartRead,
+    OrganizationCreate,
+    OrganizationRead,
+    OrganizationUpdate,
     PasswordSet,
     StockBalance,
     TokenResponse,
@@ -75,7 +79,13 @@ def login(
     db: Session = Depends(get_db),
 ):
     user = db.scalar(select(User).where(func.lower(User.email) == form.username.strip().lower()))
-    if not user or not user.is_active or not verify_password(form.password, user.password_hash):
+    organization = db.get(Organization, user.organization_id) if user else None
+    if (
+        not user
+        or not user.is_active
+        or (not user.is_platform_admin and (not organization or not organization.is_active))
+        or not verify_password(form.password, user.password_hash)
+    ):
         raise HTTPException(
             status_code=401,
             detail="Incorrect email or password",
@@ -93,6 +103,81 @@ def auth_me(db: Session = Depends(get_db), actor: Actor = Depends(get_current_ac
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+
+def _organization_read(db: Session, organization: Organization) -> OrganizationRead:
+    return OrganizationRead(
+        id=organization.id,
+        name=organization.name,
+        slug=organization.slug,
+        is_active=organization.is_active,
+        total_users=db.scalar(select(func.count(User.id)).where(User.organization_id == organization.id)) or 0,
+        total_parts=db.scalar(select(func.count(Part.id)).where(Part.organization_id == organization.id)) or 0,
+        total_work_orders=db.scalar(
+            select(func.count(WorkOrder.id)).where(WorkOrder.organization_id == organization.id)
+        ) or 0,
+        created_at=organization.created_at,
+    )
+
+
+@router.get("/platform/organizations", response_model=list[OrganizationRead])
+def list_organizations(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
+    require_platform_admin(actor)
+    db.info.pop("organization_id", None)
+    organizations = db.scalars(select(Organization).order_by(Organization.id.asc())).all()
+    return [_organization_read(db, organization) for organization in organizations]
+
+
+@router.post("/platform/organizations", response_model=OrganizationRead)
+def create_organization(
+    payload: OrganizationCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    db.info.pop("organization_id", None)
+    slug = payload.slug.strip().lower()
+    email = payload.admin_email.strip().lower()
+    if db.scalar(select(Organization.id).where(Organization.slug == slug)):
+        raise HTTPException(status_code=409, detail="Organization slug already exists")
+    if db.scalar(select(User.id).where(func.lower(User.email) == email)):
+        raise HTTPException(status_code=409, detail="Administrator email already exists")
+
+    organization = Organization(name=payload.name.strip(), slug=slug)
+    db.add(organization)
+    db.flush()
+    administrator = User(
+        organization_id=organization.id,
+        name=payload.admin_name.strip(),
+        email=email,
+        role=UserRole.ADMIN,
+        password_hash=hash_password(payload.admin_password),
+        is_active=True,
+        is_platform_admin=False,
+    )
+    db.add(administrator)
+    db.commit()
+    db.refresh(organization)
+    return _organization_read(db, organization)
+
+
+@router.patch("/platform/organizations/{organization_id}", response_model=OrganizationRead)
+def update_organization(
+    organization_id: int,
+    payload: OrganizationUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    db.info.pop("organization_id", None)
+    organization = db.get(Organization, organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    organization.is_active = payload.is_active
+    db.add(organization)
+    db.commit()
+    db.refresh(organization)
+    return _organization_read(db, organization)
 
 
 def _require_tenant_user(db: Session, user_id: int | None, field_name: str) -> None:

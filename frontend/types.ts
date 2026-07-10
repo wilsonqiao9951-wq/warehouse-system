@@ -8,6 +8,7 @@ export interface User {
   role: UserRole;
   organization_id: number;
   is_active: boolean;
+  is_platform_admin: boolean;
 }
 
 export interface AuthToken {
@@ -15,6 +16,17 @@ export interface AuthToken {
   token_type: "bearer";
   expires_in: number;
   user: User;
+}
+
+export interface Organization {
+  id: number;
+  name: string;
+  slug: string;
+  is_active: boolean;
+  total_users: number;
+  total_parts: number;
+  total_work_orders: number;
+  created_at: string;
 }
 
 export interface Warehouse {

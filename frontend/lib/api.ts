@@ -2,6 +2,7 @@ import {
   EngineerDashboard,
   JobStatus,
   LowStockAlert,
+  Organization,
   PilotChecklist,
   Part,
   QCPicture,
@@ -145,6 +146,19 @@ export const api = {
     });
   },
   getMe: () => request<User>("/auth/me"),
+  listOrganizations: () => request<Organization[]>("/platform/organizations"),
+  createOrganization: (payload: {
+    name: string;
+    slug: string;
+    admin_name: string;
+    admin_email: string;
+    admin_password: string;
+  }) => request<Organization>("/platform/organizations", { method: "POST", body: JSON.stringify(payload) }),
+  updateOrganization: (organizationId: number, isActive: boolean) =>
+    request<Organization>(`/platform/organizations/${organizationId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_active: isActive })
+    }),
   listWorkOrders: (params?: {
     skip?: number;
     limit?: number;

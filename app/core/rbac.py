@@ -12,6 +12,7 @@ from app.models import (
     AuditLog,
     InventoryTransaction,
     JobStatus,
+    Organization,
     Part,
     QCPicture,
     ReturnEquipment,
@@ -76,6 +77,7 @@ class Actor:
     user_id: int | None
     role: UserRole
     organization_id: int
+    is_platform_admin: bool = False
 
 
 def get_current_actor(
@@ -85,7 +87,7 @@ def get_current_actor(
 ) -> Actor:
     if not settings.rbac_enforce:
         db.info["organization_id"] = 1
-        return Actor(user_id=None, role=UserRole.ADMIN, organization_id=1)
+        return Actor(user_id=None, role=UserRole.ADMIN, organization_id=1, is_platform_admin=True)
 
     token_organization_id: int | None = None
     if token:
@@ -114,8 +116,16 @@ def get_current_actor(
         raise HTTPException(status_code=401, detail="User not found")
     if token_organization_id is not None and token_organization_id != user.organization_id:
         raise HTTPException(status_code=401, detail="Token organization is invalid")
+    organization = db.get(Organization, user.organization_id)
+    if not organization or (not organization.is_active and not user.is_platform_admin):
+        raise HTTPException(status_code=403, detail="Organization is inactive")
     db.info["organization_id"] = user.organization_id
-    return Actor(user_id=user.id, role=user.role, organization_id=user.organization_id)
+    return Actor(
+        user_id=user.id,
+        role=user.role,
+        organization_id=user.organization_id,
+        is_platform_admin=user.is_platform_admin,
+    )
 
 
 def require_roles(actor: Actor, *roles: UserRole) -> None:
@@ -123,6 +133,11 @@ def require_roles(actor: Actor, *roles: UserRole) -> None:
         return
     if actor.role not in roles:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
+def require_platform_admin(actor: Actor) -> None:
+    if not actor.is_platform_admin:
+        raise HTTPException(status_code=403, detail="Platform administrator access required")
 
 
 def require_work_order_scope(db: Session, actor: Actor, work_order_id: int) -> None:

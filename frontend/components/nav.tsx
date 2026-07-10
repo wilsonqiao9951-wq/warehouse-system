@@ -15,6 +15,7 @@ const links = [
   { href: "/reports", label: "Reports", roles: ["manager", "admin"] },
   { href: "/pilot-checklist", label: "Pilot Checklist", roles: ["manager", "admin"] },
   { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
+  { href: "/platform", label: "Customers", roles: ["admin"] },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },
   { href: "/work-order-details", label: "WO Details", roles: ["admin"] },
   { href: "/today", label: "Today", roles: ["engineer"] },
@@ -33,6 +34,7 @@ export default function Nav() {
   const [role, setRole] = useState("admin");
   const [userId, setUserId] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const legacyAuth = process.env.NEXT_PUBLIC_LEGACY_AUTH === "true";
 
   useEffect(() => {
@@ -51,6 +53,7 @@ export default function Nav() {
           setAuthenticated(true);
           setRole(user.role);
           setUserId(String(user.id));
+          setIsPlatformAdmin(user.is_platform_admin);
           window.localStorage.setItem("opf_role", user.role);
           window.localStorage.setItem("opf_user_id", String(user.id));
         })
@@ -72,12 +75,14 @@ export default function Nav() {
 
   const visibleLinks = useMemo(() => {
     if (!authenticated && !legacyAuth) return [];
-    const items = links.filter((link) => link.roles.includes(role));
+    const items = links.filter(
+      (link) => link.roles.includes(role) && (link.href !== "/platform" || isPlatformAdmin)
+    );
     if (role === "engineer") {
       return sortEngineerLinks(items);
     }
     return items;
-  }, [authenticated, legacyAuth, role]);
+  }, [authenticated, isPlatformAdmin, legacyAuth, role]);
 
   return (
     <>
