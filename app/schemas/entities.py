@@ -490,6 +490,22 @@ class QCPictureRead(QCPictureCreate):
         from_attributes = True
 
 
+class WorkOrderVoiceNoteRead(BaseModel):
+    id: int
+    organization_id: int
+    work_order_id: int
+    created_by: int | None = None
+    audio_url: str
+    mime_type: str
+    duration_seconds: float | None = None
+    transcript: str | None = None
+    transcription_status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class JobStatusCreate(BaseModel):
     work_order_id: int
     status: str

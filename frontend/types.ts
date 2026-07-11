@@ -199,6 +199,18 @@ export interface QCPicture {
   uploaded_by?: number | null;
 }
 
+export interface WorkOrderVoiceNote {
+  id: number;
+  work_order_id: number;
+  created_by?: number | null;
+  audio_url: string;
+  mime_type: string;
+  duration_seconds?: number | null;
+  transcript?: string | null;
+  transcription_status: string;
+  created_at: string;
+}
+
 export interface JobStatus {
   id: number;
   work_order_id: number;

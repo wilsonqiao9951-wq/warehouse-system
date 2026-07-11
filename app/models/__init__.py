@@ -19,6 +19,7 @@ from app.models.entities import (
     WorkOrder,
     WorkOrderPart,
     WorkOrderPartMemory,
+    WorkOrderVoiceNote,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "WorkOrder",
     "WorkOrderPart",
     "WorkOrderPartMemory",
+    "WorkOrderVoiceNote",
 ]

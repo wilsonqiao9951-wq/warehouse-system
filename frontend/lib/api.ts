@@ -23,7 +23,7 @@ import {
   InvitationCreated,
   InvitationInfo,
   WorkOrderProfit
-  ,WorkOrderPartRecommendation
+  ,WorkOrderPartRecommendation, WorkOrderVoiceNote
 } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
@@ -317,6 +317,14 @@ export const api = {
     request<QCPicture[]>(`/qc-pictures${workOrderId ? `?work_order_id=${workOrderId}` : ""}`),
   createQCPicture: (payload: { work_order_id: number; image_url: string; uploaded_by?: number | null }) =>
     request<QCPicture>("/qc-pictures", { method: "POST", body: JSON.stringify(payload) }),
+  listVoiceNotes: (workOrderId: number) =>
+    request<WorkOrderVoiceNote[]>(`/work-orders/${workOrderId}/voice-notes`),
+  uploadVoiceNote: (workOrderId: number, blob: Blob, durationSeconds: number) => {
+    const form = new FormData();
+    form.append("file", blob, `voice-note.${blob.type.includes("ogg") ? "ogg" : "webm"}`);
+    form.append("duration_seconds", String(durationSeconds));
+    return request<WorkOrderVoiceNote>(`/work-orders/${workOrderId}/voice-notes`, { method: "POST", body: form });
+  },
   listJobStatus: (workOrderId?: number) =>
     request<JobStatus[]>(`/job-status${workOrderId ? `?work_order_id=${workOrderId}` : ""}`),
   createJobStatus: (payload: { work_order_id: number; status: string; timestamp?: string }) =>

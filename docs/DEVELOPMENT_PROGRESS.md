@@ -30,9 +30,23 @@ Verification:
 
 Next Phase 1 work:
 
-- Voice-note recording/upload and transcription-ready metadata.
 - Customer/device history in the technician workbench.
 - Completion-policy configuration per organization/template.
+
+## 2026-07-11 — Phase 1 work-order voice notes
+
+Status: implemented.
+
+Delivered:
+
+- Mobile microphone recording with start/stop/upload controls.
+- Work-order audio playback with duration display.
+- Tenant- and work-order-scoped audio upload/list APIs.
+- Audio file-header validation for WebM, Ogg, WAV, M4A, and MP3.
+- Configurable 15 MB audio upload limit.
+- Transcription status and transcript fields reserved for the AI transcription batch.
+- Audit event for voice-note creation.
+- Alembic revision `20260711_0015`.
 
 ## 2026-07-11 — Phase 1 drawn customer signature
 

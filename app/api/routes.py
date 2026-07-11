@@ -39,6 +39,7 @@ from app.models import (
     Warehouse,
     WorkOrder,
     WorkOrderPart,
+    WorkOrderVoiceNote,
 )
 from app.schemas import (
     AbnormalUsageRow,
@@ -86,6 +87,7 @@ from app.schemas import (
     WorkOrderProfit,
     WorkOrderRead,
     WorkOrderUpdate,
+    WorkOrderVoiceNoteRead,
     WarehouseSummary,
 )
 from app.services.inventory import (
@@ -413,6 +415,75 @@ async def upload_work_order_part_photo(
 
     target_path.write_bytes(data)
     return {"url": f"/uploads/work-order-parts/{filename}"}
+
+
+def _audio_extension(data: bytes) -> tuple[str, str] | None:
+    if data.startswith(b"\x1aE\xdf\xa3"):
+        return ".webm", "audio/webm"
+    if data.startswith(b"OggS"):
+        return ".ogg", "audio/ogg"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WAVE":
+        return ".wav", "audio/wav"
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        return ".m4a", "audio/mp4"
+    if data.startswith(b"ID3") or (len(data) >= 2 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return ".mp3", "audio/mpeg"
+    return None
+
+
+@router.post("/work-orders/{work_order_id}/voice-notes", response_model=WorkOrderVoiceNoteRead)
+async def create_work_order_voice_note(
+    work_order_id: int,
+    file: UploadFile = File(...),
+    duration_seconds: float | None = Form(None, ge=0, le=7200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    work_order = db.get(WorkOrder, work_order_id)
+    if not work_order or work_order.is_locked:
+        raise HTTPException(status_code=400, detail="Voice notes cannot be added to this work order")
+    data = await file.read(settings.max_audio_upload_bytes + 1)
+    if len(data) > settings.max_audio_upload_bytes:
+        raise HTTPException(status_code=413, detail="Audio exceeds the configured upload limit")
+    audio_type = _audio_extension(data)
+    if not audio_type:
+        raise HTTPException(status_code=400, detail="Unsupported or invalid audio file")
+    extension, mime_type = audio_type
+    target_dir = Path("uploads/work-order-voice-notes")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid4().hex}{extension}"
+    (target_dir / filename).write_bytes(data)
+    note = WorkOrderVoiceNote(
+        organization_id=actor.organization_id,
+        work_order_id=work_order_id,
+        created_by=actor.user_id,
+        audio_url=f"/uploads/work-order-voice-notes/{filename}",
+        mime_type=mime_type,
+        duration_seconds=duration_seconds,
+    )
+    db.add(note)
+    _audit(db, actor, "create_voice_note", "work_order_voice_note", None, {"work_order_id": work_order_id})
+    db.commit()
+    db.refresh(note)
+    return note
+
+
+@router.get("/work-orders/{work_order_id}/voice-notes", response_model=list[WorkOrderVoiceNoteRead])
+def list_work_order_voice_notes(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    return db.scalars(
+        select(WorkOrderVoiceNote)
+        .where(
+            WorkOrderVoiceNote.organization_id == actor.organization_id,
+            WorkOrderVoiceNote.work_order_id == work_order_id,
+        )
+        .order_by(WorkOrderVoiceNote.id.desc())
+    ).all()
 
 
 @router.post("/users", response_model=UserRead)

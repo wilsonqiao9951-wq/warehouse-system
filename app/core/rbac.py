@@ -23,6 +23,7 @@ from app.models import (
     Warehouse,
     WorkOrder,
     WorkOrderPart,
+    WorkOrderVoiceNote,
 )
 
 
@@ -39,6 +40,7 @@ TENANT_MODELS = (
     AuditLog,
     ImportBatch,
     UserInvitation,
+    WorkOrderVoiceNote,
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)

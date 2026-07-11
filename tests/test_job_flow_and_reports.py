@@ -111,3 +111,28 @@ def test_completion_rejects_invalid_signature_data(client):
 
     assert response.status_code == 422
     assert "PNG data URL" in response.text
+
+
+def test_voice_note_upload_and_listing(client):
+    tech = _mk_user(client, "tech-voice")
+    wo = _mk_wo(client, "WOF-VOICE", tech)
+    audio = b"\x1aE\xdf\xa3" + b"voice-note-test" * 10
+
+    uploaded = client.post(
+        f"/api/work-orders/{wo}/voice-notes",
+        data={"duration_seconds": "4.2"},
+        files={"file": ("note.webm", audio, "audio/webm")},
+    )
+    assert uploaded.status_code == 200
+    assert uploaded.json()["mime_type"] == "audio/webm"
+    assert uploaded.json()["transcription_status"] == "not_requested"
+
+    listed = client.get(f"/api/work-orders/{wo}/voice-notes")
+    assert listed.status_code == 200
+    assert [row["id"] for row in listed.json()] == [uploaded.json()["id"]]
+
+    invalid = client.post(
+        f"/api/work-orders/{wo}/voice-notes",
+        files={"file": ("fake.webm", b"not audio", "audio/webm")},
+    )
+    assert invalid.status_code == 400

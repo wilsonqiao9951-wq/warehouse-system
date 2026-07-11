@@ -257,6 +257,25 @@ class QCPicture(Base):
     organization = relationship("Organization")
 
 
+class WorkOrderVoiceNote(Base):
+    __tablename__ = "work_order_voice_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey("work_orders.id"), nullable=False, index=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    audio_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcription_status: Mapped[str] = mapped_column(String(30), default="not_requested", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    work_order = relationship("WorkOrder")
+    creator = relationship("User")
+    organization = relationship("Organization")
+
+
 class WorkOrderPartMemory(Base):
     __tablename__ = "work_order_part_memory"
     __table_args__ = (UniqueConstraint("organization_id", "machine_type", "job_type", "part_id", name="uq_work_order_part_memory"),)

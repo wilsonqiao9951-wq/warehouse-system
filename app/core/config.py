@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     invitation_expire_hours: int = 72
     frontend_public_url: str = "http://localhost:3000"
     max_image_upload_bytes: int = 10 * 1024 * 1024
+    max_audio_upload_bytes: int = 15 * 1024 * 1024
     max_import_upload_bytes: int = 5 * 1024 * 1024
     # Comma-separated browser origins for CORS (e.g. Cloudflare Tunnel https://xxx.trycloudflare.com)
     cors_extra_origins: str = ""

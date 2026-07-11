@@ -6,6 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
 import { JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
+import { VoiceRecorder } from "@/components/voice-recorder";
+import { WorkOrderVoiceNote } from "@/types";
 
 export default function WorkOrderDetailsPage() {
   const params = useSearchParams();
@@ -19,6 +21,7 @@ export default function WorkOrderDetailsPage() {
   const [qcPictures, setQcPictures] = useState<QCPicture[]>([]);
   const [returnEquipments, setReturnEquipments] = useState<ReturnEquipment[]>([]);
   const [woParts, setWoParts] = useState<WorkOrderPart[]>([]);
+  const [voiceNotes, setVoiceNotes] = useState<WorkOrderVoiceNote[]>([]);
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const qcCameraInputId = useId();
@@ -98,16 +101,18 @@ export default function WorkOrderDetailsPage() {
   const reloadDetails = useCallback(async () => {
     if (!currentWorkOrderId) return;
     try {
-      const [statuses, pictures, equipments, allParts] = await Promise.all([
+      const [statuses, pictures, equipments, allParts, notes] = await Promise.all([
         api.listJobStatus(currentWorkOrderId),
         api.listQCPictures(currentWorkOrderId),
         api.listReturnEquipments(currentWorkOrderId),
-        api.listWorkOrderParts({ limit: 100 }).catch(() => [] as WorkOrderPart[])
+        api.listWorkOrderParts({ limit: 100 }).catch(() => [] as WorkOrderPart[]),
+        api.listVoiceNotes(currentWorkOrderId)
       ]);
       setJobStatusRows(statuses);
       setQcPictures(pictures);
       setReturnEquipments(equipments);
       setWoParts(allParts.filter((r) => r.work_order_id === currentWorkOrderId));
+      setVoiceNotes(notes);
     } catch (e) {
       const err = e instanceof Error ? e.message : "Failed to load detail records.";
       setNotice({ type: "error", text: err });
@@ -383,6 +388,26 @@ export default function WorkOrderDetailsPage() {
           </div>
         </>
       )}
+
+      <div className="card">
+        <h3 className="section-title">Voice notes</h3>
+        <p className="muted">Record a hands-free field note. Audio is stored with this work order.</p>
+        <VoiceRecorder
+          disabled={locked || !currentWorkOrderId}
+          onRecorded={async (blob, duration) => {
+            await api.uploadVoiceNote(currentWorkOrderId, blob, duration);
+            setNotice({ type: "success", text: "Voice note uploaded." });
+            await reloadDetails();
+          }}
+        />
+        <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+          {voiceNotes.map((note) => <div key={note.id}>
+            <audio controls preload="metadata" src={resolveUploadedImageUrl(note.audio_url)} style={{ width: "100%" }} />
+            <div className="muted">{Math.round(note.duration_seconds || 0)}s · {note.transcription_status}</div>
+          </div>)}
+          {voiceNotes.length === 0 && <div className="empty-state">No voice notes yet.</div>}
+        </div>
+      </div>
 
       <div className="card">
         <h3 className="section-title">Status timeline</h3>
