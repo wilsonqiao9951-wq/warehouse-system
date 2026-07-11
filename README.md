@@ -9,6 +9,9 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Inventory transactions
 - Employee parts assignment
 - Work order parts usage
+- Shared engineer work-order pool with atomic claiming
+- Account- and registered-device-bound field execution
+- Password re-verification and exact engineer/device completion attribution
 - Real-time inventory balance
 - Excel export
 
@@ -65,6 +68,8 @@ This opens two terminals:
 - Backend: `http://127.0.0.1:8000`
 - Frontend: `http://localhost:3000`
 
+On a clean `main` branch the script first checks GitHub and applies a fast-forward update. Dirty worktrees and offline starts keep the local version. Alembic migrations run automatically before either service is launched.
+
 ## API Migration Notes
 
 - `POST /api/work-orders/{id}/use-part` is the recommended endpoint for work-order part usage.
@@ -104,6 +109,9 @@ APP_ENV=development
 APP_DEBUG=false
 LOG_LEVEL=INFO
 DATABASE_URL=sqlite:///./openpartsflow.db
+RBAC_ENFORCE=true
+LEGACY_HEADER_AUTH=false
+JWT_SECRET_KEY=<at least 32 random characters>
 ```
 
 PostgreSQL example:

@@ -1,256 +1,91 @@
 # OpenPartsFlow RBAC API Mapping
 
-## Objective
+## Work-order access model
 
-This document converts role requirements into an API-level enforcement matrix for implementation.
+OpenPartsFlow separates visibility, field execution, and management. Frontend capability flags are a usability aid only; every rule is enforced again by the API.
 
-Roles:
-- `technician`
-- `manager`
-- `warehouse`
-- `admin`
+| Operation | Other engineer | Active claimant on bound device | Manager | Admin | Warehouse |
+| --- | --- | --- | --- | --- | --- |
+| View organization work-order pool and progress | Allow | Allow | Allow | Allow | Deny |
+| View service context, parts, evidence, and history | Allow | Allow | Allow | Allow | Existing scoped read only |
+| Claim an available work order | Allow with verified Bearer device | Idempotent on same device | Deny | Deny | Deny |
+| Edit field data | Deny | Allow with current claim version | Deny | Allow with audit | Deny |
+| Start/pause/add evidence/use parts | Deny | Allow with current claim version | Deny | Allow with audit | Deny |
+| Request or directly complete | Deny | Allow with current password verification | Deny | Deny | Deny |
+| Approve/reject completion | Deny | Deny | Allow | Allow | Deny |
+| Release an active claim | Deny | Deny | Allow with reason | Allow with reason | Deny |
 
-Policy keywords:
-- `Allow`
-- `Deny`
-- `Scoped` (only own assignments/ownership scope)
+## Work-order pool APIs
 
----
+`GET /api/work-orders` supports `scope=all|mine|available`.
 
-## 1) Work Orders Domain
+- Every same-organization engineer can use `all` and see the common job pool.
+- `mine` filters by `claimed_by_id`, not legacy assignment fields.
+- `available` returns unclaimed, unlocked work orders.
+- Cross-organization rows are excluded by the tenant session filter.
+- Other engineers can see status history, parts usage, photos, voice notes, repair progress, claimant, and completer. They do not receive customer signature images, financial values, or device-record identifiers.
+- Responses include `can_claim`, `can_edit`, and `can_complete`, calculated by the server.
 
-### `GET /api/work-orders`
-- technician: `Scoped` (assigned only)
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
+`POST /api/work-orders/{id}/claim` requires an engineer Bearer token plus a verified registered device. It uses one conditional database update, so concurrent claim attempts have a single winner.
 
-Scope filter:
-- `work_orders.assigned_user_id == current_user.id` OR `work_orders.engineer_id == current_user.id`
+`POST /api/work-orders/{id}/release` is restricted to managers/admins, requires a reason, clears the claim, increments `claim_version`, and records an audit event.
 
-### `POST /api/work-orders`
-- technician: `Deny`
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
+## Field execution APIs
 
-### `PATCH /api/work-orders/{work_order_id}`
-- technician: `Scoped` (limited editable fields)
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
+The following writes use the owner-or-administrator edit guard, except completion endpoints which always require the actual claim owner:
 
-Technician allowed fields:
-- `status`
-- `description`/`problem_description` updates only if needed by operation policy
+- `PATCH /api/work-orders/{id}` for engineer-editable fields
+- `POST /api/work-orders/{id}/start`
+- `POST /api/work-orders/{id}/pause`
+- `POST /api/work-orders/{id}/complete`
+- `POST /api/work-orders/{id}/request-completion`
+- `POST /api/work-orders/{id}/use-part`
+- deprecated `POST /api/work-order-parts`
+- work-order photo and voice-note uploads
+- QC picture, job-status, and return-equipment creation
 
-Technician denied fields:
-- `revenue`
-- `labor_cost`
-- assignment changes
+For an engineer request the guard requires:
 
-### `GET /api/work-orders/{work_order_id}/profit`
-- technician: `Deny`
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
+1. exact `ENGINEER` role (admin role inheritance cannot bypass it);
+2. Bearer authentication;
+3. active registered device and matching device secret;
+4. `claimed_by_id == actor.user_id`;
+5. `claimed_device_id == actor.device_record_id`;
+6. `X-Claim-Version == work_order.claim_version`.
 
-### `POST /api/work-orders/{work_order_id}/use-part`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Scoped` (when tied to approved WO operation flow)
-- admin: `Allow`
+Administrators may correct an unlocked work order through these edit routes, and every change is attributed to the administrator in the audit log. Administrators cannot request or directly complete a work order. The API overrides client attribution fields such as parts `user_id` and photo `uploaded_by` with the authenticated actor.
 
-Scope filter:
-- Technician can only use parts on assigned work orders.
+## Completion attribution
 
-### `GET /api/work-order-parts`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Scoped` (operational view)
-- admin: `Allow`
+Completion requires the engineer's current account password in `account_password`. The server writes:
 
----
+- `completed_by_id` from `claimed_by_id`;
+- `completed_device_id` from `claimed_device_id`;
+- `completed_at` from server time;
+- `completion_approved_by` separately when manager approval is required.
 
-## 2) Job Status / QC / Return Equipment
+Completed work orders are locked. Managers and administrators cannot overwrite the recorded engineer through approval or correction workflows.
 
-### `POST /api/job-status`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
+## Authentication safety
 
-### `GET /api/job-status`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Scoped`
-- admin: `Allow`
+- Secure defaults: `RBAC_ENFORCE=true`, `LEGACY_HEADER_AUTH=false`.
+- Every runnable environment forces these secure values, so stale pilot `.env` files cannot disable ownership enforcement.
+- A legacy `X-User-Id` request may never claim or execute a work order.
+- Claim and completion are not placed in the offline queue.
+- Queued writes are scoped to organization/user/device and preserve the claim version so a released or reassigned claim cannot be replayed.
 
-### `POST /api/qc-pictures`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
+## Audit requirements
 
-### `GET /api/qc-pictures`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Scoped`
-- admin: `Allow`
+Claim, release, execution, approval, rejection, and completion actions record the actor, role, authentication method, device record, claim version, server timestamp, and action-specific metadata. Passwords and device secrets are never included.
 
-### `POST /api/return-equipments`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
+## Automated acceptance coverage
 
-### `GET /api/return-equipments`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Scoped`
-- admin: `Allow`
-
----
-
-## 3) Inventory Domain
-
-### `GET /api/parts`
-- technician: `Scoped` (only parts needed for assigned jobs / van operations)
-- manager: `Allow`
-- warehouse: `Allow`
-- admin: `Allow`
-
-### `POST /api/parts`
-- technician: `Deny`
-- manager: `Allow` (optional by company policy)
-- warehouse: `Allow`
-- admin: `Allow`
-
-### `GET /api/inventory/balances`
-- technician: `Deny` (full warehouses)
-- manager: `Allow`
-- warehouse: `Allow`
-- admin: `Allow`
-
-### `GET /api/employees/{user_id}/van-inventory`
-- technician: `Scoped` (own only)
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
-
-Technician scope:
-- `user_id == current_user.id`
-
-### `POST /api/inventory/transactions`
-- technician: `Deny` (except part usage flow)
-- manager: `Allow`
-- warehouse: `Allow`
-- admin: `Allow`
-
-### `GET /api/inventory/transactions`
-- technician: `Deny` (or Scoped if needed by policy)
-- manager: `Allow`
-- warehouse: `Allow`
-- admin: `Allow`
-
----
-
-## 4) People and Performance
-
-### `GET /api/users`
-- technician: `Deny` (or limited directory endpoint in future)
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
-
-### `POST /api/users`
-- technician: `Deny`
-- manager: `Deny`
-- warehouse: `Deny`
-- admin: `Allow`
-
-### `GET /api/dashboard/engineers/{user_id}`
-- technician: `Scoped` (self only)
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
-
----
-
-## 5) Exports and Excel Sync
-
-### `GET /api/export/inventory.xlsx`
-- technician: `Deny`
-- manager: `Allow`
-- warehouse: `Allow`
-- admin: `Allow`
-
-### `GET /api/export/parts.xlsx`
-- technician: `Deny`
-- manager: `Allow`
-- warehouse: `Allow`
-- admin: `Allow`
-
-### `GET /api/export/work-orders.xlsx`
-- technician: `Deny`
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
-
-### `POST /api/import/parts.xlsx`
-- technician: `Deny`
-- manager: `Allow` (optional by policy)
-- warehouse: `Allow`
-- admin: `Allow`
-
-### `POST /api/import/work-orders.xlsx`
-- technician: `Deny`
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
-
----
-
-## 6) Uploads
-
-### `POST /api/uploads/work-order-parts`
-- technician: `Scoped`
-- manager: `Allow`
-- warehouse: `Deny`
-- admin: `Allow`
-
-Scope:
-- Upload must be attached to allowed work order context when used.
-
----
-
-## 7) Enforcement Strategy
-
-1. JWT/session carries:
-- `user_id`
-- `role`
-- optional scoped warehouse IDs / team IDs
-
-2. Backend authorization layers:
-- Route-level role checks
-- Query-level data scoping (critical for technician scope)
-- Field-level update restrictions for sensitive attributes
-
-3. Frontend guardrails:
-- Hide disallowed menus/pages
-- Prevent forbidden actions in UI
-- Never rely on frontend-only restriction
-
-4. Audit requirements:
-- Log denied access attempts
-- Log sensitive updates (`revenue`, `labor_cost`, assignment changes, inventory transactions)
-
----
-
-## 8) Phase 1 RBAC Acceptance Criteria
-
-- Technician cannot access company-wide data through any API path.
-- Manager has complete operations visibility and profit/performance access.
-- Warehouse can execute full inventory operations without profit/payroll exposure.
-- Admin has full platform control.
-- All scoped endpoints validated by automated tests (positive + negative cases).
+- Same-organization engineers all see the pool; cross-tenant data remains isolated.
+- Only one engineer wins a claim.
+- Another engineer, another device, legacy authentication, warehouse roles, and stale claim versions are rejected.
+- Parts usage cannot spoof another `user_id` through either API path.
+- Completion fails with an incorrect password and permanently records the correct engineer/device.
+- Manager approval preserves engineer attribution.
+- Other engineers can read the owner's parts and progress records but cannot mutate them.
+- Administrators can correct unlocked records with their own audit attribution; managers cannot impersonate the field owner.
+- Releasing a claim invalidates the prior user's device and queued claim generation.

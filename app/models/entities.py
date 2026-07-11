@@ -167,6 +167,25 @@ class Customer(Base):
     organization = relationship("Organization")
 
 
+class UserDevice(Base):
+    __tablename__ = "user_devices"
+    __table_args__ = (UniqueConstraint("organization_id", "device_id", name="uq_user_devices_org_device"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    device_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    device_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    device_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+    organization = relationship("Organization")
+
+
 class Equipment(Base):
     __tablename__ = "equipment"
     __table_args__ = (UniqueConstraint("organization_id", "asset_tag", name="uq_equipment_org_asset_tag"),)
@@ -216,6 +235,12 @@ class WorkOrder(Base):
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
     equipment_id: Mapped[int | None] = mapped_column(ForeignKey("equipment.id"), nullable=True, index=True)
+    claimed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    claimed_device_id: Mapped[int | None] = mapped_column(ForeignKey("user_devices.id"), nullable=True)
+    claim_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    completed_device_id: Mapped[int | None] = mapped_column(ForeignKey("user_devices.id"), nullable=True)
     ticket_number: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     wo_number: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
     schedule_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -260,6 +285,10 @@ class WorkOrder(Base):
     equipment = relationship("Equipment")
     completion_requester = relationship("User", foreign_keys=[completion_requested_by])
     completion_approver = relationship("User", foreign_keys=[completion_approved_by])
+    claimant = relationship("User", foreign_keys=[claimed_by_id])
+    completed_by = relationship("User", foreign_keys=[completed_by_id])
+    claimed_device = relationship("UserDevice", foreign_keys=[claimed_device_id])
+    completed_device = relationship("UserDevice", foreign_keys=[completed_device_id])
 
 
 class InventoryTransaction(Base):

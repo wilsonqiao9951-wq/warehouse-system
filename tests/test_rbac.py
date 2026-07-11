@@ -2,14 +2,38 @@ from app.core.config import settings
 from pathlib import Path
 
 
+RBAC_PASSWORD = "rbac-test-password"
+
+
 def _create_user(client, name: str, role: str, headers: dict[str, str] | None = None) -> int:
-    resp = client.post("/api/users", headers=headers or {}, json={"name": name, "email": f"{name}@ex.com", "role": role})
+    resp = client.post(
+        "/api/users",
+        headers=headers or {},
+        json={"name": name, "email": f"{name}@ex.com", "role": role, "password": RBAC_PASSWORD},
+    )
     assert resp.status_code == 200
     return resp.json()["id"]
 
 
 def _admin_headers() -> dict[str, str]:
     return {"X-User-Id": "1"}
+
+
+def _device_headers(client, email: str, device_id: str, device_token: str) -> dict[str, str]:
+    response = client.post(
+        "/api/auth/login",
+        data={"username": email, "password": RBAC_PASSWORD},
+        headers={
+            "X-Device-Id": device_id,
+            "X-Device-Token": device_token,
+            "X-Device-Name": device_id,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return {
+        "Authorization": f"Bearer {response.json()['access_token']}",
+        "X-Device-Token": device_token,
+    }
 
 
 def test_rbac_enforced_role_access(client):
@@ -45,7 +69,7 @@ def test_rbac_enforced_role_access(client):
         assert created.status_code == 200
         work_order_id = created.json()["id"]
 
-        # Technician can only see own assigned work order
+        # Every engineer can see the organization-wide job pool.
         listed = client.get("/api/work-orders", headers={"X-User-Id": str(tech_id)})
         assert listed.status_code == 200
         assert len(listed.json()) == 1
@@ -97,6 +121,16 @@ def test_dashboard_scope_and_upload_security(client):
         assert created.status_code == 200
         work_order_id = created.json()["id"]
 
+        tech_auth = _device_headers(client, "tech-security@ex.com", "tech-security-phone", "a" * 64)
+        other_tech_auth = _device_headers(
+            client, "other-tech-security@ex.com", "other-tech-security-phone", "b" * 64
+        )
+        claimed = client.post(f"/api/work-orders/{work_order_id}/claim", headers=tech_auth)
+        assert claimed.status_code == 200, claimed.text
+        claim_version = claimed.json()["claim_version"]
+        tech_write_headers = {**tech_auth, "X-Claim-Version": str(claim_version)}
+        other_write_headers = {**other_tech_auth, "X-Claim-Version": str(claim_version)}
+
         own_dashboard = client.get(
             f"/api/dashboard/engineers/{tech_id}",
             headers={"X-User-Id": str(tech_id)},
@@ -116,7 +150,7 @@ def test_dashboard_scope_and_upload_security(client):
         png = b"\x89PNG\r\n\x1a\n" + b"test-image-content"
         denied_upload = client.post(
             "/api/uploads/work-order-parts",
-            headers={"X-User-Id": str(other_tech_id)},
+            headers=other_write_headers,
             data={"work_order_id": str(work_order_id)},
             files={"file": ("photo.png", png, "image/png")},
         )
@@ -124,7 +158,7 @@ def test_dashboard_scope_and_upload_security(client):
 
         invalid_upload = client.post(
             "/api/uploads/work-order-parts",
-            headers={"X-User-Id": str(tech_id)},
+            headers=tech_write_headers,
             data={"work_order_id": str(work_order_id)},
             files={"file": ("photo.png", b"not-an-image", "image/png")},
         )
@@ -132,7 +166,7 @@ def test_dashboard_scope_and_upload_security(client):
 
         uploaded = client.post(
             "/api/uploads/work-order-parts",
-            headers={"X-User-Id": str(tech_id)},
+            headers=tech_write_headers,
             data={"work_order_id": str(work_order_id)},
             files={"file": ("photo.png", png, "image/png")},
         )

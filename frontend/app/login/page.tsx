@@ -18,7 +18,7 @@ export default function LoginPage() {
       window.localStorage.setItem("opf_access_token", result.access_token);
       window.localStorage.setItem("opf_role", result.user.role);
       window.localStorage.setItem("opf_user_id", String(result.user.id));
-      window.location.href = "/";
+      window.location.href = result.user.role === "engineer" ? "/today" : "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in.");
     } finally {
@@ -31,6 +31,7 @@ export default function LoginPage() {
       <div className="app-header-badge" style={{ display: "inline-block", marginBottom: 14 }}>OPERATIONS PLATFORM</div>
       <h1 style={{ fontSize: "2rem", letterSpacing: "-0.04em", margin: "0 0 8px" }}>Welcome back</h1>
       <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>Sign in to manage inventory, field work and customer operations in one place.</p>
+      <p className="notice" style={{ lineHeight: 1.5 }}>Engineer sign-in securely registers this phone. Claimed work orders can only be changed by the same account on the registered device.</p>
       <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
         <label>
           Email

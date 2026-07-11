@@ -8,6 +8,7 @@ from app.core.database import Base
 from app.core.database import get_db
 from app.models import Organization
 from app.main import app
+from app.core.config import settings
 
 
 TEST_DB_URL = "sqlite://"
@@ -30,6 +31,10 @@ def override_get_db():
 
 @pytest.fixture()
 def client():
+    original_rbac_enforce = settings.rbac_enforce
+    original_legacy_header_auth = settings.legacy_header_auth
+    settings.rbac_enforce = False
+    settings.legacy_header_auth = True
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     with TestingSessionLocal() as db:
@@ -44,3 +49,5 @@ def client():
     app.dependency_overrides.clear()
     del app.state.testing_session_local
     Base.metadata.drop_all(bind=engine)
+    settings.rbac_enforce = original_rbac_enforce
+    settings.legacy_header_auth = original_legacy_header_auth

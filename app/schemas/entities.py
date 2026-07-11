@@ -66,6 +66,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserRead
+    device_id: str | None = None
 
 
 class OrganizationCreate(BaseModel):
@@ -266,6 +267,18 @@ class WorkOrderRead(WorkOrderCreate):
     completion_requested_at: datetime | None = None
     completion_approved_by: int | None = None
     completion_approved_at: datetime | None = None
+    claimed_by_id: int | None = None
+    claimed_at: datetime | None = None
+    claimed_device_id: int | None = None
+    claim_version: int = 0
+    completed_by_id: int | None = None
+    completed_device_id: int | None = None
+    claimed_by_name: str | None = None
+    completed_by_name: str | None = None
+    completed_device_name: str | None = None
+    can_claim: bool = False
+    can_edit: bool = False
+    can_complete: bool = False
     is_locked: bool = False
     created_at: datetime
     updated_at: datetime
@@ -414,6 +427,7 @@ class WorkOrderProfit(BaseModel):
 
 class WorkOrderFlowAction(BaseModel):
     notes: str | None = None
+    account_password: str | None = Field(default=None, max_length=128)
     repair_result: str | None = None
     checklist_json: str | None = None
     customer_signature_name: str | None = None
@@ -435,6 +449,10 @@ class WorkOrderFlowAction(BaseModel):
         if not decoded.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("Customer signature is not a valid PNG image")
         return value
+
+
+class WorkOrderClaimRelease(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class CompletionPolicyUpsert(BaseModel):

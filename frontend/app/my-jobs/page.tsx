@@ -20,7 +20,7 @@ export default function MyJobsPage() {
 
   useEffect(() => {
     api
-      .listWorkOrders({ limit: 100 })
+      .listWorkOrders({ scope: "mine", limit: 100 })
       .then((rows) => {
         setJobs(rows);
         setError("");
@@ -31,7 +31,7 @@ export default function MyJobsPage() {
   const runStart = async (id: number) => {
     try {
       await api.startJob(id);
-      const refreshed = await api.listWorkOrders({ limit: 100 });
+      const refreshed = await api.listWorkOrders({ scope: "mine", limit: 100 });
       setJobs(refreshed);
       setError("");
     } catch (e) {
@@ -54,7 +54,8 @@ export default function MyJobsPage() {
         <p style={{ margin: 0, opacity: .86 }}>查看工单、准备零件，并把现场经验沉淀到系统。</p>
       </div>
       <section className="card">
-      <h3 style={{ marginTop: 0 }}>My Jobs</h3>
+      <h3 style={{ marginTop: 0 }}>My claimed jobs</h3>
+      <p className="muted">Only jobs claimed by your account are shown. Field changes are enabled only on the device that claimed the job.</p>
       {error && <p className="notice notice-error">{error}</p>}
       <div style={{ display: "grid", gap: 10 }}>
         {jobs.length === 0 && !error ? <div className="empty-state">No jobs returned for your account.</div> : null}
@@ -65,6 +66,13 @@ export default function MyJobsPage() {
             </div>
             <div className="muted">{job.outlet_name || job.store_name || "Outlet"} · {job.city || "-"}</div>
             {job.machine_type && <div className="muted" style={{ marginTop: 4 }}>Equipment: {job.machine_type}</div>}
+            <div className={job.can_edit ? "notice notice-success" : "muted"} style={{ marginTop: 8 }}>
+              {job.completed_by_name
+                ? `Completed by ${job.completed_by_name}`
+                : job.can_edit
+                  ? "Verified for this account and device"
+                  : "Read-only on this device"}
+            </div>
             {job.is_locked && <span className="job-card__lock">Completed — locked</span>}
             <div className="one-hand-actions">
               <a
@@ -84,10 +92,10 @@ export default function MyJobsPage() {
                   Call
                 </span>
               )}
-              <button type="button" onClick={() => runStart(job.id)} disabled={Boolean(job.is_locked)}>
+              <button type="button" onClick={() => runStart(job.id)} disabled={!job.can_edit || Boolean(job.is_locked)}>
                 Start
               </button>
-              {!job.is_locked && <Link className="nav-item" href={`/work-order-details?work_order_id=${job.id}#completion`}>
+              {job.can_complete && <Link className="nav-item" href={`/work-order-details?work_order_id=${job.id}#completion`}>
                 Review &amp; complete
               </Link>}
               <Link className="nav-item" href={`/work-order-details?work_order_id=${job.id}`}>

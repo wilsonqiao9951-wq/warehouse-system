@@ -6,16 +6,26 @@ import secrets
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.config import settings
-from app.core.rbac import Actor, get_current_actor, require_platform_admin, require_roles, require_work_order_scope
+from app.core.rbac import (
+    Actor,
+    get_current_actor,
+    require_bound_device,
+    require_platform_admin,
+    require_roles,
+    require_work_order_execution_scope,
+    require_work_order_owner_scope,
+    require_work_order_scope,
+    require_work_order_write_scope,
+)
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import (
     AuditLog,
@@ -34,9 +44,9 @@ from app.models import (
     QCPicture,
     ReturnEquipment,
     StorageLocation,
-    StorageLocation,
     TransactionType,
     User,
+    UserDevice,
     UserInvitation,
     UserRole,
     Warehouse,
@@ -91,6 +101,7 @@ from app.schemas import (
     WarehouseCreate,
     WarehouseRead,
     WorkOrderCreate,
+    WorkOrderClaimRelease,
     WorkOrderPartCreate,
     WorkOrderPartRead,
     WorkOrderProfit,
@@ -172,6 +183,9 @@ def _parse_non_negative_number(value, cast, field_name: str):
 def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
+    x_device_id: str | None = Header(default=None, alias="X-Device-Id"),
+    x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
+    x_device_name: str | None = Header(default=None, alias="X-Device-Name"),
 ):
     user = db.scalar(select(User).where(func.lower(User.email) == form.username.strip().lower()))
     organization = db.get(Organization, user.organization_id) if user else None
@@ -186,8 +200,38 @@ def login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    token, expires_in = create_access_token(user.id, user.organization_id)
-    return TokenResponse(access_token=token, expires_in=expires_in, user=user)
+    device_id = None
+    if x_device_id or x_device_token:
+        if not x_device_id or not x_device_token or not (16 <= len(x_device_id) <= 128) or len(x_device_token) < 32:
+            raise HTTPException(status_code=400, detail="Valid device id and device token are required together")
+        if any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for character in x_device_id):
+            raise HTTPException(status_code=400, detail="Device id contains invalid characters")
+        token_hash = sha256(x_device_token.encode("utf-8")).hexdigest()
+        device = db.scalar(select(UserDevice).where(
+            UserDevice.organization_id == user.organization_id, UserDevice.device_id == x_device_id
+        ))
+        if device and device.user_id != user.id:
+            raise HTTPException(status_code=409, detail="This device is bound to another account")
+        if device and (not device.is_active or device.revoked_at is not None):
+            raise HTTPException(status_code=401, detail="This device registration has been revoked")
+        if device and not secrets.compare_digest(device.device_token_hash, token_hash):
+            raise HTTPException(status_code=401, detail="Device authentication failed")
+        if not device:
+            device = UserDevice(
+                organization_id=user.organization_id,
+                user_id=user.id,
+                device_id=x_device_id,
+                device_token_hash=token_hash,
+                device_name=(x_device_name or "Registered device")[:255],
+            )
+            db.add(device)
+        else:
+            device.device_name = (x_device_name or device.device_name or "Registered device")[:255]
+            device.last_seen_at = datetime.utcnow()
+        db.commit()
+        device_id = x_device_id
+    token, expires_in = create_access_token(user.id, user.organization_id, device_id=device_id)
+    return TokenResponse(access_token=token, expires_in=expires_in, user=user, device_id=device_id)
 
 
 @router.get("/auth/me", response_model=UserRead)
@@ -374,16 +418,76 @@ def _audit(
     entity_id: int | None = None,
     metadata: dict | None = None,
 ):
+    audit_metadata = {
+        "actor_role": actor.role.value,
+        "auth_method": actor.auth_method,
+        "device_id": actor.device_id,
+        "device_record_id": actor.device_record_id,
+        "claim_version": actor.claim_version,
+        **(metadata or {}),
+    }
     db.add(
         AuditLog(
             user_id=actor.user_id,
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,
-            metadata_json=str(metadata or {}),
+            metadata_json=json.dumps(audit_metadata, default=str, separators=(",", ":")),
             timestamp=datetime.utcnow(),
         )
     )
+
+
+def _require_account_reauthentication(db: Session, actor: Actor, password: str | None) -> None:
+    if actor.auth_method == "test":
+        return
+    if actor.auth_method != "bearer" or actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Bearer authentication required")
+    user = db.get(User, actor.user_id)
+    if not password or not user or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Account password verification failed")
+
+
+def _work_order_read_for_actor(db: Session, actor: Actor, item: WorkOrder) -> WorkOrderRead:
+    payload = WorkOrderRead.model_validate(item).model_dump()
+    claimant = db.get(User, item.claimed_by_id) if item.claimed_by_id else None
+    completed_by = db.get(User, item.completed_by_id) if item.completed_by_id else None
+    completed_device = db.get(UserDevice, item.completed_device_id) if item.completed_device_id else None
+    is_test_actor = actor.auth_method == "test"
+    is_engineer_owner = bool(
+        actor.role == UserRole.ENGINEER
+        and actor.user_id == item.claimed_by_id
+        and actor.device_verified
+        and actor.device_record_id == item.claimed_device_id
+    )
+    execution_open = not item.is_locked and item.status.upper() != "PENDING_APPROVAL"
+    payload.update(
+        claimed_by_name=claimant.name if claimant else None,
+        completed_by_name=completed_by.name if completed_by else None,
+        completed_device_name=(
+            completed_device.device_name
+            if completed_device and (is_engineer_owner or actor.role in {UserRole.ADMIN, UserRole.MANAGER})
+            else None
+        ),
+        can_claim=bool(
+            actor.role == UserRole.ENGINEER
+            and actor.device_verified
+            and item.claimed_by_id is None
+            and execution_open
+            and item.status.upper() != "COMPLETED"
+        ),
+        can_edit=bool((is_engineer_owner or actor.role == UserRole.ADMIN or is_test_actor) and execution_open),
+        can_complete=bool((is_engineer_owner or is_test_actor) and execution_open),
+    )
+    if actor.role not in {UserRole.ADMIN, UserRole.MANAGER} and not is_engineer_owner and not is_test_actor:
+        payload["revenue"] = 0.0
+        payload["labor_cost"] = 0.0
+        payload["customer_signature_name"] = None
+        payload["customer_signature_data"] = None
+        payload["customer_signed_at"] = None
+        payload["claimed_device_id"] = None
+        payload["completed_device_id"] = None
+    return WorkOrderRead(**payload)
 
 
 def _image_extension(data: bytes) -> str | None:
@@ -409,8 +513,7 @@ async def upload_work_order_part_photo(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, work_order_id)
-    work_order = db.get(WorkOrder, work_order_id)
+    work_order = require_work_order_execution_scope(db, actor, work_order_id)
     if not work_order or work_order.is_locked or work_order.status == "PENDING_APPROVAL":
         raise HTTPException(status_code=409, detail="Work order cannot accept uploads in its current state")
 
@@ -427,6 +530,15 @@ async def upload_work_order_part_photo(
     target_path = target_dir / filename
 
     target_path.write_bytes(data)
+    _audit(
+        db,
+        actor,
+        "upload_work_order_photo",
+        "work_order",
+        work_order_id,
+        {"url": f"/uploads/work-order-parts/{filename}"},
+    )
+    db.commit()
     return {"url": f"/uploads/work-order-parts/{filename}"}
 
 
@@ -452,8 +564,7 @@ async def create_work_order_voice_note(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, work_order_id)
-    work_order = db.get(WorkOrder, work_order_id)
+    work_order = require_work_order_execution_scope(db, actor, work_order_id)
     if not work_order or work_order.is_locked or work_order.status == "PENDING_APPROVAL":
         raise HTTPException(status_code=400, detail="Voice notes cannot be added to this work order")
     data = await file.read(settings.max_audio_upload_bytes + 1)
@@ -725,12 +836,16 @@ def list_work_orders(
     q: str | None = Query(default=None),
     date_from: date | None = Query(default=None),
     date_to: date | None = Query(default=None),
+    scope: str = Query(default="all", pattern="^(all|mine|available)$"),
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
     stmt = select(WorkOrder).order_by(WorkOrder.id.desc())
     if actor.role == UserRole.ENGINEER and actor.user_id:
-        stmt = stmt.where((WorkOrder.assigned_user_id == actor.user_id) | (WorkOrder.engineer_id == actor.user_id))
+        if scope == "mine":
+            stmt = stmt.where(WorkOrder.claimed_by_id == actor.user_id)
+        elif scope == "available":
+            stmt = stmt.where(WorkOrder.claimed_by_id.is_(None), WorkOrder.is_locked.is_(False))
     elif actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     if technician_id:
@@ -753,7 +868,108 @@ def list_work_orders(
         stmt = stmt.where(WorkOrder.schedule_date >= date_from)
     if date_to:
         stmt = stmt.where(WorkOrder.schedule_date <= date_to)
-    return db.scalars(stmt.offset(skip).limit(limit)).all()
+    rows = db.scalars(stmt.offset(skip).limit(limit)).all()
+    return [_work_order_read_for_actor(db, actor, item) for item in rows]
+
+
+@router.post("/work-orders/{work_order_id}/claim", response_model=WorkOrderRead)
+def claim_work_order(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.role != UserRole.ENGINEER:
+        raise HTTPException(status_code=403, detail="Only engineers can claim work orders")
+    require_bound_device(actor)
+    require_work_order_scope(db, actor, work_order_id)
+    item = db.get(WorkOrder, work_order_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    if item.is_locked or item.status.upper() in {"COMPLETED", "PENDING_APPROVAL"}:
+        raise HTTPException(status_code=409, detail="Work order cannot be claimed in its current state")
+    if item.claimed_by_id is not None:
+        if item.claimed_by_id == actor.user_id and item.claimed_device_id == actor.device_record_id:
+            return _work_order_read_for_actor(db, actor, item)
+        if item.claimed_by_id == actor.user_id:
+            raise HTTPException(status_code=409, detail="Work order is already bound to another registered device")
+        raise HTTPException(status_code=409, detail="Work order has already been claimed")
+
+    result = db.execute(
+        update(WorkOrder)
+        .where(
+            WorkOrder.id == work_order_id,
+            WorkOrder.organization_id == actor.organization_id,
+            WorkOrder.claimed_by_id.is_(None),
+            WorkOrder.is_locked.is_(False),
+            func.upper(WorkOrder.status).notin_({"COMPLETED", "PENDING_APPROVAL"}),
+        )
+        .values(
+            claimed_by_id=actor.user_id,
+            claimed_device_id=actor.device_record_id,
+            claimed_at=datetime.utcnow(),
+            claim_version=WorkOrder.claim_version + 1,
+            assigned_user_id=actor.user_id,
+            engineer_id=actor.user_id,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Work order was claimed by another engineer")
+    db.refresh(item)
+    _audit(
+        db,
+        actor,
+        "claim_work_order",
+        "work_order",
+        work_order_id,
+        {"claimed_by_id": actor.user_id, "claimed_device_id": actor.device_record_id, "new_claim_version": item.claim_version},
+    )
+    db.commit()
+    db.refresh(item)
+    return _work_order_read_for_actor(db, actor, item)
+
+
+@router.post("/work-orders/{work_order_id}/release", response_model=WorkOrderRead)
+def release_work_order_claim(
+    work_order_id: int,
+    payload: WorkOrderClaimRelease,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_work_order_scope(db, actor, work_order_id)
+    item = db.get(WorkOrder, work_order_id)
+    if not item or item.claimed_by_id is None:
+        raise HTTPException(status_code=409, detail="Work order is not currently claimed")
+    if item.is_locked or item.status.upper() in {"COMPLETED", "PENDING_APPROVAL"}:
+        raise HTTPException(status_code=409, detail="Claim cannot be released in the current state")
+    previous_user_id = item.claimed_by_id
+    previous_device_id = item.claimed_device_id
+    if item.assigned_user_id == previous_user_id:
+        item.assigned_user_id = None
+    if item.engineer_id == previous_user_id:
+        item.engineer_id = None
+    item.claimed_by_id = None
+    item.claimed_device_id = None
+    item.claimed_at = None
+    item.claim_version += 1
+    _audit(
+        db,
+        actor,
+        "release_work_order_claim",
+        "work_order",
+        work_order_id,
+        {
+            "reason": payload.reason.strip(),
+            "previous_claimed_by_id": previous_user_id,
+            "previous_claimed_device_id": previous_device_id,
+            "new_claim_version": item.claim_version,
+        },
+    )
+    db.commit()
+    db.refresh(item)
+    return _work_order_read_for_actor(db, actor, item)
 
 
 @router.get("/work-orders/{work_order_id}/service-context", response_model=WorkOrderServiceContext)
@@ -847,10 +1063,7 @@ def update_work_order(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, work_order_id)
-    item = db.get(WorkOrder, work_order_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Work order not found")
+    item = require_work_order_write_scope(db, actor, work_order_id)
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be edited")
     if item.status == "PENDING_APPROVAL":
@@ -885,6 +1098,11 @@ def update_work_order(
     _require_tenant_user(db, updates.get("assistant_id"), "assistant_id")
     target_customer_id = updates.get("customer_id", item.customer_id)
     target_equipment_id = updates.get("equipment_id", item.equipment_id)
+    if item.claimed_by_id is not None and any(
+        field in updates and updates[field] != getattr(item, field)
+        for field in {"assigned_user_id", "engineer_id"}
+    ):
+        raise HTTPException(status_code=409, detail="Release the authenticated claim before reassigning this work order")
     customer, equipment = _require_tenant_service_links(db, actor, target_customer_id, target_equipment_id)
     if equipment and target_customer_id is None:
         updates["customer_id"] = equipment.customer_id
@@ -895,9 +1113,10 @@ def update_work_order(
         setattr(item, key, value)
 
     db.add(item)
+    _audit(db, actor, "update_work_order", "work_order", work_order_id, {"changed_fields": sorted(updates)})
     db.commit()
     db.refresh(item)
-    return item
+    return _work_order_read_for_actor(db, actor, item)
 
 
 @router.post("/work-orders/{work_order_id}/start", response_model=WorkOrderRead)
@@ -907,10 +1126,7 @@ def start_work_order(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, work_order_id)
-    item = db.get(WorkOrder, work_order_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Work order not found")
+    item = require_work_order_execution_scope(db, actor, work_order_id)
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be started")
     if item.status == "PENDING_APPROVAL":
@@ -922,7 +1138,7 @@ def start_work_order(
     _audit(db, actor, "start_job", "work_order", work_order_id)
     db.commit()
     db.refresh(item)
-    return item
+    return _work_order_read_for_actor(db, actor, item)
 
 
 @router.post("/work-orders/{work_order_id}/complete", response_model=WorkOrderRead)
@@ -932,11 +1148,8 @@ def complete_work_order(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, work_order_id)
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)
-    item = db.get(WorkOrder, work_order_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Work order not found")
+    item = require_work_order_owner_scope(db, actor, work_order_id)
+    _require_account_reauthentication(db, actor, payload.account_password)
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order already completed")
     _apply_completion_payload(item, payload)
@@ -951,7 +1164,7 @@ def complete_work_order(
         _audit(db, actor, "request_completion", "work_order", work_order_id, {"policy": policy})
         db.commit()
         db.refresh(item)
-        return item
+        return _work_order_read_for_actor(db, actor, item)
     if policy.get("require_manager_approval"):
         item.completion_approved_by = actor.user_id
         item.completion_approved_at = datetime.utcnow()
@@ -1043,17 +1256,38 @@ def _validate_completion_evidence(db: Session, item: WorkOrder, policy: dict) ->
         raise HTTPException(status_code=422, detail={"message": "Completion evidence is incomplete", "missing": missing})
 
 
-def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrder:
+def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrderRead:
     work_order_id = item.id
+    completed_by_id = item.claimed_by_id
+    completed_device_id = item.claimed_device_id
+    if actor.auth_method == "test" and completed_by_id is None:
+        completed_by_id = actor.user_id
+        completed_device_id = actor.device_record_id
+    if actor.auth_method != "test" and (completed_by_id is None or completed_device_id is None):
+        raise HTTPException(status_code=409, detail="Work order has no authenticated engineer claim")
+    item.completed_by_id = completed_by_id
+    item.completed_device_id = completed_device_id
     item.status = "COMPLETED"
     item.completed_at = datetime.utcnow()
     item.is_locked = True
     db.add(item)
     db.add(JobStatus(work_order_id=work_order_id, status="COMPLETED", timestamp=datetime.utcnow()))
-    _audit(db, actor, "complete_job", "work_order", work_order_id, {"parts_cost": get_work_order_parts_cost(db, work_order_id)})
+    _audit(
+        db,
+        actor,
+        "complete_job",
+        "work_order",
+        work_order_id,
+        {
+            "parts_cost": get_work_order_parts_cost(db, work_order_id),
+            "completed_by_id": completed_by_id,
+            "completed_device_id": completed_device_id,
+            "claim_version": item.claim_version,
+        },
+    )
     db.commit()
     db.refresh(item)
-    return item
+    return _work_order_read_for_actor(db, actor, item)
 
 
 def _require_tenant_service_links(
@@ -1143,9 +1377,8 @@ def request_work_order_completion(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, work_order_id)
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)
-    item = db.get(WorkOrder, work_order_id)
+    item = require_work_order_owner_scope(db, actor, work_order_id)
+    _require_account_reauthentication(db, actor, payload.account_password)
     if not item or item.is_locked:
         raise HTTPException(status_code=400, detail="Work order cannot request completion")
     if item.status == "PENDING_APPROVAL":
@@ -1163,7 +1396,7 @@ def request_work_order_completion(
     _audit(db, actor, "request_completion", "work_order", work_order_id)
     db.commit()
     db.refresh(item)
-    return item
+    return _work_order_read_for_actor(db, actor, item)
 
 
 @router.post("/work-orders/{work_order_id}/approve-completion", response_model=WorkOrderRead)
@@ -1201,7 +1434,7 @@ def reject_work_order_completion(
     _audit(db, actor, "reject_completion", "work_order", work_order_id, {"notes": payload.notes})
     db.commit()
     db.refresh(item)
-    return item
+    return _work_order_read_for_actor(db, actor, item)
 
 
 @router.get("/customers", response_model=list[CustomerRead])
@@ -1253,11 +1486,7 @@ def pause_work_order(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, work_order_id)
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)
-    item = db.get(WorkOrder, work_order_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Work order not found")
+    item = require_work_order_execution_scope(db, actor, work_order_id)
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Completed work order cannot be paused")
     if item.status != "IN_PROGRESS":
@@ -1269,7 +1498,7 @@ def pause_work_order(
     _audit(db, actor, "pause_job", "work_order", work_order_id, {"notes": payload.notes})
     db.commit()
     db.refresh(item)
-    return item
+    return _work_order_read_for_actor(db, actor, item)
 
 
 @router.post("/inventory/transactions", response_model=InventoryTransactionRead)
@@ -1399,7 +1628,7 @@ def add_work_order_part(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, payload.work_order_id)
+    require_work_order_execution_scope(db, actor, payload.work_order_id)
     return use_part_for_work_order(payload.work_order_id, payload, db, actor)
 
 
@@ -1414,13 +1643,13 @@ def use_part_for_work_order(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_work_order_scope(db, actor, work_order_id)
-    work_order = db.get(WorkOrder, work_order_id)
+    work_order = require_work_order_execution_scope(db, actor, work_order_id)
     if not work_order or work_order.is_locked or work_order.status == "PENDING_APPROVAL":
         raise HTTPException(status_code=409, detail="Work order cannot accept parts in its current state")
     if payload.work_order_id != work_order_id:
         raise HTTPException(status_code=400, detail="Path work order ID must match payload work_order_id")
-    usage = use_part_on_work_order(db, payload)
+    effective_payload = payload.model_copy(update={"user_id": actor.user_id}) if actor.user_id else payload
+    usage = use_part_on_work_order(db, effective_payload)
     part = db.get(Part, payload.part_id)
     warehouse_quantity = get_stock_quantity(db, payload.part_id, payload.warehouse_id)
     threshold = max(part.safety_stock, part.min_stock) if part else 0
@@ -1543,13 +1772,17 @@ def work_order_part_recommendations(
 
 @router.get("/work-order-parts", response_model=list[WorkOrderPartRead])
 def list_work_order_parts(
+    work_order_id: int | None = Query(default=None, ge=1),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
     stmt = select(WorkOrderPart).order_by(WorkOrderPart.id.desc())
-    if actor.role == UserRole.ENGINEER and actor.user_id:
+    if work_order_id is not None:
+        require_work_order_scope(db, actor, work_order_id)
+        stmt = stmt.where(WorkOrderPart.work_order_id == work_order_id)
+    elif actor.role == UserRole.ENGINEER and actor.user_id:
         stmt = stmt.where(WorkOrderPart.user_id == actor.user_id)
     elif actor.role not in {UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE}:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -1560,8 +1793,7 @@ def list_work_order_parts(
 def create_qc_picture(
     payload: QCPictureCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
 ):
-    require_work_order_scope(db, actor, payload.work_order_id)
-    work_order = db.get(WorkOrder, payload.work_order_id)
+    work_order = require_work_order_execution_scope(db, actor, payload.work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     if work_order.is_locked or work_order.status == "PENDING_APPROVAL":
@@ -1596,10 +1828,7 @@ def list_qc_pictures(
 def create_job_status(
     payload: JobStatusCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
 ):
-    require_work_order_scope(db, actor, payload.work_order_id)
-    if not db.get(WorkOrder, payload.work_order_id):
-        raise HTTPException(status_code=404, detail="Work order not found")
-    work_order = db.get(WorkOrder, payload.work_order_id)
+    work_order = require_work_order_execution_scope(db, actor, payload.work_order_id)
     if work_order and (work_order.is_locked or work_order.status == "PENDING_APPROVAL"):
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be edited")
     if payload.status.strip().upper() in {"COMPLETED", "PENDING_APPROVAL", "APPROVAL_REJECTED"}:
@@ -1636,10 +1865,7 @@ def list_job_status(
 def create_return_equipment(
     payload: ReturnEquipmentCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
 ):
-    require_work_order_scope(db, actor, payload.work_order_id)
-    if not db.get(WorkOrder, payload.work_order_id):
-        raise HTTPException(status_code=404, detail="Work order not found")
-    work_order = db.get(WorkOrder, payload.work_order_id)
+    work_order = require_work_order_execution_scope(db, actor, payload.work_order_id)
     if work_order and (work_order.is_locked or work_order.status == "PENDING_APPROVAL"):
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be edited")
     item = ReturnEquipment(**payload.model_dump())

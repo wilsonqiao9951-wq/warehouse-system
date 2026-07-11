@@ -113,3 +113,32 @@ Verification:
 - Database: existing schema upgraded through `0016 → 0017` successfully.
 - Frontend: Next.js production build passed (27 static pages).
 - Security: no new packages; production audit remains at the known Next.js/PostCSS baseline (1 high, 1 moderate).
+
+## 2026-07-11 — Shared engineer pool and device-bound work-order ownership
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- All same-organization engineers can view the shared work-order pool, progress history, parts usage, photos, voice notes, repair information, claimant, and completer.
+- Atomic online claim endpoint with a single winner under competing claim attempts.
+- Registered phone/browser identity backed by a stable random device ID and a high-entropy device secret stored only as a server-side hash.
+- Work-order ownership bound to engineer account, registered device, claim timestamp, and monotonically increasing claim version.
+- Owner-only engineer writes across start/pause, field edits, parts, photos, voice, QC, status, returned equipment, completion, and completion requests.
+- Administrator correction access with administrator audit attribution; managers retain approval/rejection/release workflows but cannot impersonate the field owner.
+- Completion password re-verification and immutable completed engineer/device attribution, kept separate from manager approval attribution.
+- Server-owned parts/photo attribution so clients cannot submit another user's identity.
+- Sensitive response redaction for non-owner engineers while retaining operational progress visibility.
+- Mobile Job Pool, My Claimed Jobs, read-only detail states, claim/release controls, device-aware login, and completion-password UI.
+- Offline queue isolation by account, device, work order, and claim version; verified state transitions remain online-only and stale claim generations cannot replay.
+- Secure defaults (`RBAC_ENFORCE=true`, `LEGACY_HEADER_AUTH=false`) forced in every runnable environment, plus removal of the frontend legacy identity fallback.
+- Safe local startup update: a clean `main` branch fast-forwards from GitHub when available, preserves dirty/offline work, and applies Alembic migrations before launching; containers also migrate before serving.
+- Alembic revision `20260711_0018`.
+
+Verification:
+
+- Backend: 49 tests passed, including shared visibility, owner/admin/manager boundaries, competing claims, device mismatch, stale claim version, legacy/warehouse denial, completion authentication, manager approval attribution, and parts identity spoofing.
+- Database: full base-to-`0018` migration, `0018 → 0017` downgrade, and `0017 → 0018` re-upgrade passed on SQLite.
+- Frontend: Next.js production build passed with type/lint validation and 27 static pages.
+- Source hygiene: `git diff --check` passed and no frontend `X-User-Id`/legacy-auth fallback remains.
+- Dependency review: production audit reports the existing Next.js/PostCSS baseline (1 high, 1 moderate); the available automatic fix is a breaking Next.js 14 → 16 upgrade and remains isolated to a separate framework-migration batch.

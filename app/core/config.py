@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     app_debug: bool = False
     log_level: str = "INFO"
     database_url: str = "sqlite:///./openpartsflow.db"
-    rbac_enforce: bool = False
-    legacy_header_auth: bool = True
+    rbac_enforce: bool = True
+    legacy_header_auth: bool = False
     jwt_secret_key: str = "development-only-change-me-32-bytes-minimum"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
@@ -24,3 +24,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Authentication is fail-closed in every runnable environment. The test suite
+# may explicitly change these in-memory values after import, but stale local
+# .env files can no longer silently disable ownership enforcement.
+if settings.app_env.lower() != "test":
+    settings.rbac_enforce = True
+    settings.legacy_header_auth = False

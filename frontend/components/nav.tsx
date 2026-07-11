@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, clearOfflineSession } from "@/lib/api";
 
 const links = [
   { href: "/", label: "Dashboard", roles: ["manager", "admin"] },
@@ -41,27 +41,20 @@ function sortEngineerLinks(items: typeof links) {
 export default function Nav() {
   const pathname = usePathname();
   const [role, setRole] = useState("admin");
-  const [userId, setUserId] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
-  const legacyAuth = process.env.NEXT_PUBLIC_LEGACY_AUTH === "true";
 
   useEffect(() => {
     const saved = window.localStorage.getItem("opf_role");
-    const savedUserId = window.localStorage.getItem("opf_user_id");
     const token = window.localStorage.getItem("opf_access_token");
     if (saved) {
       setRole(saved);
-    }
-    if (savedUserId) {
-      setUserId(savedUserId);
     }
     if (token) {
       api.getMe()
         .then((user) => {
           setAuthenticated(true);
           setRole(user.role);
-          setUserId(String(user.id));
           setIsPlatformAdmin(user.is_platform_admin);
           window.localStorage.setItem("opf_role", user.role);
           window.localStorage.setItem("opf_user_id", String(user.id));
@@ -83,7 +76,7 @@ export default function Nav() {
   }, [role]);
 
   const visibleLinks = useMemo(() => {
-    if (!authenticated && !legacyAuth) return [];
+    if (!authenticated) return [];
     const items = links.filter(
       (link) => link.roles.includes(role) && (link.href !== "/platform" || isPlatformAdmin)
     );
@@ -91,46 +84,17 @@ export default function Nav() {
       return sortEngineerLinks(items);
     }
     return items;
-  }, [authenticated, isPlatformAdmin, legacyAuth, role]);
+  }, [authenticated, isPlatformAdmin, role]);
 
   return (
     <>
       <div className="topbar container" style={{ marginBottom: 0, paddingTop: 4 }}>
-        {legacyAuth && !authenticated && <select
-          value={role}
-          onChange={(e) => {
-            setRole(e.target.value);
-            window.localStorage.setItem("opf_role", e.target.value);
-          }}
-          style={{ maxWidth: 200 }}
-          aria-label="Role"
-        >
-          <option value="engineer">technician</option>
-          <option value="warehouse">warehouse</option>
-          <option value="manager">manager</option>
-          <option value="admin">admin</option>
-        </select>}
-        {legacyAuth && !authenticated && <input
-          placeholder="X-User-Id"
-          value={userId}
-          onChange={(e) => {
-            const value = e.target.value.replace(/[^\d]/g, "");
-            setUserId(value);
-            if (value) {
-              window.localStorage.setItem("opf_user_id", value);
-            } else {
-              window.localStorage.removeItem("opf_user_id");
-            }
-          }}
-          style={{ maxWidth: 160 }}
-          inputMode="numeric"
-          aria-label="User id for API"
-        />}
-        {!authenticated && !legacyAuth && <Link href="/login">Sign in</Link>}
+        {!authenticated && <Link href="/login">Sign in</Link>}
         {authenticated && (
           <button
             type="button"
             onClick={() => {
+              clearOfflineSession();
               window.localStorage.removeItem("opf_access_token");
               window.localStorage.removeItem("opf_role");
               window.localStorage.removeItem("opf_user_id");

@@ -175,3 +175,28 @@ Validation completed:
 
 Conclusion:
 - Migration upgrade is applied with AppSheet-compatible schema extensions and without breaking existing core logic.
+
+---
+
+## 7) Authenticated Engineer Claims (`20260711_0018`)
+
+Added `user_devices` with tenant/user ownership, a stable device ID, hashed device secret, revocation state, device name, and first/last seen timestamps.
+
+Added to `work_orders`:
+
+- `claimed_by_id`
+- `claimed_at`
+- `claimed_device_id`
+- `claim_version`
+- `completed_by_id`
+- `completed_device_id`
+
+The revision also adds foreign keys and indexes for claimant/completer lookup and organization claim/status filtering. All new work-order columns are nullable except the zero-default claim version, so existing work orders upgrade without forced assignment or false completion attribution.
+
+New APIs:
+
+- `POST /api/work-orders/{id}/claim`
+- `POST /api/work-orders/{id}/release`
+- `GET /api/work-orders?scope=all|mine|available`
+
+Validation completed on SQLite with a full base-to-head upgrade, `0018 -> 0017` downgrade, and `0017 -> 0018` re-upgrade.

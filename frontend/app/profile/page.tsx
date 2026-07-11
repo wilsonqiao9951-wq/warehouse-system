@@ -23,14 +23,14 @@ export default function ProfilePage() {
         <b>Role:</b> {role}
       </div>
       <div>
-        <b>X-User-Id:</b> {userId || "—"}
+        <b>Authenticated account ID:</b> {userId || "—"}
       </div>
       <section className="card" style={{ marginTop: 14, marginBottom: 0, background: "#f9fafb" }}>
         <h4 className="section-title" style={{ marginTop: 0 }}>
           Developer / public test
         </h4>
         <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-          Values below help verify phone and Cloudflare setup. Change role and X-User-Id in the top bar.
+          Values below help verify the signed-in phone and Cloudflare setup. Account identity comes only from the authenticated session.
         </p>
         <div style={{ wordBreak: "break-all", fontSize: 14 }}>
           <b>API base URL:</b> {apiBaseUrl}

@@ -2,10 +2,19 @@ from app.core.config import settings
 
 
 PNG_SIGNATURE = "data:image/png;base64,iVBORw0KGgo="
+COMPLETION_PASSWORD = "completion-password"
 
 
 def create_user(client, name: str, role: str = "engineer") -> dict:
-    return client.post("/api/users", json={"name": name, "email": f"{name}@completion.test", "role": role}).json()
+    return client.post(
+        "/api/users",
+        json={
+            "name": name,
+            "email": f"{name}@completion.test",
+            "role": role,
+            "password": COMPLETION_PASSWORD,
+        },
+    ).json()
 
 
 def create_work_order(client, ticket: str, engineer_id: int, job_type: str = "repair") -> dict:
@@ -96,13 +105,36 @@ def test_engineer_completion_waits_for_manager_approval_and_freezes_evidence(cli
             "require_repair_result": True, "require_manager_approval": True
         })
         settings.rbac_enforce = True
-        engineer_headers = {"X-User-Id": str(engineer["id"])}
-        admin_headers = {"X-User-Id": str(admin["id"])}
+        device_token = "e" * 64
+        engineer_login = client.post(
+            "/api/auth/login",
+            data={"username": engineer["email"], "password": COMPLETION_PASSWORD},
+            headers={
+                "X-Device-Id": "approval-engineer-phone",
+                "X-Device-Token": device_token,
+                "X-Device-Name": "Approval engineer phone",
+            },
+        )
+        assert engineer_login.status_code == 200, engineer_login.text
+        engineer_headers = {
+            "Authorization": f"Bearer {engineer_login.json()['access_token']}",
+            "X-Device-Token": device_token,
+        }
+        claimed = client.post(f"/api/work-orders/{work_order['id']}/claim", headers=engineer_headers)
+        assert claimed.status_code == 200, claimed.text
+        engineer_headers["X-Claim-Version"] = str(claimed.json()["claim_version"])
+
+        admin_login = client.post(
+            "/api/auth/login",
+            data={"username": admin["email"], "password": COMPLETION_PASSWORD},
+        )
+        assert admin_login.status_code == 200, admin_login.text
+        admin_headers = {"Authorization": f"Bearer {admin_login.json()['access_token']}"}
 
         requested = client.post(
             f"/api/work-orders/{work_order['id']}/complete",
             headers=engineer_headers,
-            json={"repair_result": "Ready for approval"},
+            json={"repair_result": "Ready for approval", "account_password": COMPLETION_PASSWORD},
         )
         assert requested.status_code == 200
         assert requested.json()["status"] == "PENDING_APPROVAL"

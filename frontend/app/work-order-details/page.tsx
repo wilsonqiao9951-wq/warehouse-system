@@ -24,12 +24,16 @@ export default function WorkOrderDetailsPage() {
   const [serviceContext, setServiceContext] = useState<WorkOrderServiceContext | null>(null);
   const [completionPolicy, setCompletionPolicy] = useState<CompletionPolicy | null>(null);
   const [role, setRole] = useState("");
+  const [completionPassword, setCompletionPassword] = useState("");
+  const [claimBusy, setClaimBusy] = useState(false);
+  const [releaseReason, setReleaseReason] = useState("");
+  const [releaseBusy, setReleaseBusy] = useState(false);
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const qcCameraInputId = useId();
   const qcLibraryInputId = useId();
   const [statusInput, setStatusInput] = useState("in_progress");
-  const [qcForm, setQcForm] = useState({ image_url: "", uploaded_by: "" });
+  const [qcForm, setQcForm] = useState({ image_url: "" });
   const [qcPhotoFile, setQcPhotoFile] = useState<File | null>(null);
   const [qcPhotoPreview, setQcPhotoPreview] = useState("");
   const [qcUploadPct, setQcUploadPct] = useState(0);
@@ -62,7 +66,7 @@ export default function WorkOrderDetailsPage() {
 
   useEffect(() => {
     setRole(window.localStorage.getItem("opf_role") || "");
-    Promise.all([api.listWorkOrders(), api.listParts(), api.listUsers().catch(() => [])])
+    Promise.all([api.listWorkOrders({ scope: "all" }), api.listParts(), api.listUsers().catch(() => [])])
       .then(([wo, parts, us]) => {
         setWorkOrders(wo);
         setPartsCatalog(parts);
@@ -81,7 +85,15 @@ export default function WorkOrderDetailsPage() {
   );
   const locked = Boolean(selectedWorkOrder?.is_locked);
   const pendingApproval = selectedWorkOrder?.status === "PENDING_APPROVAL";
-  const evidenceFrozen = locked || pendingApproval;
+  const canEdit = Boolean(selectedWorkOrder?.can_edit);
+  const canComplete = Boolean(selectedWorkOrder?.can_complete);
+  const evidenceFrozen = locked || pendingApproval || !canEdit;
+  const canReleaseClaim = Boolean(
+    selectedWorkOrder?.claimed_by_id
+    && ["admin", "manager"].includes(role)
+    && !locked
+    && !pendingApproval
+  );
 
   useEffect(() => {
     if (!selectedWorkOrder) return;
@@ -99,6 +111,8 @@ export default function WorkOrderDetailsPage() {
       siteClean: Boolean(checklist.site_clean),
       customerBriefed: Boolean(checklist.customer_briefed)
     });
+    setCompletionPassword("");
+    setReleaseReason("");
   }, [selectedWorkOrder]);
 
   const partName = (id: number) => partsCatalog.find((p) => p.id === id)?.name || `Part #${id}`;
@@ -110,13 +124,13 @@ export default function WorkOrderDetailsPage() {
         api.listJobStatus(currentWorkOrderId),
         api.listQCPictures(currentWorkOrderId),
         api.listReturnEquipments(currentWorkOrderId),
-        api.listWorkOrderParts({ limit: 100 }).catch(() => [] as WorkOrderPart[]),
+        api.listWorkOrderParts({ limit: 100, work_order_id: currentWorkOrderId }).catch(() => [] as WorkOrderPart[]),
         api.listVoiceNotes(currentWorkOrderId)
       ]);
       setJobStatusRows(statuses);
       setQcPictures(pictures);
       setReturnEquipments(equipments);
-      setWoParts(allParts.filter((r) => r.work_order_id === currentWorkOrderId));
+      setWoParts(allParts);
       setVoiceNotes(notes);
     } catch (e) {
       const err = e instanceof Error ? e.message : "Failed to load detail records.";
@@ -140,11 +154,11 @@ export default function WorkOrderDetailsPage() {
   }, [currentWorkOrderId]);
 
   const onStartJob = async () => {
-    if (!currentWorkOrderId) return;
+    if (!currentWorkOrderId || !canEdit) return;
     try {
       await api.startJob(currentWorkOrderId);
       setNotice({ type: "success", text: "Job started." });
-      const wo = await api.listWorkOrders();
+      const wo = await api.listWorkOrders({ scope: "all" });
       setWorkOrders(wo);
       void reloadDetails();
     } catch (e) {
@@ -152,8 +166,41 @@ export default function WorkOrderDetailsPage() {
     }
   };
 
+  const onClaimJob = async () => {
+    if (!currentWorkOrderId || !selectedWorkOrder?.can_claim) return;
+    try {
+      setClaimBusy(true);
+      await api.claimWorkOrder(currentWorkOrderId);
+      setWorkOrders(await api.listWorkOrders({ scope: "all" }));
+      setNotice({ type: "success", text: "Job claimed and bound to this account and device." });
+    } catch (e) {
+      setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to claim job." });
+    } finally {
+      setClaimBusy(false);
+    }
+  };
+
+  const onReleaseClaim = async () => {
+    if (!currentWorkOrderId || !canReleaseClaim) return;
+    if (releaseReason.trim().length < 3) {
+      setNotice({ type: "error", text: "Enter a release reason of at least 3 characters." });
+      return;
+    }
+    try {
+      setReleaseBusy(true);
+      await api.releaseWorkOrder(currentWorkOrderId, releaseReason.trim());
+      setWorkOrders(await api.listWorkOrders({ scope: "all" }));
+      setReleaseReason("");
+      setNotice({ type: "success", text: "Claim released. The job is available to engineers again." });
+    } catch (e) {
+      setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to release claim." });
+    } finally {
+      setReleaseBusy(false);
+    }
+  };
+
   const onCompleteJob = async () => {
-    if (!currentWorkOrderId) return;
+    if (!currentWorkOrderId || !canComplete) return;
     const missing: string[] = [];
     if (completionPolicy?.require_repair_result && !completion.repairResult.trim()) missing.push("repair result");
     if (completionPolicy?.require_customer_signature && (!completion.signatureName.trim() || !completion.signatureData)) missing.push("customer signature");
@@ -164,6 +211,12 @@ export default function WorkOrderDetailsPage() {
       setNotice({ type: "error", text: `Complete the required evidence: ${missing.join(", ")}.` });
       return;
     }
+    if (!completionPassword) {
+      setNotice({ type: "error", text: "Enter your account password to verify who is completing this job." });
+      return;
+    }
+    const accountPassword = completionPassword;
+    setCompletionPassword("");
     try {
       const result = await api.completeJob(currentWorkOrderId, {
         repair_result: completion.repairResult.trim(),
@@ -173,10 +226,11 @@ export default function WorkOrderDetailsPage() {
           equipment_safe: completion.equipmentSafe,
           site_clean: completion.siteClean,
           customer_briefed: completion.customerBriefed
-        })
+        }),
+        account_password: accountPassword
       });
       setNotice({ type: "success", text: result.status === "PENDING_APPROVAL" ? "Completion submitted for manager approval." : "Job completed and locked." });
-      const wo = await api.listWorkOrders();
+      const wo = await api.listWorkOrders({ scope: "all" });
       setWorkOrders(wo);
       void reloadDetails();
     } catch (e) {
@@ -189,7 +243,7 @@ export default function WorkOrderDetailsPage() {
     try {
       await api.approveCompletion(currentWorkOrderId);
       setNotice({ type: "success", text: "Completion approved and work order locked." });
-      setWorkOrders(await api.listWorkOrders());
+      setWorkOrders(await api.listWorkOrders({ scope: "all" }));
       void reloadDetails();
     } catch (e) {
       setNotice({ type: "error", text: e instanceof Error ? e.message : "Approval failed." });
@@ -201,7 +255,7 @@ export default function WorkOrderDetailsPage() {
     try {
       await api.rejectCompletion(currentWorkOrderId, "Completion evidence requires correction");
       setNotice({ type: "success", text: "Completion rejected for correction." });
-      setWorkOrders(await api.listWorkOrders());
+      setWorkOrders(await api.listWorkOrders({ scope: "all" }));
       void reloadDetails();
     } catch (e) {
       setNotice({ type: "error", text: e instanceof Error ? e.message : "Rejection failed." });
@@ -209,11 +263,11 @@ export default function WorkOrderDetailsPage() {
   };
 
   const onPauseJob = async () => {
-    if (!currentWorkOrderId) return;
+    if (!currentWorkOrderId || !canEdit) return;
     try {
       await api.pauseJob(currentWorkOrderId);
       setNotice({ type: "success", text: "Job paused." });
-      setWorkOrders(await api.listWorkOrders());
+      setWorkOrders(await api.listWorkOrders({ scope: "all" }));
       void reloadDetails();
     } catch (e) {
       setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to pause job." });
@@ -222,7 +276,7 @@ export default function WorkOrderDetailsPage() {
 
   const onCreateJobStatus = async (e: FormEvent) => {
     e.preventDefault();
-    if (!currentWorkOrderId || !statusInput) return;
+    if (!currentWorkOrderId || !statusInput || !canEdit) return;
     try {
       await api.createJobStatus({ work_order_id: currentWorkOrderId, status: statusInput });
       setNotice({ type: "success", text: "Job status added." });
@@ -234,7 +288,7 @@ export default function WorkOrderDetailsPage() {
 
   const onCreateQCPicture = async (e: FormEvent) => {
     e.preventDefault();
-    if (!currentWorkOrderId) return;
+    if (!currentWorkOrderId || !canEdit) return;
     const manual = qcForm.image_url.trim();
     if (!qcPhotoFile && !manual) {
       setNotice({ type: "error", text: "Take a photo, choose from library, or paste an image URL." });
@@ -253,10 +307,9 @@ export default function WorkOrderDetailsPage() {
       }
       await api.createQCPicture({
         work_order_id: currentWorkOrderId,
-        image_url: imageUrl,
-        uploaded_by: qcForm.uploaded_by ? Number(qcForm.uploaded_by) : null
+        image_url: imageUrl
       });
-      setQcForm({ image_url: "", uploaded_by: qcForm.uploaded_by });
+      setQcForm({ image_url: "" });
       setQcPhotoFromFile(null);
       setQcUploadPct(0);
       setNotice({ type: "success", text: "QC picture added." });
@@ -271,7 +324,7 @@ export default function WorkOrderDetailsPage() {
 
   const onCreateReturnEquipment = async (e: FormEvent) => {
     e.preventDefault();
-    if (!currentWorkOrderId || !retForm.equipment_type.trim()) return;
+    if (!currentWorkOrderId || !retForm.equipment_type.trim() || !canEdit) return;
     try {
       await api.createReturnEquipment({
         work_order_id: currentWorkOrderId,
@@ -324,21 +377,51 @@ export default function WorkOrderDetailsPage() {
               {selectedWorkOrder.job_type || "—"}
             </p>
             {locked && <span className="job-card__lock">Completed — locked (no edits)</span>}
+            <div className={canEdit ? "notice notice-success" : "notice"} style={{ marginTop: 10 }}>
+              {selectedWorkOrder.completed_by_name
+                ? `Completed by ${selectedWorkOrder.completed_by_name}${selectedWorkOrder.completed_device_name ? ` on ${selectedWorkOrder.completed_device_name}` : ""}`
+                : canEdit
+                  ? role === "admin"
+                    ? "Administrator access: field records may be corrected, but only the claiming engineer can complete the job."
+                    : "Verified owner: this account and device may record and complete field work."
+                  : selectedWorkOrder.claimed_by_name
+                    ? `Read-only: claimed by ${selectedWorkOrder.claimed_by_name}.`
+                    : "Read-only until you claim this job."}
+            </div>
             <div className="sticky-actions">
-              <button type="button" onClick={onStartJob} disabled={evidenceFrozen}>
+              {selectedWorkOrder.can_claim && <button type="button" onClick={onClaimJob} disabled={claimBusy}>
+                {claimBusy ? "Claiming…" : "Claim this job"}
+              </button>}
+              {canEdit && <button type="button" onClick={onStartJob} disabled={evidenceFrozen}>
                 Start job
-              </button>
-              <button type="button" onClick={onCompleteJob} disabled={evidenceFrozen}>
+              </button>}
+              {canComplete && <button type="button" onClick={onCompleteJob} disabled={evidenceFrozen}>
                 {completionPolicy?.require_manager_approval && role === "engineer" ? "Submit for approval" : "Complete job"}
-              </button>
-              <button type="button" onClick={onPauseJob} disabled={evidenceFrozen || selectedWorkOrder.status !== "IN_PROGRESS"}>
+              </button>}
+              {canEdit && <button type="button" onClick={onPauseJob} disabled={evidenceFrozen || selectedWorkOrder.status !== "IN_PROGRESS"}>
                 Pause
-              </button>
+              </button>}
               {pendingApproval && ["admin", "manager"].includes(role) && <>
                 <button type="button" onClick={onApproveCompletion}>Approve &amp; lock</button>
                 <button type="button" onClick={onRejectCompletion}>Reject</button>
               </>}
             </div>
+            {canReleaseClaim && <div className="card" style={{ margin: "12px 0 0", background: "#f9fafb" }}>
+              <strong>Release engineer claim</strong>
+              <p className="muted" style={{ margin: "4px 0 8px" }}>Managers and administrators can return this job to the shared pool without changing its field records.</p>
+              <div className="two-col" style={{ alignItems: "stretch" }}>
+                <input
+                  value={releaseReason}
+                  onChange={(e) => setReleaseReason(e.target.value)}
+                  placeholder="Required release reason"
+                  minLength={3}
+                  disabled={releaseBusy}
+                />
+                <button type="button" onClick={() => void onReleaseClaim()} disabled={releaseBusy || releaseReason.trim().length < 3}>
+                  {releaseBusy ? "Releasing…" : "Release claim"}
+                </button>
+              </div>
+            </div>}
           </div>
 
           <div className="card">
@@ -445,6 +528,20 @@ export default function WorkOrderDetailsPage() {
               )}
             </div>
             <p className="muted">The drawn signature, signed name, and completion checklist are stored with the locked work order.</p>
+            {canComplete && <label style={{ display: "block", marginTop: 12 }}>
+              Verify with your account password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={completionPassword}
+                onChange={(e) => setCompletionPassword(e.target.value)}
+                placeholder="Required when completing this job"
+                disabled={evidenceFrozen}
+              />
+              <span className="muted" style={{ display: "block", marginTop: 4 }}>
+                This confirms the signed-in engineer is the person completing the work order.
+              </span>
+            </label>}
           </div>
 
           <div className="card">
@@ -596,10 +693,10 @@ export default function WorkOrderDetailsPage() {
             }}
           />
           <div className="photo-upload-actions" style={{ marginBottom: 12 }}>
-            <label htmlFor={qcCameraInputId} style={{ opacity: locked || qcBusy ? 0.5 : 1, pointerEvents: locked || qcBusy ? "none" : "auto" }}>
+            <label htmlFor={qcCameraInputId} style={{ opacity: evidenceFrozen || qcBusy ? 0.5 : 1, pointerEvents: evidenceFrozen || qcBusy ? "none" : "auto" }}>
               Take QC photo
             </label>
-            <label htmlFor={qcLibraryInputId} style={{ opacity: locked || qcBusy ? 0.5 : 1, pointerEvents: locked || qcBusy ? "none" : "auto" }}>
+            <label htmlFor={qcLibraryInputId} style={{ opacity: evidenceFrozen || qcBusy ? 0.5 : 1, pointerEvents: evidenceFrozen || qcBusy ? "none" : "auto" }}>
               Choose from library
             </label>
             {qcPhotoFile && (
@@ -638,18 +735,6 @@ export default function WorkOrderDetailsPage() {
             style={{ marginBottom: 8 }}
             disabled={evidenceFrozen || qcBusy}
           />
-          <select
-            value={qcForm.uploaded_by}
-            onChange={(e) => setQcForm((prev) => ({ ...prev, uploaded_by: e.target.value }))}
-            disabled={evidenceFrozen || qcBusy}
-          >
-            <option value="">Uploaded by (optional)</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.name}
-              </option>
-            ))}
-          </select>
           <button type="submit" style={{ marginTop: 8 }} disabled={evidenceFrozen || qcBusy}>
             {qcBusy ? "Working…" : "Add QC picture"}
           </button>

@@ -16,6 +16,7 @@ export interface AuthToken {
   token_type: "bearer";
   expires_in: number;
   user: User;
+  device_id?: string | null;
 }
 
 export interface Organization {
@@ -172,6 +173,18 @@ export interface WorkOrder {
   zip?: string | null;
   started_at?: string | null;
   machine_type?: string | null;
+  claimed_by_id?: number | null;
+  claimed_at?: string | null;
+  claimed_device_id?: number | null;
+  claim_version: number;
+  completed_by_id?: number | null;
+  completed_device_id?: number | null;
+  claimed_by_name?: string | null;
+  completed_by_name?: string | null;
+  completed_device_name?: string | null;
+  can_claim: boolean;
+  can_edit: boolean;
+  can_complete: boolean;
 }
 
 export interface CompletionPolicy {

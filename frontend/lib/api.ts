@@ -25,8 +25,95 @@ import {
   WorkOrderProfit
   ,WorkOrderPartRecommendation, WorkOrderVoiceNote, WorkOrderServiceContext, CompletionPolicy
 } from "@/types";
+import { ensureDeviceCredentials, getCurrentDeviceId, getCurrentDeviceToken } from "@/lib/device";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
+const OFFLINE_QUEUE_KEY = "opf_offline_queue";
+const CLAIM_VERSIONS_KEY = "opf_claim_versions";
+
+interface OfflineQueueItem {
+  path: string;
+  method: string;
+  body: string;
+  queuedAt: string;
+  userId: string;
+  deviceId: string;
+  workOrderId?: number;
+  claimVersion?: number;
+  blockedReason?: string;
+}
+
+function readJsonStorage<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    return JSON.parse(window.localStorage.getItem(key) || "") as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function readClaimVersions(): Record<string, number> {
+  return readJsonStorage<Record<string, number>>(CLAIM_VERSIONS_KEY, {});
+}
+
+function rememberWorkOrderClaimVersion(workOrder: Pick<WorkOrder, "id" | "claim_version">): void {
+  if (typeof window === "undefined" || !Number.isInteger(workOrder.id) || !Number.isInteger(workOrder.claim_version)) return;
+  const versions = readClaimVersions();
+  versions[String(workOrder.id)] = workOrder.claim_version;
+  window.localStorage.setItem(CLAIM_VERSIONS_KEY, JSON.stringify(versions));
+}
+
+function rememberClaimVersionsFromPayload(payload: unknown): void {
+  const rows = Array.isArray(payload) ? payload : [payload];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const candidate = row as { id?: unknown; claim_version?: unknown };
+    if (typeof candidate.id === "number" && typeof candidate.claim_version === "number") {
+      rememberWorkOrderClaimVersion(candidate as Pick<WorkOrder, "id" | "claim_version">);
+    }
+  }
+}
+
+function workOrderIdForRequest(path: string, init?: RequestInit): number | undefined {
+  const pathMatch = path.match(/^\/work-orders\/(\d+)(?:\/|$)/);
+  if (pathMatch) return Number(pathMatch[1]);
+  if (init?.body instanceof FormData) {
+    const value = init.body.get("work_order_id");
+    return value ? Number(value) || undefined : undefined;
+  }
+  if (typeof init?.body !== "string") return undefined;
+  try {
+    const payload = JSON.parse(init.body) as { work_order_id?: unknown };
+    return typeof payload.work_order_id === "number" ? payload.work_order_id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isOnlineOnlyMutation(path: string, method: string): boolean {
+  if (method === "GET") return false;
+  if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
+  if (/^\/work-orders\/\d+\/(claim|release|start|pause|complete|request-completion|approve-completion|reject-completion)$/.test(path)) return true;
+  return path === "/job-status";
+}
+
+function readOfflineQueue(): OfflineQueueItem[] {
+  return readJsonStorage<OfflineQueueItem[]>(OFFLINE_QUEUE_KEY, []);
+}
+
+function writeOfflineQueue(queue: OfflineQueueItem[]): void {
+  if (typeof window === "undefined") return;
+  if (queue.length) window.localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+  else window.localStorage.removeItem(OFFLINE_QUEUE_KEY);
+  window.dispatchEvent(new Event("opf-offline-queued"));
+}
+
+export function clearOfflineSession(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(OFFLINE_QUEUE_KEY);
+  window.localStorage.removeItem(CLAIM_VERSIONS_KEY);
+  window.dispatchEvent(new Event("opf-offline-queued"));
+}
 
 /** Origin for resolving relative upload paths (e.g. `/uploads/...`) to absolute URLs on phones. */
 export function getApiPublicOrigin(): string {
@@ -51,10 +138,14 @@ async function xhrUploadPartPhoto(
     throw new Error("You are offline. Connect to the network and try again.");
   }
   const token = typeof window !== "undefined" ? window.localStorage.getItem("opf_access_token") : null;
-  const userId = typeof window !== "undefined" ? window.localStorage.getItem("opf_user_id") : null;
   const headers: Record<string, string> = {};
-  if (token) headers.Authorization = `Bearer ${token}`;
-  else if (userId) headers["X-User-Id"] = userId;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+    const deviceToken = getCurrentDeviceToken();
+    if (deviceToken) headers["X-Device-Token"] = deviceToken;
+    const claimVersion = readClaimVersions()[String(workOrderId)];
+    if (Number.isInteger(claimVersion)) headers["X-Claim-Version"] = String(claimVersion);
+  }
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -97,13 +188,35 @@ async function xhrUploadPartPhoto(
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || "GET").toUpperCase();
+  const workOrderId = workOrderIdForRequest(path, init);
   if (typeof navigator !== "undefined" && !navigator.onLine) {
-    const method = init?.method || "GET";
+    const bodyContainsPassword = typeof init?.body === "string" && /password/i.test(init.body);
+    if (isOnlineOnlyMutation(path, method) || bodyContainsPassword) {
+      throw new Error("This verified action requires a network connection.");
+    }
     if (method !== "GET" && typeof window !== "undefined" && typeof init?.body === "string") {
-      const queue = JSON.parse(window.localStorage.getItem("opf_offline_queue") || "[]") as Array<{ path: string; method: string; body: string; queuedAt: string }>;
-      queue.push({ path, method, body: init.body, queuedAt: new Date().toISOString() });
-      window.localStorage.setItem("opf_offline_queue", JSON.stringify(queue));
-      window.dispatchEvent(new Event("opf-offline-queued"));
+      const userId = window.localStorage.getItem("opf_user_id");
+      const deviceId = getCurrentDeviceId();
+      if (!userId || !deviceId) {
+        throw new Error("Sign in on this registered device before saving offline work.");
+      }
+      const claimVersion = workOrderId === undefined ? undefined : readClaimVersions()[String(workOrderId)];
+      if (workOrderId !== undefined && !Number.isInteger(claimVersion)) {
+        throw new Error("Open and claim this work order online before saving offline work.");
+      }
+      const queue = readOfflineQueue();
+      queue.push({
+        path,
+        method,
+        body: init.body,
+        queuedAt: new Date().toISOString(),
+        userId,
+        deviceId,
+        workOrderId,
+        claimVersion
+      });
+      writeOfflineQueue(queue);
       return { queued: true } as T;
     }
     throw new Error("You are offline. This action will be available when connection returns.");
@@ -112,11 +225,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let authHeaders: Record<string, string> = {};
   if (typeof window !== "undefined") {
     const token = window.localStorage.getItem("opf_access_token");
-    const userId = window.localStorage.getItem("opf_user_id");
     if (token) {
       authHeaders = { Authorization: `Bearer ${token}` };
-    } else if (userId) {
-      authHeaders = { "X-User-Id": userId };
+      const deviceToken = getCurrentDeviceToken();
+      if (deviceToken) authHeaders["X-Device-Token"] = deviceToken;
+      if (method !== "GET" && workOrderId !== undefined) {
+        const claimVersion = readClaimVersions()[String(workOrderId)];
+        if (Number.isInteger(claimVersion)) authHeaders["X-Claim-Version"] = String(claimVersion);
+      }
     }
   }
   let res: Response;
@@ -152,34 +268,79 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(detail);
   }
-  return (await res.json()) as T;
+  const payload = (await res.json()) as T;
+  rememberClaimVersionsFromPayload(payload);
+  return payload;
 }
 
 export async function syncOfflineQueue(): Promise<number> {
   if (typeof window === "undefined" || !navigator.onLine) return 0;
-  const queue = JSON.parse(window.localStorage.getItem("opf_offline_queue") || "[]") as Array<{ path: string; method: string; body: string; queuedAt: string }>;
+  const userId = window.localStorage.getItem("opf_user_id");
+  const deviceId = getCurrentDeviceId();
+  if (!userId || !deviceId) return 0;
+  const queue = readOfflineQueue();
   if (!queue.length) return 0;
-  let synced = 0;
-  for (const item of queue) {
-    try { await request(item.path, { method: item.method, body: item.body }); synced += 1; } catch { break; }
+  const currentQueue = queue.filter((row) => row.userId === userId && row.deviceId === deviceId);
+  if (currentQueue.some((row) => row.workOrderId !== undefined)) {
+    try {
+      await request<WorkOrder[]>("/work-orders?scope=all&limit=100");
+    } catch {
+      return 0;
+    }
   }
-  const remaining = queue.slice(synced);
-  if (remaining.length) window.localStorage.setItem("opf_offline_queue", JSON.stringify(remaining));
-  else window.localStorage.removeItem("opf_offline_queue");
+  let remaining = [...queue];
+  let synced = 0;
+  for (const item of currentQueue) {
+    if (item.workOrderId !== undefined) {
+      const currentVersion = readClaimVersions()[String(item.workOrderId)];
+      if (!Number.isInteger(item.claimVersion) || currentVersion !== item.claimVersion) break;
+    }
+    try {
+      await request(item.path, {
+        method: item.method,
+        body: item.body,
+        headers: item.claimVersion === undefined ? undefined : { "X-Claim-Version": String(item.claimVersion) }
+      });
+      remaining = remaining.filter((row) => row !== item);
+      synced += 1;
+    } catch (error) {
+      item.blockedReason = error instanceof Error ? error.message : "Sync failed";
+      break;
+    }
+  }
+  writeOfflineQueue(remaining);
   return synced;
 }
 
-export function getOfflineQueue(): Array<{ path: string; method: string; queuedAt: string }> {
+export function getOfflineQueue(): Array<{ path: string; method: string; queuedAt: string; claimVersion?: number; stale: boolean; blockedReason?: string }> {
   if (typeof window === "undefined") return [];
-  return (JSON.parse(window.localStorage.getItem("opf_offline_queue") || "[]") as Array<{ path: string; method: string; body: string; queuedAt: string }>).map(({ path, method, queuedAt }) => ({ path, method, queuedAt }));
+  const userId = window.localStorage.getItem("opf_user_id");
+  const deviceId = getCurrentDeviceId();
+  const versions = readClaimVersions();
+  return readOfflineQueue()
+    .filter((row) => row.userId === userId && row.deviceId === deviceId)
+    .map(({ path, method, queuedAt, workOrderId, claimVersion, blockedReason }) => ({
+      path,
+      method,
+      queuedAt,
+      claimVersion,
+      stale: workOrderId !== undefined && versions[String(workOrderId)] !== claimVersion,
+      blockedReason
+    }));
 }
 
 export const api = {
   login: (email: string, password: string) => {
+    const device = ensureDeviceCredentials();
     const form = new URLSearchParams({ username: email, password });
     return request<AuthToken>("/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Device-Id": device.deviceId,
+        "X-Device-Token": device.deviceToken,
+        "X-Device-Name": device.deviceName
+      },
       body: form.toString()
     });
   },
@@ -228,6 +389,7 @@ export const api = {
   listWorkOrders: (params?: {
     skip?: number;
     limit?: number;
+    scope?: "all" | "mine" | "available";
     technician_id?: number;
     status?: string;
     city?: string;
@@ -239,6 +401,7 @@ export const api = {
     const query = new URLSearchParams();
     if (params?.skip !== undefined) query.set("skip", String(params.skip));
     if (params?.limit !== undefined) query.set("limit", String(params.limit));
+    if (params?.scope) query.set("scope", params.scope);
     if (params?.technician_id) query.set("technician_id", String(params.technician_id));
     if (params?.status) query.set("status", params.status);
     if (params?.city) query.set("city", params.city);
@@ -251,6 +414,13 @@ export const api = {
   },
   createWorkOrder: (payload: Partial<WorkOrder> & { ticket_number: string }) =>
     request<WorkOrder>("/work-orders", { method: "POST", body: JSON.stringify(payload) }),
+  claimWorkOrder: (workOrderId: number) =>
+    request<WorkOrder>(`/work-orders/${workOrderId}/claim`, { method: "POST", body: JSON.stringify({}) }),
+  releaseWorkOrder: (workOrderId: number, reason: string) =>
+    request<WorkOrder>(`/work-orders/${workOrderId}/release`, {
+      method: "POST",
+      body: JSON.stringify({ reason })
+    }),
   updateWorkOrder: (
     workOrderId: number,
     payload: Partial<Pick<WorkOrder, "status" | "revenue" | "engineer_id" | "assigned_user_id" | "labor_cost">>
@@ -355,14 +525,16 @@ export const api = {
     checklist_json?: string;
     customer_signature_name?: string;
     customer_signature_data?: string;
+    account_password?: string;
   } = {}) => request<WorkOrder>(`/work-orders/${workOrderId}/complete`, { method: "POST", body: JSON.stringify(payload) }),
   getLowStockAlerts: () => request<LowStockAlert[]>("/inventory/low-stock-alerts?limit=300"),
   getAbnormalUsage: () => request<AbnormalUsageRow[]>("/reports/abnormal-usage?limit=300")
   ,
   getPilotChecklist: () => request<PilotChecklist>("/pilot/checklist"),
-  listWorkOrderParts: (params?: { limit?: number }) => {
+  listWorkOrderParts: (params?: { limit?: number; work_order_id?: number }) => {
     const q = new URLSearchParams();
     q.set("limit", String(Math.min(100, Math.max(1, params?.limit ?? 100))));
+    if (params?.work_order_id) q.set("work_order_id", String(params.work_order_id));
     return request<WorkOrderPart[]>(`/work-order-parts?${q.toString()}`);
   }
 };

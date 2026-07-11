@@ -11,7 +11,7 @@ export default function MyVanInventoryPage() {
   useEffect(() => {
     const uid = window.localStorage.getItem("opf_user_id");
     if (!uid) {
-      setError("Please set X-User-Id in the top bar.");
+      setError("Sign in again to load your van inventory.");
       return;
     }
     api.getVanInventory(Number(uid)).then(setItems).catch(() => setError("Failed to load van inventory."));
