@@ -3,13 +3,20 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { WorkOrder, WorkOrderPartRecommendation } from "@/types";
+import { StockBalance, WorkOrder, WorkOrderPartRecommendation } from "@/types";
 
 export default function MyJobsPage() {
   const [jobs, setJobs] = useState<WorkOrder[]>([]);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
   const [recommendations, setRecommendations] = useState<WorkOrderPartRecommendation[]>([]);
+  const [vanStock, setVanStock] = useState<StockBalance[]>([]);
+  const [checked, setChecked] = useState<Record<number, boolean>>({});
+
+  useEffect(() => {
+    const userId = window.localStorage.getItem("opf_user_id");
+    if (userId) api.getVanInventory(Number(userId)).then(setVanStock).catch(() => setVanStock([]));
+  }, []);
 
   useEffect(() => {
     api
@@ -34,6 +41,7 @@ export default function MyJobsPage() {
 
   const showRecommendations = async (id: number) => {
     setSelected(id);
+    setChecked({});
     try { setRecommendations(await api.getWorkOrderPartRecommendations(id)); }
     catch (e) { setError(e instanceof Error ? e.message : "Unable to load recommendations."); }
   };
@@ -98,7 +106,7 @@ export default function MyJobsPage() {
               </Link>
               <button type="button" onClick={() => void showRecommendations(job.id)}>Parts assist</button>
             </div>
-            {selected === job.id && <div className="notice notice-success" style={{ marginTop: 10 }}><strong>AI parts assist</strong>{recommendations.length === 0 ? <div>No learned recommendation yet. Capture the parts used to train this model.</div> : <div style={{ display: "grid", gap: 6, marginTop: 6 }}>{recommendations.slice(0, 5).map((rec) => <div key={rec.part.id}><b>{rec.part.part_number}</b> · carry {rec.recommended_quantity} · {rec.reason}</div>)}</div>}</div>}
+            {selected === job.id && <div className="notice notice-success" style={{ marginTop: 10 }}><strong>AI parts assist · departure checklist</strong>{recommendations.length === 0 ? <div>No learned recommendation yet. Capture the parts used to train this model.</div> : <div style={{ display: "grid", gap: 8, marginTop: 8 }}>{recommendations.slice(0, 5).map((rec) => { const available = vanStock.filter((row) => row.part_id === rec.part.id).reduce((sum, row) => sum + row.quantity, 0); const shortage = Math.max(0, rec.recommended_quantity - available); return <label key={rec.part.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}><input type="checkbox" checked={Boolean(checked[rec.part.id])} onChange={(e) => setChecked((prev) => ({ ...prev, [rec.part.id]: e.target.checked }))} style={{ width: 20, minHeight: 20, marginTop: 2 }} /><span><b>{rec.part.part_number}</b> · carry {rec.recommended_quantity} · van stock {available} {shortage > 0 ? <span className="danger">· request {shortage} from warehouse</span> : <span style={{ color: "#15803d" }}>· ready</span>}<br /><span className="muted">{rec.reason}</span></span></label>; })}</div>}</div>}
           </div>
         ))}
       </div>
