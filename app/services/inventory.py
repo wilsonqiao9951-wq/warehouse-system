@@ -2,8 +2,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import InventoryTransaction, Part, TransactionType, User, Warehouse, WorkOrder, WorkOrderPart
-from app.schemas import InventoryTransactionCreate, StockBalance, WorkOrderPartCreate
+from app.models import InventoryTransaction, Part, StorageLocation, TransactionType, User, Warehouse, WorkOrder, WorkOrderPart
+from app.schemas import InventoryTransactionCreate, LocationStockBalance, StockBalance, WorkOrderPartCreate
 
 
 def create_transaction(db: Session, payload: InventoryTransactionCreate) -> InventoryTransaction:
@@ -21,11 +21,17 @@ def create_transaction(db: Session, payload: InventoryTransactionCreate) -> Inve
     if payload.transaction_type == TransactionType.TRANSFER:
         if not payload.from_warehouse_id or not payload.to_warehouse_id:
             raise HTTPException(status_code=400, detail="Transfer requires both from_warehouse_id and to_warehouse_id")
-        if payload.from_warehouse_id == payload.to_warehouse_id:
+        if payload.from_warehouse_id == payload.to_warehouse_id and (
+            not payload.from_location_id or not payload.to_location_id or payload.from_location_id == payload.to_location_id
+        ):
             raise HTTPException(status_code=400, detail="Transfer warehouses cannot be the same")
 
     if payload.from_warehouse_id:
-        current = get_stock_quantity(db, payload.part_id, payload.from_warehouse_id)
+        current = (
+            get_location_stock_quantity(db, payload.part_id, payload.from_location_id)
+            if payload.from_location_id
+            else get_stock_quantity(db, payload.part_id, payload.from_warehouse_id)
+        )
         if current < payload.quantity:
             raise HTTPException(status_code=400, detail=f"Insufficient stock. Available: {current}")
 
@@ -81,6 +87,33 @@ def get_stock_quantity(db: Session, part_id: int, warehouse_id: int) -> int:
         if tx.from_warehouse_id == warehouse_id:
             quantity -= tx.quantity
     return quantity
+
+
+def get_location_stock_quantity(db: Session, part_id: int, location_id: int) -> int:
+    transactions = db.scalars(select(InventoryTransaction).where(InventoryTransaction.part_id == part_id)).all()
+    return sum(
+        (tx.quantity if tx.to_location_id == location_id else 0)
+        - (tx.quantity if tx.from_location_id == location_id else 0)
+        for tx in transactions
+    )
+
+
+def get_location_stock_balances(db: Session, warehouse_id: int | None = None) -> list[LocationStockBalance]:
+    locations_query = select(StorageLocation).order_by(StorageLocation.code.asc())
+    if warehouse_id is not None:
+        locations_query = locations_query.where(StorageLocation.warehouse_id == warehouse_id)
+    locations = db.scalars(locations_query).all()
+    parts = db.scalars(select(Part)).all()
+    warehouses = {item.id: item for item in db.scalars(select(Warehouse)).all()}
+    return [
+        LocationStockBalance(
+            part_id=part.id, part_number=part.part_number, part_name=part.name,
+            warehouse_id=location.warehouse_id, warehouse_name=warehouses[location.warehouse_id].name,
+            location_id=location.id, location_code=location.code, location_name=location.name,
+            quantity=get_location_stock_quantity(db, part.id, location.id),
+        )
+        for location in locations for part in parts
+    ]
 
 
 def get_stock_balances(db: Session) -> list[StockBalance]:
@@ -149,6 +182,15 @@ def _validate_transaction_entities(db: Session, payload: InventoryTransactionCre
 
     if payload.to_warehouse_id and not db.get(Warehouse, payload.to_warehouse_id):
         raise HTTPException(status_code=404, detail="Destination warehouse not found")
+
+    for field, warehouse_id in (("from_location_id", payload.from_warehouse_id), ("to_location_id", payload.to_warehouse_id)):
+        location_id = getattr(payload, field)
+        if location_id:
+            location = db.get(StorageLocation, location_id)
+            if not location:
+                raise HTTPException(status_code=404, detail=f"{field} not found")
+            if location.warehouse_id != warehouse_id:
+                raise HTTPException(status_code=400, detail=f"{field} does not belong to the selected warehouse")
 
     if payload.user_id and not db.get(User, payload.user_id):
         raise HTTPException(status_code=404, detail="User not found")

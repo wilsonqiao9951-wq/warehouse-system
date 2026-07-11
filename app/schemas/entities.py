@@ -250,6 +250,8 @@ class InventoryTransactionCreate(BaseModel):
     quantity: int = Field(gt=0)
     from_warehouse_id: int | None = None
     to_warehouse_id: int | None = None
+    from_location_id: int | None = None
+    to_location_id: int | None = None
     work_order_id: int | None = None
     user_id: int | None = None
     unit_cost: float = 0.0
@@ -264,6 +266,18 @@ class InventoryTransactionRead(InventoryTransactionCreate):
 
     class Config:
         from_attributes = True
+
+
+class LocationStockBalance(BaseModel):
+    part_id: int
+    part_number: str
+    part_name: str
+    warehouse_id: int
+    warehouse_name: str
+    location_id: int
+    location_code: str
+    location_name: str | None = None
+    quantity: int
 
 
 class WorkOrderPartCreate(BaseModel):

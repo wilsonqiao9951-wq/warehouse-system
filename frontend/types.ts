@@ -85,6 +85,18 @@ export interface StorageLocation {
   is_active: boolean;
 }
 
+export interface LocationStockBalance {
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  warehouse_id: number;
+  warehouse_name: string;
+  location_id: number;
+  location_code: string;
+  location_name?: string | null;
+  quantity: number;
+}
+
 export interface Part {
   id: number;
   part_number: string;

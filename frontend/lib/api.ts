@@ -2,6 +2,7 @@ import {
   EngineerDashboard,
   JobStatus,
   LowStockAlert,
+  LocationStockBalance,
   Organization,
   PilotChecklist,
   Part,
@@ -233,6 +234,8 @@ export const api = {
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),
+  listLocationBalances: (warehouseId?: number) =>
+    request<LocationStockBalance[]>(`/inventory/location-balances${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   getVanInventory: (userId: number) =>
     request<StockBalance[]>(`/employees/${userId}/van-inventory?limit=500`),
   usePartOnWorkOrder: (

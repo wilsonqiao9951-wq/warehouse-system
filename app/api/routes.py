@@ -45,6 +45,7 @@ from app.schemas import (
     ReturnEquipmentRead,
     InventoryTransactionCreate,
     LowStockAlert,
+    LocationStockBalance,
     WorkOrderFlowAction,
     InventoryTransactionRead,
     ImportBatchRead,
@@ -81,6 +82,7 @@ from app.services.inventory import (
     get_employee_van_inventory,
     get_stock_quantity,
     get_stock_balances,
+    get_location_stock_balances,
     get_work_order_parts_cost,
     use_part_on_work_order,
 )
@@ -726,6 +728,18 @@ def inventory_balances(
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     rows = get_stock_balances(db)
     return rows[skip : skip + limit]
+
+
+@router.get("/inventory/location-balances", response_model=list[LocationStockBalance])
+def inventory_location_balances(
+    warehouse_id: int | None = None,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    if warehouse_id is not None and not db.get(Warehouse, warehouse_id):
+        raise HTTPException(status_code=404, detail="Warehouse not found")
+    return get_location_stock_balances(db, warehouse_id)
 
 
 @router.get("/employees/{user_id}/van-inventory", response_model=list[StockBalance])

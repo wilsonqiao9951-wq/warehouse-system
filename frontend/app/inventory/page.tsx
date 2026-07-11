@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { LowStockAlert, StockBalance, User } from "@/types";
+import { LocationStockBalance, LowStockAlert, StockBalance, User } from "@/types";
 import { AppRole, getCurrentRole } from "@/lib/role";
 import ManagerShell from "@/components/manager-shell";
 
@@ -13,6 +13,7 @@ export default function InventoryPage() {
   const [vanInventory, setVanInventory] = useState<StockBalance[]>([]);
   const [alerts, setAlerts] = useState(0);
   const [lowStockRows, setLowStockRows] = useState<LowStockAlert[]>([]);
+  const [locationBalances, setLocationBalances] = useState<LocationStockBalance[]>([]);
   const [role, setRole] = useState<AppRole>("admin");
 
   useEffect(() => {
@@ -37,6 +38,7 @@ export default function InventoryPage() {
         setAlerts(0);
         setLowStockRows([]);
       });
+    if (role !== "engineer") api.listLocationBalances().then(setLocationBalances).catch(() => setLocationBalances([]));
   }, [role]);
   useEffect(() => {
     if (role === "engineer") {
@@ -162,6 +164,16 @@ export default function InventoryPage() {
         </div>
       </div>
     </section>
+    {role !== "engineer" && locationBalances.some((row) => row.quantity !== 0) && (
+      <div className="card">
+        <h3>Stock by Storage Location</h3>
+        <div className="table-wrap"><table><thead><tr><th>Warehouse</th><th>Location</th><th>Item</th><th>Qty</th></tr></thead>
+          <tbody>{locationBalances.filter((row) => row.quantity !== 0).map((row) => (
+            <tr key={`${row.location_id}-${row.part_id}`}><td>{row.warehouse_name}</td><td>{row.location_code}</td><td>{row.part_number} — {row.part_name}</td><td>{row.quantity}</td></tr>
+          ))}</tbody>
+        </table></div>
+      </div>
+    )}
     </ManagerShell>
   );
 }
