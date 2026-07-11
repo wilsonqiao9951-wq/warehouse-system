@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
 import { JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart } from "@/types";
+import { SignaturePad } from "@/components/signature-pad";
 
 export default function WorkOrderDetailsPage() {
   const params = useSearchParams();
@@ -32,6 +33,7 @@ export default function WorkOrderDetailsPage() {
   const [completion, setCompletion] = useState({
     repairResult: "",
     signatureName: "",
+    signatureData: "",
     equipmentSafe: false,
     siteClean: false,
     customerBriefed: false
@@ -73,6 +75,24 @@ export default function WorkOrderDetailsPage() {
   );
   const locked = Boolean(selectedWorkOrder?.is_locked);
 
+  useEffect(() => {
+    if (!selectedWorkOrder) return;
+    let checklist: Record<string, boolean> = {};
+    try {
+      checklist = selectedWorkOrder.checklist_json ? JSON.parse(selectedWorkOrder.checklist_json) : {};
+    } catch {
+      checklist = {};
+    }
+    setCompletion({
+      repairResult: selectedWorkOrder.repair_result || "",
+      signatureName: selectedWorkOrder.customer_signature_name || "",
+      signatureData: selectedWorkOrder.customer_signature_data || "",
+      equipmentSafe: Boolean(checklist.equipment_safe),
+      siteClean: Boolean(checklist.site_clean),
+      customerBriefed: Boolean(checklist.customer_briefed)
+    });
+  }, [selectedWorkOrder]);
+
   const partName = (id: number) => partsCatalog.find((p) => p.id === id)?.name || `Part #${id}`;
 
   const reloadDetails = useCallback(async () => {
@@ -113,14 +133,15 @@ export default function WorkOrderDetailsPage() {
 
   const onCompleteJob = async () => {
     if (!currentWorkOrderId) return;
-    if (!completion.repairResult.trim() || !completion.signatureName.trim()) {
-      setNotice({ type: "error", text: "Repair result and customer signature name are required." });
+    if (!completion.repairResult.trim() || !completion.signatureName.trim() || !completion.signatureData) {
+      setNotice({ type: "error", text: "Repair result, customer name, and drawn signature are required." });
       return;
     }
     try {
       await api.completeJob(currentWorkOrderId, {
         repair_result: completion.repairResult.trim(),
         customer_signature_name: completion.signatureName.trim(),
+        customer_signature_data: completion.signatureData,
         checklist_json: JSON.stringify({
           equipment_safe: completion.equipmentSafe,
           site_clean: completion.siteClean,
@@ -307,7 +328,23 @@ export default function WorkOrderDetailsPage() {
                 disabled={locked}
               />
             </label>
-            <p className="muted">The signed name and completion checklist are stored with the locked work order.</p>
+            <div style={{ marginTop: 12 }}>
+              {locked && completion.signatureData ? (
+                // The data URL is validated by the API as a bounded PNG before storage.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={completion.signatureData}
+                  alt={`Signature of ${completion.signatureName || "customer"}`}
+                  style={{ width: "100%", maxHeight: 180, objectFit: "contain", border: "1px solid #cbd5e1", borderRadius: 10 }}
+                />
+              ) : (
+                <SignaturePad
+                  disabled={locked}
+                  onChange={(signatureData) => setCompletion((prev) => ({ ...prev, signatureData }))}
+                />
+              )}
+            </div>
+            <p className="muted">The drawn signature, signed name, and completion checklist are stored with the locked work order.</p>
           </div>
 
           <div className="card">

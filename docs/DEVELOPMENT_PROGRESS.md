@@ -30,7 +30,24 @@ Verification:
 
 Next Phase 1 work:
 
-- Drawn customer signature canvas and immutable signature artifact.
 - Voice-note recording/upload and transcription-ready metadata.
 - Customer/device history in the technician workbench.
 - Completion-policy configuration per organization/template.
+
+## 2026-07-11 — Phase 1 drawn customer signature
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Touch- and pointer-compatible customer signature canvas.
+- Clear and re-sign controls before completion.
+- Required drawn signature in the mobile completion workflow.
+- Server-side PNG data URL and 1.5 MB size validation.
+- Read-only signature, checklist, and repair-result display after work-order locking.
+- API regression coverage for malformed signature rejection.
+
+Verification:
+
+- Targeted backend flow: 3 tests passed.
+- Frontend: Next.js production build passed (27 static pages).

@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
 
@@ -408,6 +408,17 @@ class WorkOrderFlowAction(BaseModel):
     checklist_json: str | None = None
     customer_signature_name: str | None = None
     customer_signature_data: str | None = None
+
+    @field_validator("customer_signature_data")
+    @classmethod
+    def validate_signature_data(cls, value: str | None):
+        if value is None:
+            return value
+        if not value.startswith("data:image/png;base64,"):
+            raise ValueError("Customer signature must be a PNG data URL")
+        if len(value) > 1_500_000:
+            raise ValueError("Customer signature exceeds the 1.5 MB limit")
+        return value
 
 
 class LowStockAlert(BaseModel):

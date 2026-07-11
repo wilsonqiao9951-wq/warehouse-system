@@ -97,3 +97,17 @@ def test_work_order_filters_low_stock_and_abnormal_reports(client):
     assert abnormal.status_code == 200
     if abnormal.json():
         assert any("90th percentile" in row["reason"] or "historical average" in row["reason"] for row in abnormal.json())
+
+
+def test_completion_rejects_invalid_signature_data(client):
+    tech = _mk_user(client, "tech-signature")
+    wo = _mk_wo(client, "WOF-SIGNATURE", tech)
+    client.post(f"/api/work-orders/{wo}/start", json={})
+
+    response = client.post(
+        f"/api/work-orders/{wo}/complete",
+        json={"customer_signature_name": "Customer", "customer_signature_data": "not-an-image"},
+    )
+
+    assert response.status_code == 422
+    assert "PNG data URL" in response.text
