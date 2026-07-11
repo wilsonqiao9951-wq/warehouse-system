@@ -21,6 +21,7 @@ import {
   InvitationCreated,
   InvitationInfo,
   WorkOrderProfit
+  ,WorkOrderPartRecommendation
 } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
@@ -276,6 +277,7 @@ export const api = {
     });
   },
   getWorkOrderProfit: (workOrderId: number) => request<WorkOrderProfit>(`/work-orders/${workOrderId}/profit`),
+  getWorkOrderPartRecommendations: (workOrderId: number) => request<WorkOrderPartRecommendation[]>(`/work-orders/${workOrderId}/part-recommendations`),
   getEngineerDashboard: (userId: number) => request<EngineerDashboard>(`/dashboard/engineers/${userId}`),
   listQCPictures: (workOrderId?: number) =>
     request<QCPicture[]>(`/qc-pictures${workOrderId ? `?work_order_id=${workOrderId}` : ""}`),

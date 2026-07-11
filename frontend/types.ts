@@ -149,6 +149,15 @@ export interface WorkOrder {
   state?: string | null;
   zip?: string | null;
   started_at?: string | null;
+  machine_type?: string | null;
+}
+
+export interface WorkOrderPartRecommendation {
+  part: Part;
+  recommended_quantity: number;
+  usage_count: number;
+  total_quantity: number;
+  reason: string;
 }
 
 export interface WorkOrderPart {
