@@ -23,7 +23,7 @@ import {
   InvitationCreated,
   InvitationInfo,
   WorkOrderProfit
-  ,WorkOrderPartRecommendation, WorkOrderVoiceNote
+  ,WorkOrderPartRecommendation, WorkOrderVoiceNote, WorkOrderServiceContext
 } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
@@ -244,7 +244,7 @@ export const api = {
     if (params?.q) query.set("q", params.q);
     if (params?.date_from) query.set("date_from", params.date_from);
     if (params?.date_to) query.set("date_to", params.date_to);
-    if (!query.has("limit")) query.set("limit", "200");
+    if (!query.has("limit")) query.set("limit", "100");
     return request<WorkOrder[]>(`/work-orders?${query.toString()}`);
   },
   createWorkOrder: (payload: Partial<WorkOrder> & { ticket_number: string }) =>
@@ -253,13 +253,15 @@ export const api = {
     workOrderId: number,
     payload: Partial<Pick<WorkOrder, "status" | "revenue" | "engineer_id" | "assigned_user_id" | "labor_cost">>
   ) => request<WorkOrder>(`/work-orders/${workOrderId}`, { method: "PATCH", body: JSON.stringify(payload) }),
-  listUsers: () => request<User[]>("/users?limit=200"),
+  listUsers: () => request<User[]>("/users?limit=100"),
   listEngineers: async () => {
-    const users = await request<User[]>("/users?limit=200");
+    const users = await request<User[]>("/users?limit=100");
     return users.filter((u) => u.role === "engineer");
   },
-  listParts: () => request<Part[]>("/parts?limit=200"),
-  listWarehouses: () => request<Warehouse[]>("/warehouses?limit=200"),
+  listParts: () => request<Part[]>("/parts?limit=100"),
+  listWarehouses: () => request<Warehouse[]>("/warehouses?limit=100"),
+  getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
+    request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),
   listStorageLocations: (warehouseId?: number) =>
     request<StorageLocation[]>(`/storage-locations${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   scanInventory: (payload: { barcode?: string; part_number?: string; quantity?: number; warehouse_id?: number; location_id?: number }) =>

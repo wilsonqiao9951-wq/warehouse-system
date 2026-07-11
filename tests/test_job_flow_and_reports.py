@@ -136,3 +136,59 @@ def test_voice_note_upload_and_listing(client):
         files={"file": ("fake.webm", b"not audio", "audio/webm")},
     )
     assert invalid.status_code == 400
+
+
+def test_customer_equipment_service_context_and_parts_history(client):
+    tech = _mk_user(client, "tech-history")
+    customer = client.post("/api/customers", json={
+        "name": "Northwind Plant", "account_number": "NW-1", "contact_name": "Sam", "phone": "555-0100"
+    }).json()
+    equipment = client.post("/api/equipment", json={
+        "customer_id": customer["id"], "asset_tag": "NW-CHILLER-1", "manufacturer": "ACME", "model": "ACME-9000", "serial_number": "SN-9"
+    }).json()
+    other_equipment = client.post("/api/equipment", json={
+        "customer_id": customer["id"], "asset_tag": "NW-CHILLER-2", "model": "ACME-9000"
+    }).json()
+    van = _mk_wh(client, "Van-history", assigned_user_id=tech)
+    part = _mk_part(client, "HIST-001")
+    client.post("/api/inventory/transactions", json={
+        "part_id": part, "transaction_type": "inbound", "quantity": 5, "to_warehouse_id": van
+    })
+
+    previous = client.post("/api/work-orders", json={
+        "ticket_number": "HISTORY-OLD", "engineer_id": tech, "customer_id": customer["id"], "equipment_id": equipment["id"],
+        "job_type": "repair", "problem_description": "Unit would not cool"
+    }).json()
+    client.post(f"/api/work-orders/{previous['id']}/use-part", json={
+        "work_order_id": previous["id"], "part_id": part, "warehouse_id": van, "user_id": tech, "quantity": 2
+    })
+    client.post(f"/api/work-orders/{previous['id']}/complete", json={"repair_result": "Replaced filter and tested cooling"})
+
+    unrelated = client.post("/api/work-orders", json={
+        "ticket_number": "HISTORY-OTHER", "engineer_id": tech, "customer_id": customer["id"], "equipment_id": other_equipment["id"]
+    }).json()
+    client.post(f"/api/work-orders/{unrelated['id']}/complete", json={"repair_result": "Other asset"})
+
+    current = client.post("/api/work-orders", json={
+        "ticket_number": "HISTORY-NOW", "engineer_id": tech, "customer_id": customer["id"], "equipment_id": equipment["id"]
+    }).json()
+    context = client.get(f"/api/work-orders/{current['id']}/service-context")
+    assert context.status_code == 200
+    body = context.json()
+    assert body["customer"]["account_number"] == "NW-1"
+    assert body["equipment"]["asset_tag"] == "NW-CHILLER-1"
+    assert [row["ticket_number"] for row in body["history"]] == ["HISTORY-OLD"]
+    assert body["history"][0]["parts_used"] == [{"part_number": "HIST-001", "name": "HIST-001", "quantity": 2}]
+
+
+def test_work_order_rejects_customer_equipment_mismatch(client):
+    tech = _mk_user(client, "tech-history-mismatch")
+    first = client.post("/api/customers", json={"name": "First customer", "account_number": "FIRST"}).json()
+    second = client.post("/api/customers", json={"name": "Second customer", "account_number": "SECOND"}).json()
+    equipment = client.post("/api/equipment", json={"customer_id": first["id"], "asset_tag": "FIRST-ASSET", "model": "Model X"}).json()
+
+    response = client.post("/api/work-orders", json={
+        "ticket_number": "BAD-LINK", "engineer_id": tech, "customer_id": second["id"], "equipment_id": equipment["id"]
+    })
+    assert response.status_code == 400
+    assert "does not belong" in response.text

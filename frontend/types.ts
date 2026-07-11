@@ -138,6 +138,8 @@ export interface Part {
 
 export interface WorkOrder {
   id: number;
+  customer_id?: number | null;
+  equipment_id?: number | null;
   ticket_number: string;
   wo_number?: string | null;
   store_name?: string | null;
@@ -166,6 +168,30 @@ export interface WorkOrder {
   zip?: string | null;
   started_at?: string | null;
   machine_type?: string | null;
+}
+
+export interface Customer {
+  id: number; name: string; account_number?: string | null; contact_name?: string | null;
+  email?: string | null; phone?: string | null; address?: string | null; city?: string | null;
+  state?: string | null; zip?: string | null; notes?: string | null;
+}
+
+export interface Equipment {
+  id: number; customer_id?: number | null; asset_tag?: string | null; manufacturer?: string | null;
+  model: string; serial_number?: string | null; equipment_type?: string | null; location?: string | null;
+  install_date?: string | null; notes?: string | null;
+}
+
+export interface ServiceHistoryItem {
+  id: number; ticket_number: string; schedule_date?: string | null; job_type?: string | null;
+  problem_description?: string | null; repair_result?: string | null; status: string;
+  completed_at?: string | null; engineer_id?: number | null;
+  parts_used: Array<{ part_number: string; name: string; quantity: number }>;
+}
+
+export interface WorkOrderServiceContext {
+  customer?: Customer | null; equipment?: Equipment | null; fallback_customer_name?: string | null;
+  fallback_contact_phone?: string | null; fallback_equipment_model?: string | null; history: ServiceHistoryItem[];
 }
 
 export interface WorkOrderPartRecommendation {

@@ -194,6 +194,8 @@ class ImportBatchRead(BaseModel):
 
 
 class WorkOrderCreate(BaseModel):
+    customer_id: int | None = None
+    equipment_id: int | None = None
     ticket_number: str | None = None
     wo_number: str | None = None
     schedule_date: date | None = None
@@ -223,6 +225,8 @@ class WorkOrderCreate(BaseModel):
 
 
 class WorkOrderUpdate(BaseModel):
+    customer_id: int | None = None
+    equipment_id: int | None = None
     ticket_number: str | None = None
     wo_number: str | None = None
     schedule_date: date | None = None
@@ -488,6 +492,81 @@ class QCPictureRead(QCPictureCreate):
 
     class Config:
         from_attributes = True
+
+
+class CustomerCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    account_number: str | None = Field(default=None, max_length=120)
+    contact_name: str | None = Field(default=None, max_length=255)
+    email: str | None = Field(default=None, max_length=255)
+    phone: str | None = Field(default=None, max_length=50)
+    address: str | None = Field(default=None, max_length=500)
+    city: str | None = Field(default=None, max_length=120)
+    state: str | None = Field(default=None, max_length=120)
+    zip: str | None = Field(default=None, max_length=20)
+    notes: str | None = None
+
+
+class CustomerRead(CustomerCreate):
+    id: int
+    organization_id: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class EquipmentCreate(BaseModel):
+    customer_id: int | None = None
+    asset_tag: str | None = Field(default=None, max_length=120)
+    manufacturer: str | None = Field(default=None, max_length=160)
+    model: str = Field(min_length=1, max_length=255)
+    serial_number: str | None = Field(default=None, max_length=160)
+    equipment_type: str | None = Field(default=None, max_length=160)
+    location: str | None = Field(default=None, max_length=255)
+    install_date: date | None = None
+    notes: str | None = None
+
+
+class EquipmentRead(EquipmentCreate):
+    id: int
+    organization_id: int
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ServiceHistoryPart(BaseModel):
+    part_number: str
+    name: str
+    quantity: int
+
+
+class ServiceHistoryItem(BaseModel):
+    id: int
+    ticket_number: str
+    schedule_date: date | None = None
+    job_type: str | None = None
+    problem_description: str | None = None
+    repair_result: str | None = None
+    status: str
+    completed_at: datetime | None = None
+    engineer_id: int | None = None
+    parts_used: list[ServiceHistoryPart] = Field(default_factory=list)
+
+
+class WorkOrderServiceContext(BaseModel):
+    customer: CustomerRead | None = None
+    equipment: EquipmentRead | None = None
+    fallback_customer_name: str | None = None
+    fallback_contact_phone: str | None = None
+    fallback_equipment_model: str | None = None
+    history: list[ServiceHistoryItem] = Field(default_factory=list)
 
 
 class WorkOrderVoiceNoteRead(BaseModel):

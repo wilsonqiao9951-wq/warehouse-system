@@ -1,6 +1,8 @@
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.database import Base
+from app.core.rbac import TENANT_MODELS
 from app.models import Organization, Part, User, UserRole, Warehouse, WorkOrder
 
 
@@ -61,6 +63,9 @@ def test_core_api_isolates_organizations(client):
             "/api/work-orders",
             json={"ticket_number": "ORG1-WO", "assigned_user_id": first_admin["id"]},
         ).json()
+        first_customer = client.post(
+            "/api/customers", json={"name": "Organization One Customer", "account_number": "ORG1-CUSTOMER"}
+        ).json()
 
         with client.app.state.testing_session_local() as db:
             second_organization = Organization(id=2, name="Second Organization", slug="second")
@@ -107,5 +112,24 @@ def test_core_api_isolates_organizations(client):
             json={"ticket_number": "ORG2-BAD-WO", "assigned_user_id": first_admin["id"]},
         )
         assert cross_org_assignment.status_code == 400
+
+        cross_org_customer = client.post(
+            "/api/work-orders",
+            headers=second_headers,
+            json={"ticket_number": "ORG2-BAD-CUSTOMER", "customer_id": first_customer["id"]},
+        )
+        assert cross_org_customer.status_code == 400
+
+        cross_org_context = client.get(
+            f"/api/work-orders/{first_work_order['id']}/service-context", headers=second_headers
+        )
+        assert cross_org_context.status_code == 404
     finally:
         settings.rbac_enforce = False
+def test_all_tenant_models_are_registered_for_automatic_scope():
+    missing = [
+        mapper.class_.__name__
+        for mapper in Base.registry.mappers
+        if hasattr(mapper.class_, "organization_id") and mapper.class_ not in TENANT_MODELS
+    ]
+    assert missing == []

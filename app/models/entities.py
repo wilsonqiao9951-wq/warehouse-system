@@ -144,11 +144,59 @@ class PartMachineAssociation(Base):
     part = relationship("Part")
 
 
+class Customer(Base):
+    __tablename__ = "customers"
+    __table_args__ = (UniqueConstraint("organization_id", "account_number", name="uq_customers_org_account"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    account_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    zip: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    organization = relationship("Organization")
+
+
+class Equipment(Base):
+    __tablename__ = "equipment"
+    __table_args__ = (UniqueConstraint("organization_id", "asset_tag", name="uq_equipment_org_asset_tag"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
+    asset_tag: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    serial_number: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    equipment_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    install_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    customer = relationship("Customer")
+    organization = relationship("Organization")
+
+
 class WorkOrder(Base):
     __tablename__ = "work_orders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
+    equipment_id: Mapped[int | None] = mapped_column(ForeignKey("equipment.id"), nullable=True, index=True)
     ticket_number: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     wo_number: Mapped[str | None] = mapped_column(String(120), unique=True, nullable=True)
     schedule_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -185,6 +233,8 @@ class WorkOrder(Base):
     engineer = relationship("User", foreign_keys=[engineer_id])
     assistant = relationship("User", foreign_keys=[assistant_id])
     organization = relationship("Organization")
+    customer = relationship("Customer")
+    equipment = relationship("Equipment")
 
 
 class InventoryTransaction(Base):

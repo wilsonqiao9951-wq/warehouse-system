@@ -4,10 +4,9 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from "rea
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
-import { JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart } from "@/types";
+import { JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart, WorkOrderServiceContext, WorkOrderVoiceNote } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
 import { VoiceRecorder } from "@/components/voice-recorder";
-import { WorkOrderVoiceNote } from "@/types";
 
 export default function WorkOrderDetailsPage() {
   const params = useSearchParams();
@@ -22,6 +21,7 @@ export default function WorkOrderDetailsPage() {
   const [returnEquipments, setReturnEquipments] = useState<ReturnEquipment[]>([]);
   const [woParts, setWoParts] = useState<WorkOrderPart[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<WorkOrderVoiceNote[]>([]);
+  const [serviceContext, setServiceContext] = useState<WorkOrderServiceContext | null>(null);
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const qcCameraInputId = useId();
@@ -122,6 +122,14 @@ export default function WorkOrderDetailsPage() {
   useEffect(() => {
     void reloadDetails();
   }, [reloadDetails]);
+
+  useEffect(() => {
+    if (!currentWorkOrderId) return;
+    setServiceContext(null);
+    api.getWorkOrderServiceContext(currentWorkOrderId, 5)
+      .then(setServiceContext)
+      .catch(() => setServiceContext({ history: [] }));
+  }, [currentWorkOrderId]);
 
   const onStartJob = async () => {
     if (!currentWorkOrderId) return;
@@ -277,9 +285,6 @@ export default function WorkOrderDetailsPage() {
               {selectedWorkOrder.outlet_name || selectedWorkOrder.store_name || "Outlet"} ·{" "}
               {selectedWorkOrder.job_type || "—"}
             </p>
-            <p className="muted" style={{ margin: "4px 0" }}>
-              Revenue ${Number(selectedWorkOrder.revenue).toFixed(2)}
-            </p>
             {locked && <span className="job-card__lock">Completed — locked (no edits)</span>}
             <div className="sticky-actions">
               <button type="button" onClick={onStartJob} disabled={locked}>
@@ -295,6 +300,42 @@ export default function WorkOrderDetailsPage() {
           </div>
 
           <div className="card">
+            <h3 className="section-title">Customer &amp; equipment</h3>
+            <div className="two-col">
+              <div>
+                <strong>{serviceContext?.customer?.name || serviceContext?.fallback_customer_name || "Customer not linked"}</strong>
+                <div className="muted">{serviceContext?.customer?.contact_name || "No contact name"}</div>
+                <div className="muted">{serviceContext?.customer?.phone || serviceContext?.fallback_contact_phone || "No phone"}</div>
+                {serviceContext?.customer?.account_number && <div className="muted">Account {serviceContext.customer.account_number}</div>}
+              </div>
+              <div>
+                <strong>{serviceContext?.equipment?.model || serviceContext?.fallback_equipment_model || "Equipment not linked"}</strong>
+                <div className="muted">{[serviceContext?.equipment?.manufacturer, serviceContext?.equipment?.equipment_type].filter(Boolean).join(" · ") || "No equipment profile"}</div>
+                {serviceContext?.equipment?.asset_tag && <div className="muted">Asset {serviceContext.equipment.asset_tag}</div>}
+                {serviceContext?.equipment?.serial_number && <div className="muted">Serial {serviceContext.equipment.serial_number}</div>}
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3 className="section-title">Service history</h3>
+            {!serviceContext ? <div className="skeleton" style={{ width: "80%" }} /> : serviceContext.history.length === 0 ? (
+              <div className="empty-state">No completed repair history found for this equipment.</div>
+            ) : serviceContext.history.map((item) => (
+              <details key={item.id} style={{ padding: "10px 0", borderBottom: "1px solid #e2e8f0" }}>
+                <summary style={{ cursor: "pointer" }}>
+                  <strong>{item.ticket_number}</strong> · {item.job_type || "service"} · <time>{item.completed_at ? new Date(item.completed_at).toLocaleDateString() : item.schedule_date || "Date unavailable"}</time>
+                </summary>
+                <p><strong>Problem:</strong> {item.problem_description || "Not recorded"}</p>
+                <p><strong>Result:</strong> {item.repair_result || "Not recorded"}</p>
+                {item.parts_used.length > 0 && <div><strong>Parts:</strong><ul>{item.parts_used.map((part) => (
+                  <li key={part.part_number}>{part.part_number} · {part.name} × {part.quantity}</li>
+                ))}</ul></div>}
+              </details>
+            ))}
+          </div>
+
+          <div className="card" id="completion">
             <h3 className="section-title">Field completion</h3>
             <label>
               Repair result

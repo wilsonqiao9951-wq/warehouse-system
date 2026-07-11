@@ -19,6 +19,8 @@ from app.core.rbac import Actor, get_current_actor, require_platform_admin, requ
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import (
     AuditLog,
+    Customer,
+    Equipment,
     InventoryTransaction,
     InventoryNotification,
     ReplenishmentRequest,
@@ -43,6 +45,10 @@ from app.models import (
 )
 from app.schemas import (
     AbnormalUsageRow,
+    CustomerCreate,
+    CustomerRead,
+    EquipmentCreate,
+    EquipmentRead,
     JobStatusCreate,
     JobStatusRead,
     QCPictureCreate,
@@ -87,6 +93,7 @@ from app.schemas import (
     WorkOrderProfit,
     WorkOrderRead,
     WorkOrderUpdate,
+    WorkOrderServiceContext,
     WorkOrderVoiceNoteRead,
     WarehouseSummary,
 )
@@ -662,6 +669,20 @@ def create_work_order(payload: WorkOrderCreate, db: Session = Depends(get_db), a
     _require_tenant_user(db, payload.engineer_id, "engineer_id")
     _require_tenant_user(db, payload.assistant_id, "assistant_id")
     data = payload.model_dump()
+    customer, equipment = _require_tenant_service_links(db, actor, data.get("customer_id"), data.get("equipment_id"))
+    if equipment and not data.get("customer_id"):
+        data["customer_id"] = equipment.customer_id
+        customer = db.get(Customer, equipment.customer_id) if equipment.customer_id else None
+    if customer:
+        data["store_name"] = data.get("store_name") or customer.name
+        data["outlet_name"] = data.get("outlet_name") or customer.name
+        data["contact_phone"] = data.get("contact_phone") or customer.phone
+        data["address"] = data.get("address") or customer.address
+        data["city"] = data.get("city") or customer.city
+        data["state"] = data.get("state") or customer.state
+        data["zip"] = data.get("zip") or customer.zip
+    if equipment:
+        data["machine_type"] = data.get("machine_type") or equipment.model
     if not data.get("ticket_number"):
         data["ticket_number"] = data.get("wo_number")
     if not data.get("wo_number"):
@@ -727,6 +748,90 @@ def list_work_orders(
     return db.scalars(stmt.offset(skip).limit(limit)).all()
 
 
+@router.get("/work-orders/{work_order_id}/service-context", response_model=WorkOrderServiceContext)
+def get_work_order_service_context(
+    work_order_id: int,
+    history_limit: int = Query(default=5, ge=1, le=20),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    current = db.get(WorkOrder, work_order_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    customer = db.get(Customer, current.customer_id) if current.customer_id else None
+    equipment = db.get(Equipment, current.equipment_id) if current.equipment_id else None
+
+    history_stmt = select(WorkOrder).where(
+        WorkOrder.organization_id == actor.organization_id,
+        WorkOrder.id != current.id,
+        func.lower(WorkOrder.status) == "completed",
+    )
+    if current.equipment_id:
+        history_stmt = history_stmt.where(WorkOrder.equipment_id == current.equipment_id)
+    elif current.customer_id and current.machine_type:
+        history_stmt = history_stmt.where(
+            WorkOrder.customer_id == current.customer_id,
+            func.lower(func.coalesce(WorkOrder.machine_type, "")) == current.machine_type.lower(),
+        )
+    elif current.customer_id:
+        history_stmt = history_stmt.where(WorkOrder.customer_id == current.customer_id)
+    else:
+        site_name = (current.outlet_name or current.store_name or "").strip().lower()
+        machine = (current.machine_type or "").strip().lower()
+        if not site_name or not machine:
+            history_rows = []
+            history_stmt = None
+        else:
+            history_stmt = history_stmt.where(
+                func.lower(func.coalesce(WorkOrder.machine_type, "")) == machine,
+                or_(
+                    func.lower(func.coalesce(WorkOrder.outlet_name, "")) == site_name,
+                    func.lower(func.coalesce(WorkOrder.store_name, "")) == site_name,
+                ),
+            )
+    if history_stmt is not None:
+        history_rows = db.scalars(
+            history_stmt.order_by(WorkOrder.completed_at.desc(), WorkOrder.id.desc()).limit(history_limit)
+        ).all()
+
+    history = []
+    for row in history_rows:
+        part_rows = db.execute(
+            select(Part.part_number, Part.name, func.sum(WorkOrderPart.quantity))
+            .join(WorkOrderPart, WorkOrderPart.part_id == Part.id)
+            .where(
+                WorkOrderPart.organization_id == actor.organization_id,
+                WorkOrderPart.work_order_id == row.id,
+            )
+            .group_by(Part.part_number, Part.name)
+            .order_by(Part.part_number)
+        ).all()
+        history.append({
+            "id": row.id,
+            "ticket_number": row.ticket_number,
+            "schedule_date": row.schedule_date,
+            "job_type": row.job_type,
+            "problem_description": row.problem_description,
+            "repair_result": row.repair_result,
+            "status": row.status,
+            "completed_at": row.completed_at,
+            "engineer_id": row.engineer_id,
+            "parts_used": [
+                {"part_number": part_number, "name": name, "quantity": int(quantity or 0)}
+                for part_number, name, quantity in part_rows
+            ],
+        })
+    return {
+        "customer": customer,
+        "equipment": equipment,
+        "fallback_customer_name": current.outlet_name or current.store_name,
+        "fallback_contact_phone": current.contact_phone,
+        "fallback_equipment_model": current.machine_type,
+        "history": history,
+    }
+
+
 @router.patch("/work-orders/{work_order_id}", response_model=WorkOrderRead)
 def update_work_order(
     work_order_id: int,
@@ -743,7 +848,7 @@ def update_work_order(
 
     updates = payload.model_dump(exclude_unset=True)
     if actor.role == UserRole.ENGINEER:
-        blocked = {"revenue", "labor_cost", "assigned_user_id", "engineer_id", "assistant_id"}
+        blocked = {"revenue", "labor_cost", "assigned_user_id", "engineer_id", "assistant_id", "customer_id", "equipment_id"}
         for key in blocked:
             updates.pop(key, None)
     if "ticket_number" in updates and "wo_number" not in updates:
@@ -766,6 +871,13 @@ def update_work_order(
     _require_tenant_user(db, updates.get("assigned_user_id"), "assigned_user_id")
     _require_tenant_user(db, updates.get("engineer_id"), "engineer_id")
     _require_tenant_user(db, updates.get("assistant_id"), "assistant_id")
+    target_customer_id = updates.get("customer_id", item.customer_id)
+    target_equipment_id = updates.get("equipment_id", item.equipment_id)
+    customer, equipment = _require_tenant_service_links(db, actor, target_customer_id, target_equipment_id)
+    if equipment and target_customer_id is None:
+        updates["customer_id"] = equipment.customer_id
+    if customer and equipment and equipment.customer_id not in {None, customer.id}:
+        raise HTTPException(status_code=400, detail="Equipment does not belong to the selected customer")
 
     for key, value in updates.items():
         setattr(item, key, value)
@@ -832,6 +944,82 @@ def complete_work_order(
     db.commit()
     db.refresh(item)
     return item
+
+
+def _require_tenant_service_links(
+    db: Session,
+    actor: Actor,
+    customer_id: int | None,
+    equipment_id: int | None,
+) -> tuple[Customer | None, Equipment | None]:
+    customer = None
+    equipment = None
+    if customer_id:
+        customer = db.scalar(select(Customer).where(Customer.id == customer_id, Customer.organization_id == actor.organization_id))
+        if not customer:
+            raise HTTPException(status_code=400, detail="customer_id is not available in this organization")
+    if equipment_id:
+        equipment = db.scalar(select(Equipment).where(Equipment.id == equipment_id, Equipment.organization_id == actor.organization_id))
+        if not equipment:
+            raise HTTPException(status_code=400, detail="equipment_id is not available in this organization")
+    if customer and equipment and equipment.customer_id not in {None, customer.id}:
+        raise HTTPException(status_code=400, detail="Equipment does not belong to the selected customer")
+    return customer, equipment
+
+
+@router.post("/customers", response_model=CustomerRead)
+def create_customer(payload: CustomerCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    data = payload.model_dump()
+    if data.get("account_number") == "":
+        data["account_number"] = None
+    item = Customer(organization_id=actor.organization_id, **data)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/customers", response_model=list[CustomerRead])
+def list_customers(
+    q: str | None = None,
+    limit: int = Query(default=100, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    stmt = select(Customer).where(Customer.organization_id == actor.organization_id, Customer.is_active.is_(True))
+    if q:
+        like = f"%{q.strip().lower()}%"
+        stmt = stmt.where(func.lower(Customer.name).like(like) | func.lower(func.coalesce(Customer.account_number, "")).like(like))
+    return db.scalars(stmt.order_by(Customer.name, Customer.id).limit(limit)).all()
+
+
+@router.post("/equipment", response_model=EquipmentRead)
+def create_equipment(payload: EquipmentCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    customer, _ = _require_tenant_service_links(db, actor, payload.customer_id, None)
+    item = Equipment(organization_id=actor.organization_id, **payload.model_dump())
+    if customer:
+        item.customer_id = customer.id
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/equipment", response_model=list[EquipmentRead])
+def list_equipment(
+    customer_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    stmt = select(Equipment).where(Equipment.organization_id == actor.organization_id, Equipment.is_active.is_(True))
+    if customer_id:
+        stmt = stmt.where(Equipment.customer_id == customer_id)
+    return db.scalars(stmt.order_by(Equipment.model, Equipment.id).limit(limit)).all()
 
 
 @router.post("/work-orders/{work_order_id}/pause", response_model=WorkOrderRead)

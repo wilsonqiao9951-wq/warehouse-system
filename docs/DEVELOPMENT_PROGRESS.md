@@ -30,7 +30,6 @@ Verification:
 
 Next Phase 1 work:
 
-- Customer/device history in the technician workbench.
 - Completion-policy configuration per organization/template.
 
 ## 2026-07-11 — Phase 1 work-order voice notes
@@ -65,3 +64,27 @@ Verification:
 
 - Targeted backend flow: 3 tests passed.
 - Frontend: Next.js production build passed (27 static pages).
+
+## 2026-07-11 — Phase 1 customer and equipment service context
+
+Status: implemented.
+
+Delivered:
+
+- Tenant-scoped customer and equipment master records.
+- Optional customer/equipment links on work orders while preserving legacy snapshot fields.
+- Automatic snapshot defaults from linked profiles when a work order is created.
+- Engineer-safe service-context API with completed history and aggregated parts used.
+- Exact legacy fallback matching by customer/site and machine model.
+- Mobile customer, equipment, and expandable repair-history panels.
+- Removed unsafe quick-complete actions that bypassed completion evidence.
+- Corrected frontend list limits that previously exceeded API validation limits.
+- Expanded automatic tenant filtering to all organization-owned models.
+- Alembic revision `20260711_0016` with history-query indexes.
+
+Verification:
+
+- Backend: 39 tests passed, including tenant registry, cross-tenant access, relationship mismatch, history scope, and parts aggregation.
+- Database: existing migration chain at `0015` upgraded successfully to `0016` without relying on application startup compatibility hooks.
+- Frontend: Next.js production build passed (27 static pages).
+- Security: no new packages; production audit remains at the recorded Next.js/PostCSS baseline (1 high, 1 moderate) pending the planned framework migration.

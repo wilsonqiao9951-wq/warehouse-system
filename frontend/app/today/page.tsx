@@ -17,7 +17,7 @@ export default function TodayPage() {
   useEffect(() => {
     setLoading(true);
     api
-      .listWorkOrders({ limit: 200 })
+      .listWorkOrders({ limit: 100 })
       .then((rows) => {
         setJobs(rows);
         setError("");
@@ -39,22 +39,11 @@ export default function TodayPage() {
   const runStart = async (id: number) => {
     try {
       await api.startJob(id);
-      const refreshed = await api.listWorkOrders({ limit: 200 });
+      const refreshed = await api.listWorkOrders({ limit: 100 });
       setJobs(refreshed);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Start failed.");
-    }
-  };
-
-  const runComplete = async (id: number) => {
-    try {
-      await api.completeJob(id);
-      const refreshed = await api.listWorkOrders({ limit: 200 });
-      setJobs(refreshed);
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Complete failed.");
     }
   };
 
@@ -117,9 +106,9 @@ export default function TodayPage() {
                 <button type="button" onClick={() => runStart(job.id)} disabled={Boolean(job.is_locked)}>
                   Start
                 </button>
-                <button type="button" onClick={() => runComplete(job.id)} disabled={Boolean(job.is_locked)}>
-                  Complete
-                </button>
+                {!job.is_locked && <Link className="nav-item" href={`/work-order-details?work_order_id=${job.id}#completion`}>
+                  Review &amp; complete
+                </Link>}
                 <Link className="nav-item" href={`/work-order-details?work_order_id=${job.id}`}>
                   Open
                 </Link>
