@@ -27,6 +27,7 @@ from app.models import (
     QCPicture,
     ReturnEquipment,
     StorageLocation,
+    StorageLocation,
     TransactionType,
     User,
     UserInvitation,
@@ -46,6 +47,8 @@ from app.schemas import (
     InventoryTransactionCreate,
     LowStockAlert,
     LocationStockBalance,
+    InventoryScanRequest,
+    InventoryScanRead,
     WorkOrderFlowAction,
     InventoryTransactionRead,
     ImportBatchRead,
@@ -83,6 +86,7 @@ from app.services.inventory import (
     get_stock_quantity,
     get_stock_balances,
     get_location_stock_balances,
+    get_location_stock_quantity,
     get_work_order_parts_cost,
     use_part_on_work_order,
 )
@@ -740,6 +744,51 @@ def inventory_location_balances(
     if warehouse_id is not None and not db.get(Warehouse, warehouse_id):
         raise HTTPException(status_code=404, detail="Warehouse not found")
     return get_location_stock_balances(db, warehouse_id)
+
+
+@router.post("/inventory/scan", response_model=InventoryScanRead)
+def scan_inventory(
+    payload: InventoryScanRequest,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
+    if not payload.barcode and not payload.part_number:
+        raise HTTPException(status_code=400, detail="barcode or part_number is required")
+    part = None
+    method = "barcode" if payload.barcode else "part_number"
+    if payload.barcode:
+        part = db.scalar(select(Part).where(Part.barcode == payload.barcode.strip()))
+    if not part and payload.part_number:
+        part = db.scalar(select(Part).where(Part.part_number == payload.part_number.strip()))
+        if part:
+            method = "part_number_fallback"
+    if not part:
+        return InventoryScanRead(
+            matched=False, confidence=0.0, recognition_method=method,
+            quantity_requested=payload.quantity, warehouse_id=payload.warehouse_id,
+            location_id=payload.location_id, feedback="未匹配到物料，请拍摄清晰标签或人工选择物料。",
+        )
+    if payload.location_id:
+        location = db.get(StorageLocation, payload.location_id)
+        if not location or (payload.warehouse_id and location.warehouse_id != payload.warehouse_id):
+            raise HTTPException(status_code=400, detail="Location does not belong to warehouse")
+        current = get_location_stock_quantity(db, part.id, payload.location_id)
+    elif payload.warehouse_id:
+        current = get_stock_quantity(db, part.id, payload.warehouse_id)
+    else:
+        current = None
+    projected = current - payload.quantity if current is not None else None
+    feedback = "识别成功，库存充足。" if projected is None or projected >= 0 else f"库存不足，还差 {abs(projected)} 件。"
+    _audit(db, actor, "inventory_scan", "part", part.id, {"method": method, "quantity": payload.quantity})
+    db.commit()
+    return InventoryScanRead(
+        matched=True, confidence=1.0 if method == "barcode" else 0.95,
+        recognition_method=method, part=PartRead.model_validate(part),
+        quantity_requested=payload.quantity, warehouse_id=payload.warehouse_id,
+        location_id=payload.location_id, current_quantity=current,
+        projected_quantity=projected, feedback=feedback,
+    )
 
 
 @router.get("/employees/{user_id}/van-inventory", response_model=list[StockBalance])

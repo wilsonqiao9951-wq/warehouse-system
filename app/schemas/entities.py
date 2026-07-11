@@ -303,6 +303,27 @@ class WorkOrderPartRead(WorkOrderPartCreate):
         from_attributes = True
 
 
+class InventoryScanRequest(BaseModel):
+    barcode: str | None = None
+    part_number: str | None = None
+    quantity: int = Field(default=1, ge=1)
+    warehouse_id: int | None = None
+    location_id: int | None = None
+
+
+class InventoryScanRead(BaseModel):
+    matched: bool
+    confidence: float
+    recognition_method: str
+    part: PartRead | None = None
+    quantity_requested: int
+    warehouse_id: int | None = None
+    location_id: int | None = None
+    current_quantity: int | None = None
+    projected_quantity: int | None = None
+    feedback: str
+
+
 class StockBalance(BaseModel):
     part_id: int
     part_number: str

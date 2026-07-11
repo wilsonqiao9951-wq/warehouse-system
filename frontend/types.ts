@@ -85,6 +85,19 @@ export interface StorageLocation {
   is_active: boolean;
 }
 
+export interface InventoryScanResult {
+  matched: boolean;
+  confidence: number;
+  recognition_method: string;
+  part?: Part | null;
+  quantity_requested: number;
+  warehouse_id?: number | null;
+  location_id?: number | null;
+  current_quantity?: number | null;
+  projected_quantity?: number | null;
+  feedback: string;
+}
+
 export interface LocationStockBalance {
   part_id: number;
   part_number: string;

@@ -10,6 +10,7 @@ import {
   ReturnEquipment,
   StockBalance,
   StorageLocation,
+  InventoryScanResult,
   User,
   Warehouse,
   WorkOrder,
@@ -231,6 +232,8 @@ export const api = {
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=200"),
   listStorageLocations: (warehouseId?: number) =>
     request<StorageLocation[]>(`/storage-locations${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
+  scanInventory: (payload: { barcode?: string; part_number?: string; quantity?: number; warehouse_id?: number; location_id?: number }) =>
+    request<InventoryScanResult>("/inventory/scan", { method: "POST", body: JSON.stringify(payload) }),
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),
