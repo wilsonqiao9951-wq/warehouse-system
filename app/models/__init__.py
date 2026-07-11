@@ -1,5 +1,6 @@
 from app.models.entities import (
     AuditLog,
+    InventoryNotification,
     InventoryTransaction,
     ImportBatch,
     JobStatus,
@@ -23,6 +24,7 @@ __all__ = [
     "InventoryTransaction",
     "ImportBatch",
     "AuditLog",
+    "InventoryNotification",
     "JobStatus",
     "Organization",
     "Part",

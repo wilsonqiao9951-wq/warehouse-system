@@ -315,6 +315,23 @@ class AuditLog(Base):
     organization = relationship("Organization")
 
 
+class InventoryNotification(Base):
+    __tablename__ = "inventory_notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    work_order_id: Mapped[int | None] = mapped_column(ForeignKey("work_orders.id"), nullable=True)
+    notification_type: Mapped[str] = mapped_column(String(40), default="replenishment", nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="open", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    part = relationship("Part")
+    warehouse = relationship("Warehouse")
+
+
 class ImportBatch(Base):
     __tablename__ = "import_batches"
 

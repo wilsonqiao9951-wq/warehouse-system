@@ -20,6 +20,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.models import (
     AuditLog,
     InventoryTransaction,
+    InventoryNotification,
     ImportBatch,
     JobStatus,
     Organization,
@@ -64,6 +65,7 @@ from app.schemas import (
     PartRead,
     PartMachineAssociationRead,
     WorkOrderPartRecommendation,
+    InventoryNotificationRead,
     OrganizationCreate,
     OrganizationRead,
     OrganizationUpdate,
@@ -890,9 +892,31 @@ def use_part_for_work_order(
     if payload.work_order_id != work_order_id:
         raise HTTPException(status_code=400, detail="Path work order ID must match payload work_order_id")
     usage = use_part_on_work_order(db, payload)
+    part = db.get(Part, payload.part_id)
+    warehouse_quantity = get_stock_quantity(db, payload.part_id, payload.warehouse_id)
+    threshold = max(part.safety_stock, part.min_stock) if part else 0
+    if part and warehouse_quantity <= threshold:
+        existing = db.scalar(select(InventoryNotification).where(
+            InventoryNotification.part_id == part.id,
+            InventoryNotification.warehouse_id == payload.warehouse_id,
+            InventoryNotification.status == "open",
+        ))
+        if not existing:
+            db.add(InventoryNotification(
+                part_id=part.id, warehouse_id=payload.warehouse_id, work_order_id=work_order_id,
+                message=f"{part.part_number} 使用后库存为 {warehouse_quantity}，已达到补货阈值 {threshold}。",
+            ))
     _audit(db, actor, "use_part", "work_order_part", usage.id, {"work_order_id": work_order_id, "part_id": payload.part_id, "qty": payload.quantity})
     db.commit()
     return usage
+
+
+@router.get("/inventory/notifications", response_model=list[InventoryNotificationRead])
+def inventory_notifications(
+    status: str = "open", db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    return db.scalars(select(InventoryNotification).where(InventoryNotification.status == status).order_by(InventoryNotification.id.desc()).limit(100)).all()
 
 
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])

@@ -325,6 +325,20 @@ class WorkOrderPartRecommendation(BaseModel):
     reason: str
 
 
+class InventoryNotificationRead(BaseModel):
+    id: int
+    part_id: int
+    warehouse_id: int
+    work_order_id: int | None = None
+    notification_type: str
+    message: str
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class InventoryScanRequest(BaseModel):
     barcode: str | None = None
     part_number: str | None = None
