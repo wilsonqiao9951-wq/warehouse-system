@@ -23,7 +23,7 @@ import {
   InvitationCreated,
   InvitationInfo,
   WorkOrderProfit
-  ,WorkOrderPartRecommendation, WorkOrderVoiceNote, WorkOrderServiceContext
+  ,WorkOrderPartRecommendation, WorkOrderVoiceNote, WorkOrderServiceContext, CompletionPolicy
 } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
@@ -141,9 +141,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!res.ok) {
     let detail = `API error ${res.status}`;
     try {
-      const payload = (await res.json()) as { detail?: string | string[] };
+      const payload = (await res.json()) as { detail?: string | string[] | { message?: string; missing?: string[] } };
       if (payload?.detail) {
-        detail = Array.isArray(payload.detail) ? payload.detail.join(", ") : payload.detail;
+        if (Array.isArray(payload.detail)) detail = payload.detail.join(", ");
+        else if (typeof payload.detail === "string") detail = payload.detail;
+        else detail = `${payload.detail.message || "Request failed"}${payload.detail.missing?.length ? `: ${payload.detail.missing.join(", ")}` : ""}`;
       }
     } catch {
       // ignore parse failure
@@ -262,6 +264,15 @@ export const api = {
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=100"),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),
+  listCompletionPolicies: () => request<CompletionPolicy[]>("/completion-policies"),
+  saveCompletionPolicy: (payload: Omit<CompletionPolicy, "id" | "organization_id" | "source">) =>
+    request<CompletionPolicy>("/completion-policies", { method: "POST", body: JSON.stringify(payload) }),
+  getCompletionPolicy: (workOrderId: number) =>
+    request<CompletionPolicy>(`/work-orders/${workOrderId}/completion-policy`),
+  approveCompletion: (workOrderId: number) =>
+    request<WorkOrder>(`/work-orders/${workOrderId}/approve-completion`, { method: "POST", body: JSON.stringify({}) }),
+  rejectCompletion: (workOrderId: number, notes: string) =>
+    request<WorkOrder>(`/work-orders/${workOrderId}/reject-completion`, { method: "POST", body: JSON.stringify({ notes }) }),
   listStorageLocations: (warehouseId?: number) =>
     request<StorageLocation[]>(`/storage-locations${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   scanInventory: (payload: { barcode?: string; part_number?: string; quantity?: number; warehouse_id?: number; location_id?: number }) =>

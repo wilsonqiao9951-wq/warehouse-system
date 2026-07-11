@@ -19,6 +19,7 @@ from app.core.rbac import Actor, get_current_actor, require_platform_admin, requ
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import (
     AuditLog,
+    CompletionPolicy,
     Customer,
     Equipment,
     InventoryTransaction,
@@ -49,6 +50,8 @@ from app.schemas import (
     CustomerRead,
     EquipmentCreate,
     EquipmentRead,
+    CompletionPolicyRead,
+    CompletionPolicyUpsert,
     JobStatusCreate,
     JobStatusRead,
     QCPictureCreate,
@@ -407,6 +410,9 @@ async def upload_work_order_part_photo(
     actor: Actor = Depends(get_current_actor),
 ):
     require_work_order_scope(db, actor, work_order_id)
+    work_order = db.get(WorkOrder, work_order_id)
+    if not work_order or work_order.is_locked or work_order.status == "PENDING_APPROVAL":
+        raise HTTPException(status_code=409, detail="Work order cannot accept uploads in its current state")
 
     data = await file.read(settings.max_image_upload_bytes + 1)
     if len(data) > settings.max_image_upload_bytes:
@@ -448,7 +454,7 @@ async def create_work_order_voice_note(
 ):
     require_work_order_scope(db, actor, work_order_id)
     work_order = db.get(WorkOrder, work_order_id)
-    if not work_order or work_order.is_locked:
+    if not work_order or work_order.is_locked or work_order.status == "PENDING_APPROVAL":
         raise HTTPException(status_code=400, detail="Voice notes cannot be added to this work order")
     data = await file.read(settings.max_audio_upload_bytes + 1)
     if len(data) > settings.max_audio_upload_bytes:
@@ -665,6 +671,8 @@ def list_parts(
 @router.post("/work-orders", response_model=WorkOrderRead)
 def create_work_order(payload: WorkOrderCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    if payload.status.strip().upper() in {"COMPLETED", "PENDING_APPROVAL", "APPROVAL_REJECTED"}:
+        raise HTTPException(status_code=400, detail="Terminal work order status requires the completion workflow")
     _require_tenant_user(db, payload.assigned_user_id, "assigned_user_id")
     _require_tenant_user(db, payload.engineer_id, "engineer_id")
     _require_tenant_user(db, payload.assistant_id, "assistant_id")
@@ -845,12 +853,16 @@ def update_work_order(
         raise HTTPException(status_code=404, detail="Work order not found")
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be edited")
+    if item.status == "PENDING_APPROVAL":
+        raise HTTPException(status_code=409, detail="Pending completion evidence is frozen until approval or rejection")
 
     updates = payload.model_dump(exclude_unset=True)
     if actor.role == UserRole.ENGINEER:
-        blocked = {"revenue", "labor_cost", "assigned_user_id", "engineer_id", "assistant_id", "customer_id", "equipment_id"}
+        blocked = {"revenue", "labor_cost", "assigned_user_id", "engineer_id", "assistant_id", "customer_id", "equipment_id", "status"}
         for key in blocked:
             updates.pop(key, None)
+    if str(updates.get("status", "")).strip().upper() in {"COMPLETED", "PENDING_APPROVAL", "APPROVAL_REJECTED"}:
+        raise HTTPException(status_code=400, detail="Terminal work order status requires the completion workflow")
     if "ticket_number" in updates and "wo_number" not in updates:
         updates["wo_number"] = updates["ticket_number"]
     if "wo_number" in updates and "ticket_number" not in updates:
@@ -901,6 +913,8 @@ def start_work_order(
         raise HTTPException(status_code=404, detail="Work order not found")
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be started")
+    if item.status == "PENDING_APPROVAL":
+        raise HTTPException(status_code=409, detail="Work order is awaiting manager approval")
     item.status = "IN_PROGRESS"
     item.started_at = item.started_at or datetime.utcnow()
     db.add(item)
@@ -919,11 +933,75 @@ def complete_work_order(
     actor: Actor = Depends(get_current_actor),
 ):
     require_work_order_scope(db, actor, work_order_id)
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)
     item = db.get(WorkOrder, work_order_id)
     if not item:
         raise HTTPException(status_code=404, detail="Work order not found")
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order already completed")
+    _apply_completion_payload(item, payload)
+    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    _validate_completion_evidence(db, item, policy)
+    if policy.get("require_manager_approval") and actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
+        item.status = "PENDING_APPROVAL"
+        item.completion_requested_by = actor.user_id
+        item.completion_requested_at = datetime.utcnow()
+        db.add(item)
+        db.add(JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow()))
+        _audit(db, actor, "request_completion", "work_order", work_order_id, {"policy": policy})
+        db.commit()
+        db.refresh(item)
+        return item
+    if policy.get("require_manager_approval"):
+        item.completion_approved_by = actor.user_id
+        item.completion_approved_at = datetime.utcnow()
+    return _finalize_work_order(db, actor, item)
+
+
+def _normalize_job_type(job_type: str | None) -> str:
+    return (job_type or "*").strip().lower() or "*"
+
+
+def _policy_dict(policy: CompletionPolicy | None, organization_id: int, source: str) -> dict:
+    if not policy:
+        return {
+            "id": None, "organization_id": organization_id, "job_type": None, "source": "legacy_default",
+            "require_repair_result": False, "require_customer_signature": False,
+            "require_completion_photo": False, "require_all_checklist_items": False,
+            "require_parts_usage": False, "require_manager_approval": False,
+            "created_at": None, "updated_at": None,
+        }
+    return {
+        "id": policy.id, "organization_id": policy.organization_id,
+        "job_type": None if policy.job_type_key == "*" else policy.job_type_key, "source": source,
+        "require_repair_result": policy.require_repair_result,
+        "require_customer_signature": policy.require_customer_signature,
+        "require_completion_photo": policy.require_completion_photo,
+        "require_all_checklist_items": policy.require_all_checklist_items,
+        "require_parts_usage": policy.require_parts_usage,
+        "require_manager_approval": policy.require_manager_approval,
+        "created_at": policy.created_at, "updated_at": policy.updated_at,
+    }
+
+
+def _effective_completion_policy(db: Session, organization_id: int, job_type: str | None) -> dict:
+    key = _normalize_job_type(job_type)
+    policy = None
+    source = "organization_default"
+    if key != "*":
+        policy = db.scalar(select(CompletionPolicy).where(
+            CompletionPolicy.organization_id == organization_id, CompletionPolicy.job_type_key == key
+        ))
+        if policy:
+            source = "job_type"
+    if not policy:
+        policy = db.scalar(select(CompletionPolicy).where(
+            CompletionPolicy.organization_id == organization_id, CompletionPolicy.job_type_key == "*"
+        ))
+    return _policy_dict(policy, organization_id, source)
+
+
+def _apply_completion_payload(item: WorkOrder, payload: WorkOrderFlowAction) -> None:
     if payload.repair_result is not None:
         item.repair_result = payload.repair_result.strip() or None
     if payload.checklist_json is not None:
@@ -932,9 +1010,41 @@ def complete_work_order(
         item.customer_signature_name = payload.customer_signature_name.strip() or None
     if payload.customer_signature_data is not None:
         item.customer_signature_data = payload.customer_signature_data
-    if item.customer_signature_name or item.customer_signature_data:
-        item.customer_signed_at = datetime.utcnow()
-    _ = get_work_order_parts_cost(db, work_order_id)
+    item.customer_signed_at = datetime.utcnow() if item.customer_signature_name and item.customer_signature_data else None
+
+
+def _validate_completion_evidence(db: Session, item: WorkOrder, policy: dict) -> None:
+    missing: list[str] = []
+    if policy.get("require_repair_result") and not (item.repair_result or "").strip():
+        missing.append("repair_result")
+    if policy.get("require_customer_signature") and not (item.customer_signature_name and item.customer_signature_data):
+        missing.append("customer_signature")
+    if policy.get("require_all_checklist_items"):
+        try:
+            checklist = json.loads(item.checklist_json or "")
+        except (TypeError, json.JSONDecodeError):
+            checklist = None
+        required_keys = {"equipment_safe", "site_clean", "customer_briefed"}
+        if (
+            not isinstance(checklist, dict)
+            or not required_keys.issubset(checklist)
+            or not all(type(checklist[key]) is bool and checklist[key] for key in required_keys)
+        ):
+            missing.append("completed_checklist")
+    if policy.get("require_completion_photo") and not db.scalar(
+        select(QCPicture.id).where(QCPicture.work_order_id == item.id).limit(1)
+    ):
+        missing.append("completion_photo")
+    if policy.get("require_parts_usage") and not db.scalar(
+        select(WorkOrderPart.id).where(WorkOrderPart.work_order_id == item.id).limit(1)
+    ):
+        missing.append("parts_usage")
+    if missing:
+        raise HTTPException(status_code=422, detail={"message": "Completion evidence is incomplete", "missing": missing})
+
+
+def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrder:
+    work_order_id = item.id
     item.status = "COMPLETED"
     item.completed_at = datetime.utcnow()
     item.is_locked = True
@@ -975,6 +1085,120 @@ def create_customer(payload: CustomerCreate, db: Session = Depends(get_db), acto
         data["account_number"] = None
     item = Customer(organization_id=actor.organization_id, **data)
     db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/completion-policies", response_model=list[CompletionPolicyRead])
+def list_completion_policies(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    rows = db.scalars(select(CompletionPolicy).where(
+        CompletionPolicy.organization_id == actor.organization_id
+    ).order_by(CompletionPolicy.job_type_key, CompletionPolicy.id)).all()
+    return [_policy_dict(row, actor.organization_id, "organization_default" if row.job_type_key == "*" else "job_type") for row in rows]
+
+
+@router.post("/completion-policies", response_model=CompletionPolicyRead)
+def upsert_completion_policy(
+    payload: CompletionPolicyUpsert,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    key = _normalize_job_type(payload.job_type)
+    item = db.scalar(select(CompletionPolicy).where(
+        CompletionPolicy.organization_id == actor.organization_id, CompletionPolicy.job_type_key == key
+    ))
+    values = payload.model_dump(exclude={"job_type"})
+    if item:
+        for field, value in values.items():
+            setattr(item, field, value)
+    else:
+        item = CompletionPolicy(organization_id=actor.organization_id, job_type_key=key, **values)
+    db.add(item)
+    db.flush()
+    _audit(db, actor, "upsert_completion_policy", "completion_policy", item.id, {"job_type": key, **values})
+    db.commit()
+    db.refresh(item)
+    return _policy_dict(item, actor.organization_id, "organization_default" if key == "*" else "job_type")
+
+
+@router.get("/work-orders/{work_order_id}/completion-policy", response_model=CompletionPolicyRead)
+def get_work_order_completion_policy(
+    work_order_id: int, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
+):
+    require_work_order_scope(db, actor, work_order_id)
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)
+    item = db.get(WorkOrder, work_order_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    return _effective_completion_policy(db, actor.organization_id, item.job_type)
+
+
+@router.post("/work-orders/{work_order_id}/request-completion", response_model=WorkOrderRead)
+def request_work_order_completion(
+    work_order_id: int,
+    payload: WorkOrderFlowAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)
+    item = db.get(WorkOrder, work_order_id)
+    if not item or item.is_locked:
+        raise HTTPException(status_code=400, detail="Work order cannot request completion")
+    if item.status == "PENDING_APPROVAL":
+        raise HTTPException(status_code=409, detail="Completion approval is already pending")
+    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    if not policy.get("require_manager_approval"):
+        raise HTTPException(status_code=409, detail="This work order does not require manager approval")
+    _apply_completion_payload(item, payload)
+    _validate_completion_evidence(db, item, policy)
+    item.status = "PENDING_APPROVAL"
+    item.completion_requested_by = actor.user_id
+    item.completion_requested_at = datetime.utcnow()
+    db.add(item)
+    db.add(JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow()))
+    _audit(db, actor, "request_completion", "work_order", work_order_id)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/work-orders/{work_order_id}/approve-completion", response_model=WorkOrderRead)
+def approve_work_order_completion(
+    work_order_id: int, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
+):
+    require_work_order_scope(db, actor, work_order_id)
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    item = db.get(WorkOrder, work_order_id)
+    if not item or item.status != "PENDING_APPROVAL" or item.is_locked:
+        raise HTTPException(status_code=409, detail="Work order is not pending completion approval")
+    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    _validate_completion_evidence(db, item, policy)
+    item.completion_approved_by = actor.user_id
+    item.completion_approved_at = datetime.utcnow()
+    _audit(db, actor, "approve_completion", "work_order", work_order_id)
+    return _finalize_work_order(db, actor, item)
+
+
+@router.post("/work-orders/{work_order_id}/reject-completion", response_model=WorkOrderRead)
+def reject_work_order_completion(
+    work_order_id: int,
+    payload: WorkOrderFlowAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    item = db.get(WorkOrder, work_order_id)
+    if not item or item.status != "PENDING_APPROVAL" or item.is_locked:
+        raise HTTPException(status_code=409, detail="Work order is not pending completion approval")
+    item.status = "APPROVAL_REJECTED"
+    db.add(item)
+    db.add(JobStatus(work_order_id=work_order_id, status="APPROVAL_REJECTED", timestamp=datetime.utcnow()))
+    _audit(db, actor, "reject_completion", "work_order", work_order_id, {"notes": payload.notes})
     db.commit()
     db.refresh(item)
     return item
@@ -1030,6 +1254,7 @@ def pause_work_order(
     actor: Actor = Depends(get_current_actor),
 ):
     require_work_order_scope(db, actor, work_order_id)
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)
     item = db.get(WorkOrder, work_order_id)
     if not item:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -1169,8 +1394,13 @@ def employee_van_inventory(
     deprecated=True,
     summary="Deprecated: use /work-orders/{work_order_id}/use-part",
 )
-def add_work_order_part(payload: WorkOrderPartCreate, db: Session = Depends(get_db)):
-    return use_part_on_work_order(db, payload)
+def add_work_order_part(
+    payload: WorkOrderPartCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, payload.work_order_id)
+    return use_part_for_work_order(payload.work_order_id, payload, db, actor)
 
 
 @router.post(
@@ -1185,6 +1415,9 @@ def use_part_for_work_order(
     actor: Actor = Depends(get_current_actor),
 ):
     require_work_order_scope(db, actor, work_order_id)
+    work_order = db.get(WorkOrder, work_order_id)
+    if not work_order or work_order.is_locked or work_order.status == "PENDING_APPROVAL":
+        raise HTTPException(status_code=409, detail="Work order cannot accept parts in its current state")
     if payload.work_order_id != work_order_id:
         raise HTTPException(status_code=400, detail="Path work order ID must match payload work_order_id")
     usage = use_part_on_work_order(db, payload)
@@ -1328,10 +1561,12 @@ def create_qc_picture(
     payload: QCPictureCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
 ):
     require_work_order_scope(db, actor, payload.work_order_id)
-    if not db.get(WorkOrder, payload.work_order_id):
+    work_order = db.get(WorkOrder, payload.work_order_id)
+    if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
-    if payload.uploaded_by and not db.get(User, payload.uploaded_by):
-        raise HTTPException(status_code=404, detail="User not found")
+    if work_order.is_locked or work_order.status == "PENDING_APPROVAL":
+        raise HTTPException(status_code=400, detail="Work order cannot accept more photos in its current state")
+    payload.uploaded_by = actor.user_id
     item = QCPicture(**payload.model_dump())
     db.add(item)
     _audit(db, actor, "upload_qc_picture", "qc_picture", None, {"work_order_id": payload.work_order_id})
@@ -1365,8 +1600,10 @@ def create_job_status(
     if not db.get(WorkOrder, payload.work_order_id):
         raise HTTPException(status_code=404, detail="Work order not found")
     work_order = db.get(WorkOrder, payload.work_order_id)
-    if work_order and work_order.is_locked:
+    if work_order and (work_order.is_locked or work_order.status == "PENDING_APPROVAL"):
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be edited")
+    if payload.status.strip().upper() in {"COMPLETED", "PENDING_APPROVAL", "APPROVAL_REJECTED"}:
+        raise HTTPException(status_code=400, detail="Reserved status requires the completion workflow")
     data = payload.model_dump()
     if not data.get("timestamp"):
         data["timestamp"] = datetime.utcnow()
@@ -1403,7 +1640,7 @@ def create_return_equipment(
     if not db.get(WorkOrder, payload.work_order_id):
         raise HTTPException(status_code=404, detail="Work order not found")
     work_order = db.get(WorkOrder, payload.work_order_id)
-    if work_order and work_order.is_locked:
+    if work_order and (work_order.is_locked or work_order.status == "PENDING_APPROVAL"):
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be edited")
     item = ReturnEquipment(**payload.model_dump())
     db.add(item)
@@ -1891,14 +2128,16 @@ async def import_parts_excel(
     if not file.filename or not file.filename.lower().endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Please upload an .xlsx file")
 
-    content = await file.read()
+    content = await file.read(settings.max_import_upload_bytes + 1)
+    if len(content) > settings.max_import_upload_bytes:
+        raise HTTPException(status_code=413, detail="Import file exceeds the configured upload limit")
     wb = load_workbook(filename=BytesIO(content), data_only=True)
     ws = wb.active
     rows = list(ws.iter_rows(min_row=2, values_only=True))
     created = 0
     updated = 0
 
-    for row in rows:
+    for row_number, row in enumerate(rows, start=2):
         if not row or not row[0]:
             continue
         part_number = str(row[0]).strip()
@@ -2052,6 +2291,10 @@ async def import_work_orders_excel(
             "assigned_user_id": int(row[14]) if row[14] else None,
             "engineer_id": int(row[15]) if row[15] else None,
         }
+        if payload["status"].strip().upper() in {"COMPLETED", "PENDING_APPROVAL", "APPROVAL_REJECTED"}:
+            raise HTTPException(status_code=400, detail=f"Row {row_number}: terminal status requires the completion workflow")
+        _require_tenant_user(db, payload["assigned_user_id"], "assigned_user_id")
+        _require_tenant_user(db, payload["engineer_id"], "engineer_id")
         if payload["assigned_user_id"] and not payload["engineer_id"]:
             payload["engineer_id"] = payload["assigned_user_id"]
         if payload["engineer_id"] and not payload["assigned_user_id"]:

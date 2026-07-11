@@ -161,6 +161,10 @@ export interface WorkOrder {
   customer_signature_name?: string | null;
   customer_signature_data?: string | null;
   customer_signed_at?: string | null;
+  completion_requested_by?: number | null;
+  completion_requested_at?: string | null;
+  completion_approved_by?: number | null;
+  completion_approved_at?: string | null;
   is_locked?: boolean;
   description?: string | null;
   problem_description?: string | null;
@@ -168,6 +172,19 @@ export interface WorkOrder {
   zip?: string | null;
   started_at?: string | null;
   machine_type?: string | null;
+}
+
+export interface CompletionPolicy {
+  id?: number | null;
+  organization_id: number;
+  job_type?: string | null;
+  source: "job_type" | "organization_default" | "legacy_default";
+  require_repair_result: boolean;
+  require_customer_signature: boolean;
+  require_completion_photo: boolean;
+  require_all_checklist_items: boolean;
+  require_parts_usage: boolean;
+  require_manager_approval: boolean;
 }
 
 export interface Customer {

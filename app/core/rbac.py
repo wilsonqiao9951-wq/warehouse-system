@@ -10,6 +10,7 @@ from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models import (
     AuditLog,
+    CompletionPolicy,
     Customer,
     Equipment,
     ImportBatch,
@@ -35,6 +36,7 @@ from app.models import (
 
 
 TENANT_MODELS = (
+    CompletionPolicy,
     Customer,
     Equipment,
     User,

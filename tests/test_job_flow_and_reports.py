@@ -52,7 +52,7 @@ def test_full_technician_job_flow_and_lock(client):
         "repair_result": "Replaced failed filter and verified operation.",
         "checklist_json": "{\"power_off\":true,\"site_clean\":true}",
         "customer_signature_name": "Alex Customer",
-        "customer_signature_data": "data:image/png;base64,c2lnbmF0dXJl",
+        "customer_signature_data": "data:image/png;base64,iVBORw0KGgo=",
     })
     assert completed.status_code == 200
     assert completed.json()["status"] == "COMPLETED"

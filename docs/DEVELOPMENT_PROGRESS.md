@@ -88,3 +88,28 @@ Verification:
 - Database: existing migration chain at `0015` upgraded successfully to `0016` without relying on application startup compatibility hooks.
 - Frontend: Next.js production build passed (27 static pages).
 - Security: no new packages; production audit remains at the recorded Next.js/PostCSS baseline (1 high, 1 moderate) pending the planned framework migration.
+
+## 2026-07-11 — Phase 1 configurable completion policies
+
+Status: implemented and verified.
+
+Delivered:
+
+- Organization default completion policy with normalized job-type overrides.
+- Configurable requirements for repair results, customer signatures, field photos, checklist completion, parts usage, and manager approval.
+- Server-side evidence enforcement across direct API calls and the mobile UI.
+- Engineer completion requests with frozen evidence while approval is pending.
+- Manager/admin approval and rejection actions with audit/status history.
+- Administrator settings UI for creating and editing policies.
+- Blocked completion bypasses through generic create, PATCH, Excel import, and status-timeline APIs.
+- Locked and pending-approval work orders reject parts, photos, voice notes, and other evidence mutations.
+- Signature payloads now require valid base64 PNG data.
+- Secured the deprecated parts-usage endpoint and server-owned photo uploader identity.
+- Alembic revision `20260711_0017`.
+
+Verification:
+
+- Backend: 42 tests passed.
+- Database: existing schema upgraded through `0016 → 0017` successfully.
+- Frontend: Next.js production build passed (27 static pages).
+- Security: no new packages; production audit remains at the known Next.js/PostCSS baseline (1 high, 1 moderate).

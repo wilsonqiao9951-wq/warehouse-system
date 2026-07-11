@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from "rea
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
-import { JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart, WorkOrderServiceContext, WorkOrderVoiceNote } from "@/types";
+import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart, WorkOrderServiceContext, WorkOrderVoiceNote } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
 import { VoiceRecorder } from "@/components/voice-recorder";
 
@@ -22,6 +22,8 @@ export default function WorkOrderDetailsPage() {
   const [woParts, setWoParts] = useState<WorkOrderPart[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<WorkOrderVoiceNote[]>([]);
   const [serviceContext, setServiceContext] = useState<WorkOrderServiceContext | null>(null);
+  const [completionPolicy, setCompletionPolicy] = useState<CompletionPolicy | null>(null);
+  const [role, setRole] = useState("");
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const qcCameraInputId = useId();
@@ -59,6 +61,7 @@ export default function WorkOrderDetailsPage() {
   }, [qcPhotoPreview]);
 
   useEffect(() => {
+    setRole(window.localStorage.getItem("opf_role") || "");
     Promise.all([api.listWorkOrders(), api.listParts(), api.listUsers().catch(() => [])])
       .then(([wo, parts, us]) => {
         setWorkOrders(wo);
@@ -77,6 +80,8 @@ export default function WorkOrderDetailsPage() {
     [workOrders, currentWorkOrderId]
   );
   const locked = Boolean(selectedWorkOrder?.is_locked);
+  const pendingApproval = selectedWorkOrder?.status === "PENDING_APPROVAL";
+  const evidenceFrozen = locked || pendingApproval;
 
   useEffect(() => {
     if (!selectedWorkOrder) return;
@@ -129,6 +134,9 @@ export default function WorkOrderDetailsPage() {
     api.getWorkOrderServiceContext(currentWorkOrderId, 5)
       .then(setServiceContext)
       .catch(() => setServiceContext({ history: [] }));
+    api.getCompletionPolicy(currentWorkOrderId)
+      .then(setCompletionPolicy)
+      .catch(() => setCompletionPolicy(null));
   }, [currentWorkOrderId]);
 
   const onStartJob = async () => {
@@ -146,12 +154,18 @@ export default function WorkOrderDetailsPage() {
 
   const onCompleteJob = async () => {
     if (!currentWorkOrderId) return;
-    if (!completion.repairResult.trim() || !completion.signatureName.trim() || !completion.signatureData) {
-      setNotice({ type: "error", text: "Repair result, customer name, and drawn signature are required." });
+    const missing: string[] = [];
+    if (completionPolicy?.require_repair_result && !completion.repairResult.trim()) missing.push("repair result");
+    if (completionPolicy?.require_customer_signature && (!completion.signatureName.trim() || !completion.signatureData)) missing.push("customer signature");
+    if (completionPolicy?.require_completion_photo && qcPictures.length === 0) missing.push("field photo");
+    if (completionPolicy?.require_parts_usage && woParts.length === 0) missing.push("part usage");
+    if (completionPolicy?.require_all_checklist_items && !(completion.equipmentSafe && completion.siteClean && completion.customerBriefed)) missing.push("field checklist");
+    if (missing.length) {
+      setNotice({ type: "error", text: `Complete the required evidence: ${missing.join(", ")}.` });
       return;
     }
     try {
-      await api.completeJob(currentWorkOrderId, {
+      const result = await api.completeJob(currentWorkOrderId, {
         repair_result: completion.repairResult.trim(),
         customer_signature_name: completion.signatureName.trim(),
         customer_signature_data: completion.signatureData,
@@ -161,12 +175,36 @@ export default function WorkOrderDetailsPage() {
           customer_briefed: completion.customerBriefed
         })
       });
-      setNotice({ type: "success", text: "Job completed and locked." });
+      setNotice({ type: "success", text: result.status === "PENDING_APPROVAL" ? "Completion submitted for manager approval." : "Job completed and locked." });
       const wo = await api.listWorkOrders();
       setWorkOrders(wo);
       void reloadDetails();
     } catch (e) {
       setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to complete job." });
+    }
+  };
+
+  const onApproveCompletion = async () => {
+    if (!currentWorkOrderId) return;
+    try {
+      await api.approveCompletion(currentWorkOrderId);
+      setNotice({ type: "success", text: "Completion approved and work order locked." });
+      setWorkOrders(await api.listWorkOrders());
+      void reloadDetails();
+    } catch (e) {
+      setNotice({ type: "error", text: e instanceof Error ? e.message : "Approval failed." });
+    }
+  };
+
+  const onRejectCompletion = async () => {
+    if (!currentWorkOrderId) return;
+    try {
+      await api.rejectCompletion(currentWorkOrderId, "Completion evidence requires correction");
+      setNotice({ type: "success", text: "Completion rejected for correction." });
+      setWorkOrders(await api.listWorkOrders());
+      void reloadDetails();
+    } catch (e) {
+      setNotice({ type: "error", text: e instanceof Error ? e.message : "Rejection failed." });
     }
   };
 
@@ -287,15 +325,19 @@ export default function WorkOrderDetailsPage() {
             </p>
             {locked && <span className="job-card__lock">Completed — locked (no edits)</span>}
             <div className="sticky-actions">
-              <button type="button" onClick={onStartJob} disabled={locked}>
+              <button type="button" onClick={onStartJob} disabled={evidenceFrozen}>
                 Start job
               </button>
-              <button type="button" onClick={onCompleteJob} disabled={locked}>
-                Complete job
+              <button type="button" onClick={onCompleteJob} disabled={evidenceFrozen}>
+                {completionPolicy?.require_manager_approval && role === "engineer" ? "Submit for approval" : "Complete job"}
               </button>
-              <button type="button" onClick={onPauseJob} disabled={locked || selectedWorkOrder.status !== "IN_PROGRESS"}>
+              <button type="button" onClick={onPauseJob} disabled={evidenceFrozen || selectedWorkOrder.status !== "IN_PROGRESS"}>
                 Pause
               </button>
+              {pendingApproval && ["admin", "manager"].includes(role) && <>
+                <button type="button" onClick={onApproveCompletion}>Approve &amp; lock</button>
+                <button type="button" onClick={onRejectCompletion}>Reject</button>
+              </>}
             </div>
           </div>
 
@@ -337,13 +379,25 @@ export default function WorkOrderDetailsPage() {
 
           <div className="card" id="completion">
             <h3 className="section-title">Field completion</h3>
+            {pendingApproval && <p className="notice notice-success">Evidence is frozen while manager approval is pending.</p>}
+            {completionPolicy && <div className="notice" style={{ marginBottom: 12 }}>
+              <strong>Required for this job:</strong>{" "}
+              {[
+                completionPolicy.require_repair_result && "repair result",
+                completionPolicy.require_customer_signature && "customer signature",
+                completionPolicy.require_completion_photo && "field photo",
+                completionPolicy.require_all_checklist_items && "all checklist items",
+                completionPolicy.require_parts_usage && "part usage",
+                completionPolicy.require_manager_approval && "manager approval"
+              ].filter(Boolean).join(", ") || "No additional company requirements"}
+            </div>}
             <label>
               Repair result
               <textarea
                 value={completion.repairResult}
                 onChange={(e) => setCompletion((prev) => ({ ...prev, repairResult: e.target.value }))}
                 placeholder="Describe the repair, verification, and final condition"
-                disabled={locked}
+                disabled={evidenceFrozen}
                 rows={4}
               />
             </label>
@@ -358,7 +412,7 @@ export default function WorkOrderDetailsPage() {
                     type="checkbox"
                     checked={completion[key]}
                     onChange={(e) => setCompletion((prev) => ({ ...prev, [key]: e.target.checked }))}
-                    disabled={locked}
+                    disabled={evidenceFrozen}
                     style={{ width: 20, minHeight: 20 }}
                   />
                   {label}
@@ -371,7 +425,7 @@ export default function WorkOrderDetailsPage() {
                 value={completion.signatureName}
                 onChange={(e) => setCompletion((prev) => ({ ...prev, signatureName: e.target.value }))}
                 placeholder="Customer full name"
-                disabled={locked}
+                disabled={evidenceFrozen}
               />
             </label>
             <div style={{ marginTop: 12 }}>
@@ -385,7 +439,7 @@ export default function WorkOrderDetailsPage() {
                 />
               ) : (
                 <SignaturePad
-                  disabled={locked}
+                  disabled={evidenceFrozen}
                   onChange={(signatureData) => setCompletion((prev) => ({ ...prev, signatureData }))}
                 />
               )}
@@ -434,7 +488,7 @@ export default function WorkOrderDetailsPage() {
         <h3 className="section-title">Voice notes</h3>
         <p className="muted">Record a hands-free field note. Audio is stored with this work order.</p>
         <VoiceRecorder
-          disabled={locked || !currentWorkOrderId}
+          disabled={evidenceFrozen || !currentWorkOrderId}
           onRecorded={async (blob, duration) => {
             await api.uploadVoiceNote(currentWorkOrderId, blob, duration);
             setNotice({ type: "success", text: "Voice note uploaded." });
@@ -454,12 +508,11 @@ export default function WorkOrderDetailsPage() {
         <h3 className="section-title">Status timeline</h3>
         <form onSubmit={onCreateJobStatus} style={{ marginBottom: 12 }}>
           <div className="two-col" style={{ alignItems: "stretch" }}>
-            <select value={statusInput} onChange={(e) => setStatusInput(e.target.value)} disabled={locked}>
+            <select value={statusInput} onChange={(e) => setStatusInput(e.target.value)} disabled={evidenceFrozen}>
               <option value="open">open</option>
               <option value="in_progress">in_progress</option>
-              <option value="completed">completed</option>
             </select>
-            <button type="submit" disabled={locked}>
+            <button type="submit" disabled={evidenceFrozen}>
               Add status
             </button>
           </div>
@@ -523,7 +576,7 @@ export default function WorkOrderDetailsPage() {
             type="file"
             accept="image/*"
             capture="environment"
-            disabled={locked || qcBusy}
+            disabled={evidenceFrozen || qcBusy}
             onChange={(e) => {
               const file = e.target.files?.[0] || null;
               setQcPhotoFromFile(file);
@@ -535,7 +588,7 @@ export default function WorkOrderDetailsPage() {
             className="visually-hidden"
             type="file"
             accept="image/*"
-            disabled={locked || qcBusy}
+            disabled={evidenceFrozen || qcBusy}
             onChange={(e) => {
               const file = e.target.files?.[0] || null;
               setQcPhotoFromFile(file);
@@ -550,7 +603,7 @@ export default function WorkOrderDetailsPage() {
               Choose from library
             </label>
             {qcPhotoFile && (
-              <button type="button" className="photo-upload-clear" disabled={locked || qcBusy} onClick={() => setQcPhotoFromFile(null)}>
+              <button type="button" className="photo-upload-clear" disabled={evidenceFrozen || qcBusy} onClick={() => setQcPhotoFromFile(null)}>
                 Remove photo
               </button>
             )}
@@ -583,12 +636,12 @@ export default function WorkOrderDetailsPage() {
             value={qcForm.image_url}
             onChange={(e) => setQcForm((prev) => ({ ...prev, image_url: e.target.value }))}
             style={{ marginBottom: 8 }}
-            disabled={locked || qcBusy}
+            disabled={evidenceFrozen || qcBusy}
           />
           <select
             value={qcForm.uploaded_by}
             onChange={(e) => setQcForm((prev) => ({ ...prev, uploaded_by: e.target.value }))}
-            disabled={locked || qcBusy}
+            disabled={evidenceFrozen || qcBusy}
           >
             <option value="">Uploaded by (optional)</option>
             {users.map((u) => (
@@ -597,7 +650,7 @@ export default function WorkOrderDetailsPage() {
               </option>
             ))}
           </select>
-          <button type="submit" style={{ marginTop: 8 }} disabled={locked || qcBusy}>
+          <button type="submit" style={{ marginTop: 8 }} disabled={evidenceFrozen || qcBusy}>
             {qcBusy ? "Working…" : "Add QC picture"}
           </button>
         </form>
@@ -635,7 +688,7 @@ export default function WorkOrderDetailsPage() {
             value={retForm.equipment_type}
             onChange={(e) => setRetForm((prev) => ({ ...prev, equipment_type: e.target.value }))}
             style={{ marginBottom: 8 }}
-            disabled={locked}
+            disabled={evidenceFrozen}
           />
           <input
             type="number"
@@ -643,9 +696,9 @@ export default function WorkOrderDetailsPage() {
             value={retForm.quantity}
             onChange={(e) => setRetForm((prev) => ({ ...prev, quantity: e.target.value }))}
             style={{ marginBottom: 8 }}
-            disabled={locked}
+            disabled={evidenceFrozen}
           />
-          <button type="submit" disabled={locked}>
+          <button type="submit" disabled={evidenceFrozen}>
             Add return line
           </button>
         </form>

@@ -236,7 +236,6 @@ export default function WorkOrdersPage() {
                 <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
                   <option value="open">open</option>
                   <option value="in_progress">in_progress</option>
-                  <option value="completed">completed</option>
                 </select>
               </div>
               <button type="submit" disabled={saving}>
@@ -302,7 +301,6 @@ export default function WorkOrdersPage() {
                     >
                       <option value="open">open</option>
                       <option value="in_progress">in_progress</option>
-                      <option value="completed">completed</option>
                     </select>
                     <div className="one-hand-actions" style={{ marginTop: 10 }}>
                       <button type="button" onClick={() => saveRow(w)}>
@@ -361,7 +359,6 @@ export default function WorkOrdersPage() {
                           >
                             <option value="open">open</option>
                             <option value="in_progress">in_progress</option>
-                            <option value="completed">completed</option>
                           </select>
                         </td>
                         <td>

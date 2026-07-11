@@ -1,4 +1,6 @@
 from datetime import date, datetime
+import base64
+import binascii
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
@@ -260,6 +262,10 @@ class WorkOrderRead(WorkOrderCreate):
     customer_signature_name: str | None = None
     customer_signature_data: str | None = None
     customer_signed_at: datetime | None = None
+    completion_requested_by: int | None = None
+    completion_requested_at: datetime | None = None
+    completion_approved_by: int | None = None
+    completion_approved_at: datetime | None = None
     is_locked: bool = False
     created_at: datetime
     updated_at: datetime
@@ -422,7 +428,38 @@ class WorkOrderFlowAction(BaseModel):
             raise ValueError("Customer signature must be a PNG data URL")
         if len(value) > 1_500_000:
             raise ValueError("Customer signature exceeds the 1.5 MB limit")
+        try:
+            decoded = base64.b64decode(value.split(",", 1)[1], validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("Customer signature contains invalid base64 data") from exc
+        if not decoded.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("Customer signature is not a valid PNG image")
         return value
+
+
+class CompletionPolicyUpsert(BaseModel):
+    job_type: str | None = Field(default=None, max_length=120)
+    require_repair_result: bool = False
+    require_customer_signature: bool = False
+    require_completion_photo: bool = False
+    require_all_checklist_items: bool = False
+    require_parts_usage: bool = False
+    require_manager_approval: bool = False
+
+
+class CompletionPolicyRead(BaseModel):
+    id: int | None = None
+    organization_id: int
+    job_type: str | None = None
+    source: str = "legacy_default"
+    require_repair_result: bool = False
+    require_customer_signature: bool = False
+    require_completion_photo: bool = False
+    require_all_checklist_items: bool = False
+    require_parts_usage: bool = False
+    require_manager_approval: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class LowStockAlert(BaseModel):

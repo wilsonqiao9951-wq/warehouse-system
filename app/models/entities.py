@@ -190,6 +190,25 @@ class Equipment(Base):
     organization = relationship("Organization")
 
 
+class CompletionPolicy(Base):
+    __tablename__ = "completion_policies"
+    __table_args__ = (UniqueConstraint("organization_id", "job_type_key", name="uq_completion_policy_org_job_type"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    job_type_key: Mapped[str] = mapped_column(String(120), default="*", nullable=False)
+    require_repair_result: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    require_customer_signature: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    require_completion_photo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    require_all_checklist_items: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    require_parts_usage: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    require_manager_approval: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    organization = relationship("Organization")
+
+
 class WorkOrder(Base):
     __tablename__ = "work_orders"
 
@@ -225,6 +244,10 @@ class WorkOrder(Base):
     customer_signature_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     customer_signature_data: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_signed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completion_requested_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    completion_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completion_approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    completion_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_locked: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -235,6 +258,8 @@ class WorkOrder(Base):
     organization = relationship("Organization")
     customer = relationship("Customer")
     equipment = relationship("Equipment")
+    completion_requester = relationship("User", foreign_keys=[completion_requested_by])
+    completion_approver = relationship("User", foreign_keys=[completion_approved_by])
 
 
 class InventoryTransaction(Base):
