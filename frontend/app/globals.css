@@ -245,6 +245,17 @@ td {
   font-size: 15px;
 }
 
+.sync-banner {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: #155eef;
+  color: #fff;
+  padding: 8px 16px;
+  text-align: center;
+  font-size: 14px;
+}
+
 .install-btn {
   position: fixed;
   right: 12px;

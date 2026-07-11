@@ -98,7 +98,15 @@ async function xhrUploadPartPhoto(
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (typeof navigator !== "undefined" && !navigator.onLine) {
-    throw new Error("You are offline. Connect to the network and try again.");
+    const method = init?.method || "GET";
+    if (method !== "GET" && typeof window !== "undefined" && typeof init?.body === "string") {
+      const queue = JSON.parse(window.localStorage.getItem("opf_offline_queue") || "[]") as Array<{ path: string; method: string; body: string; queuedAt: string }>;
+      queue.push({ path, method, body: init.body, queuedAt: new Date().toISOString() });
+      window.localStorage.setItem("opf_offline_queue", JSON.stringify(queue));
+      window.dispatchEvent(new Event("opf-offline-queued"));
+      return { queued: true } as T;
+    }
+    throw new Error("You are offline. This action will be available when connection returns.");
   }
   const isFormData = init?.body instanceof FormData;
   let authHeaders: Record<string, string> = {};
@@ -143,6 +151,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(detail);
   }
   return (await res.json()) as T;
+}
+
+export async function syncOfflineQueue(): Promise<number> {
+  if (typeof window === "undefined" || !navigator.onLine) return 0;
+  const queue = JSON.parse(window.localStorage.getItem("opf_offline_queue") || "[]") as Array<{ path: string; method: string; body: string; queuedAt: string }>;
+  if (!queue.length) return 0;
+  let synced = 0;
+  for (const item of queue) {
+    try { await request(item.path, { method: item.method, body: item.body }); synced += 1; } catch { break; }
+  }
+  const remaining = queue.slice(synced);
+  if (remaining.length) window.localStorage.setItem("opf_offline_queue", JSON.stringify(remaining));
+  else window.localStorage.removeItem("opf_offline_queue");
+  return synced;
 }
 
 export const api = {
