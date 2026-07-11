@@ -919,6 +919,23 @@ def inventory_notifications(
     return db.scalars(select(InventoryNotification).where(InventoryNotification.status == status).order_by(InventoryNotification.id.desc()).limit(100)).all()
 
 
+@router.patch("/inventory/notifications/{notification_id}", response_model=InventoryNotificationRead)
+def update_inventory_notification(
+    notification_id: int,
+    status: str = Query(..., pattern="^(open|acknowledged|resolved)$"),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    notification = db.get(InventoryNotification, notification_id)
+    if not notification:
+        raise HTTPException(status_code=404, detail="Inventory notification not found")
+    notification.status = status
+    db.commit()
+    db.refresh(notification)
+    return notification
+
+
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])
 def work_order_part_recommendations(
     work_order_id: int,
