@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 from hashlib import sha256
 from io import BytesIO
 import json
+import secrets
 from pathlib import Path
 from uuid import uuid4
 
@@ -27,6 +28,7 @@ from app.models import (
     ReturnEquipment,
     TransactionType,
     User,
+    UserInvitation,
     UserRole,
     Warehouse,
     WorkOrder,
@@ -45,6 +47,10 @@ from app.schemas import (
     WorkOrderFlowAction,
     InventoryTransactionRead,
     ImportBatchRead,
+    InvitationAccept,
+    InvitationCreate,
+    InvitationCreated,
+    InvitationInfo,
     AdminWarehouseDashboard,
     EngineerDashboard,
     PartCreate,
@@ -157,6 +163,92 @@ def auth_me(db: Session = Depends(get_db), actor: Actor = Depends(get_current_ac
     user = db.get(User, actor.user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+@router.post("/users/invitations", response_model=InvitationCreated)
+def create_user_invitation(
+    payload: InvitationCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    email = payload.email.strip().lower()
+    if db.scalar(select(User.id).where(func.lower(User.email) == email)):
+        raise HTTPException(status_code=409, detail="A user with this email already exists")
+    now = datetime.utcnow()
+    pending = db.scalars(
+        select(UserInvitation).where(
+            func.lower(UserInvitation.email) == email,
+            UserInvitation.used_at.is_(None),
+        )
+    ).all()
+    for invitation in pending:
+        invitation.used_at = now
+    raw_token = secrets.token_urlsafe(32)
+    invitation = UserInvitation(
+        email=email,
+        name=payload.name.strip(),
+        role=payload.role,
+        token_hash=sha256(raw_token.encode()).hexdigest(),
+        invited_by=actor.user_id,
+        expires_at=now + timedelta(hours=settings.invitation_expire_hours),
+    )
+    db.add(invitation)
+    db.commit()
+    db.refresh(invitation)
+    base_url = settings.frontend_public_url.rstrip("/")
+    return InvitationCreated(
+        id=invitation.id,
+        email=invitation.email,
+        name=invitation.name,
+        role=invitation.role,
+        expires_at=invitation.expires_at,
+        invitation_url=f"{base_url}/accept-invitation?token={raw_token}",
+    )
+
+
+def _valid_invitation(db: Session, raw_token: str) -> UserInvitation:
+    token_hash = sha256(raw_token.encode()).hexdigest()
+    invitation = db.scalar(select(UserInvitation).where(UserInvitation.token_hash == token_hash))
+    if not invitation or invitation.used_at is not None or invitation.expires_at <= datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Invitation is invalid or expired")
+    organization = db.get(Organization, invitation.organization_id)
+    if not organization or not organization.is_active:
+        raise HTTPException(status_code=400, detail="Organization is inactive")
+    return invitation
+
+
+@router.get("/auth/invitations/{token}", response_model=InvitationInfo)
+def invitation_info(token: str, db: Session = Depends(get_db)):
+    invitation = _valid_invitation(db, token)
+    organization = db.get(Organization, invitation.organization_id)
+    return InvitationInfo(
+        email=invitation.email,
+        name=invitation.name,
+        role=invitation.role,
+        organization_name=organization.name,
+        expires_at=invitation.expires_at,
+    )
+
+
+@router.post("/auth/invitations/accept", response_model=UserRead)
+def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
+    invitation = _valid_invitation(db, payload.token)
+    if db.scalar(select(User.id).where(func.lower(User.email) == invitation.email.lower())):
+        raise HTTPException(status_code=409, detail="A user with this email already exists")
+    user = User(
+        organization_id=invitation.organization_id,
+        name=invitation.name,
+        email=invitation.email,
+        role=invitation.role,
+        password_hash=hash_password(payload.password),
+        is_active=True,
+    )
+    invitation.used_at = datetime.utcnow()
+    db.add_all([user, invitation])
+    db.commit()
+    db.refresh(user)
     return user
 
 

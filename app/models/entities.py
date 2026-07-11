@@ -268,3 +268,22 @@ class ImportBatch(Base):
 
     organization = relationship("Organization")
     creator = relationship("User")
+
+
+class UserInvitation(Base):
+    __tablename__ = "user_invitations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    role: Mapped[UserRole] = mapped_column(SqlEnum(UserRole), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    invited_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    organization = relationship("Organization")
+    inviter = relationship("User")

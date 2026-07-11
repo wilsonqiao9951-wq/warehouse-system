@@ -18,6 +18,7 @@ from app.models import (
     QCPicture,
     ReturnEquipment,
     User,
+    UserInvitation,
     UserRole,
     Warehouse,
     WorkOrder,
@@ -37,6 +38,7 @@ TENANT_MODELS = (
     ReturnEquipment,
     AuditLog,
     ImportBatch,
+    UserInvitation,
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)

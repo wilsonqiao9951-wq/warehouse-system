@@ -48,6 +48,23 @@ export interface ImportBatch {
   created_at: string;
 }
 
+export interface InvitationCreated {
+  id: number;
+  email: string;
+  name: string;
+  role: UserRole;
+  expires_at: string;
+  invitation_url: string;
+}
+
+export interface InvitationInfo {
+  email: string;
+  name: string;
+  role: UserRole;
+  organization_name: string;
+  expires_at: string;
+}
+
 export interface Warehouse {
   id: number;
   name: string;

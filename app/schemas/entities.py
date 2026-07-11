@@ -31,6 +31,34 @@ class PasswordSet(BaseModel):
     password: str = Field(min_length=10, max_length=128)
 
 
+class InvitationCreate(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    name: str = Field(min_length=2, max_length=120)
+    role: UserRole = UserRole.ENGINEER
+
+
+class InvitationCreated(BaseModel):
+    id: int
+    email: str
+    name: str
+    role: UserRole
+    expires_at: datetime
+    invitation_url: str
+
+
+class InvitationInfo(BaseModel):
+    email: str
+    name: str
+    role: UserRole
+    organization_name: str
+    expires_at: datetime
+
+
+class InvitationAccept(BaseModel):
+    token: str = Field(min_length=20, max_length=500)
+    password: str = Field(min_length=10, max_length=128)
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

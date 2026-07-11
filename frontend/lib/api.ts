@@ -15,6 +15,8 @@ import {
   AbnormalUsageRow,
   AuthToken,
   ImportBatch,
+  InvitationCreated,
+  InvitationInfo,
   WorkOrderProfit
 } from "@/types";
 
@@ -147,6 +149,15 @@ export const api = {
     });
   },
   getMe: () => request<User>("/auth/me"),
+  createInvitation: (payload: { name: string; email: string; role: string }) =>
+    request<InvitationCreated>("/users/invitations", { method: "POST", body: JSON.stringify(payload) }),
+  getInvitation: (token: string) =>
+    request<InvitationInfo>(`/auth/invitations/${encodeURIComponent(token)}`),
+  acceptInvitation: (token: string, password: string) =>
+    request<User>("/auth/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify({ token, password })
+    }),
   listOrganizations: () => request<Organization[]>("/platform/organizations"),
   createOrganization: (payload: {
     name: string;
