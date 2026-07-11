@@ -26,6 +26,8 @@ Recommended fields:
 | `image_url` | Optional product image |
 | `notes` | Operational notes, substitutions, compatibility |
 
+Generic item fields are also supported: `category`, `barcode`, `item_type`, `tracking_mode` (`none`, `batch`, or `serial`) and `is_active`. Any column beginning with `custom_` is preserved in the item's customer-specific custom field map—for example, `custom_color` or `custom_internal_code`.
+
 Collect separately: customer legal/display name, warehouses, van assignments, users and roles, opening stock by warehouse, and desired work-order numbering policy.
 
 ## 2. Profile and map

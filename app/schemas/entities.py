@@ -112,6 +112,12 @@ class WarehouseRead(WarehouseCreate):
 class PartCreate(BaseModel):
     part_number: str
     name: str
+    category: str | None = None
+    barcode: str | None = None
+    item_type: str = "stock"
+    tracking_mode: str = Field(default="none", pattern=r"^(none|batch|serial)$")
+    is_active: bool = True
+    custom_fields: dict = Field(default_factory=dict)
     english_name: str | None = None
     machine_type: str | None = None
     unit: str = "pcs"

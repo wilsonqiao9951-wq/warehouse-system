@@ -87,6 +87,11 @@ router = APIRouter()
 PART_IMPORT_FIELDS = {
     "part_number",
     "name",
+    "category",
+    "barcode",
+    "item_type",
+    "tracking_mode",
+    "is_active",
     "english_name",
     "machine_type",
     "unit",
@@ -993,15 +998,22 @@ async def preview_parts_import(
         raise HTTPException(status_code=400, detail=f"Missing required columns: {', '.join(missing)}")
 
     field_indexes = {field: headers.index(field) for field in PART_IMPORT_FIELDS if field in headers}
+    custom_indexes = {header: index for index, header in enumerate(headers) if header.startswith("custom_")}
     normalized_rows: list[dict] = []
     errors: list[dict] = []
     seen_numbers: set[str] = set()
+    seen_barcodes: set[str] = set()
     total_rows = 0
     for row_number, row in enumerate(worksheet.iter_rows(min_row=2, values_only=True), start=2):
         if not row or not any(value not in (None, "") for value in row):
             continue
         total_rows += 1
         values = {field: row[index] if index < len(row) else None for field, index in field_indexes.items()}
+        custom_fields = {
+            field.removeprefix("custom_"): row[index]
+            for field, index in custom_indexes.items()
+            if index < len(row) and row[index] not in (None, "")
+        }
         part_number = str(values.get("part_number") or "").strip()
         name = str(values.get("name") or "").strip()
         row_errors: list[str] = []
@@ -1013,6 +1025,17 @@ async def preview_parts_import(
             row_errors.append("duplicate part_number in file")
         if part_number:
             seen_numbers.add(part_number)
+        barcode = str(values.get("barcode") or "").strip() or None
+        if barcode and barcode in seen_barcodes:
+            row_errors.append("duplicate barcode in file")
+        if barcode:
+            seen_barcodes.add(barcode)
+            barcode_owner = db.scalar(select(Part).where(Part.barcode == barcode))
+            if barcode_owner and barcode_owner.part_number != part_number:
+                row_errors.append("barcode already belongs to another item")
+        tracking_mode = str(values.get("tracking_mode") or "none").strip().lower()
+        if tracking_mode not in {"none", "batch", "serial"}:
+            row_errors.append("tracking_mode must be none, batch, or serial")
         try:
             default_cost = _parse_non_negative_number(values.get("default_cost"), float, "default_cost")
             safety_stock = _parse_non_negative_number(values.get("safety_stock"), int, "safety_stock")
@@ -1029,6 +1052,12 @@ async def preview_parts_import(
                 "row_number": row_number,
                 "part_number": part_number,
                 "name": name,
+                "category": str(values.get("category") or "").strip() or None,
+                "barcode": barcode,
+                "item_type": str(values.get("item_type") or "stock").strip() or "stock",
+                "tracking_mode": tracking_mode,
+                "is_active": str(values.get("is_active") or "true").strip().lower() not in {"false", "0", "no"},
+                "custom_fields": custom_fields,
                 "english_name": str(values.get("english_name") or "").strip() or None,
                 "machine_type": str(values.get("machine_type") or "").strip() or None,
                 "unit": str(values.get("unit") or "pcs").strip() or "pcs",

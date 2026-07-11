@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SqlEnum, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Enum as SqlEnum, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -73,12 +73,21 @@ class Warehouse(Base):
 
 class Part(Base):
     __tablename__ = "parts"
-    __table_args__ = (UniqueConstraint("organization_id", "part_number", name="uq_parts_org_part_number"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "part_number", name="uq_parts_org_part_number"),
+        UniqueConstraint("organization_id", "barcode", name="uq_parts_org_barcode"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
     part_number: Mapped[str] = mapped_column(String(120), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    barcode: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    item_type: Mapped[str] = mapped_column(String(50), default="stock", nullable=False)
+    tracking_mode: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    custom_fields: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     english_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     machine_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     unit: Mapped[str] = mapped_column(String(50), default="pcs")

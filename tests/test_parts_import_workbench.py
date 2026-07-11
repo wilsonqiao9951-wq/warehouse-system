@@ -119,3 +119,27 @@ def test_same_part_number_isolated_between_customers(client):
     finally:
         settings.rbac_enforce = original_rbac
         settings.legacy_header_auth = original_legacy
+
+
+def test_item_master_preserves_barcode_tracking_and_custom_columns(client):
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append([
+        "part_number", "name", "category", "barcode", "item_type", "tracking_mode",
+        "custom_color", "custom_customer_code",
+    ])
+    worksheet.append(["GEN-1", "Generic Item", "Filters", "123456789", "stock", "batch", "blue", "C-99"])
+    output = BytesIO()
+    workbook.save(output)
+    preview = _preview(client, output.getvalue())
+    assert preview.status_code == 200
+    row = preview.json()["preview_rows"][0]
+    assert row["barcode"] == "123456789"
+    assert row["tracking_mode"] == "batch"
+    assert row["custom_fields"] == {"color": "blue", "customer_code": "C-99"}
+    committed = client.post(f"/api/imports/parts/{preview.json()['id']}/commit")
+    assert committed.status_code == 200
+    item = next(part for part in client.get("/api/parts").json() if part["part_number"] == "GEN-1")
+    assert item["category"] == "Filters"
+    assert item["barcode"] == "123456789"
+    assert item["custom_fields"]["customer_code"] == "C-99"

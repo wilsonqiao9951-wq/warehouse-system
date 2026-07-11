@@ -78,8 +78,8 @@ export default function PartsImportPage() {
           {batch.preview_rows.length > 0 && (
             <div style={{ overflowX: "auto", marginTop: 16 }}>
               <table>
-                <thead><tr><th>Row</th><th>Part number</th><th>Name</th><th>Unit</th><th>Cost</th><th>Min stock</th></tr></thead>
-                <tbody>{batch.preview_rows.map((row) => <tr key={String(row.row_number)}><td>{row.row_number}</td><td>{row.part_number}</td><td>{row.name}</td><td>{row.unit}</td><td>{row.default_cost}</td><td>{row.min_stock}</td></tr>)}</tbody>
+                <thead><tr><th>Row</th><th>Item number</th><th>Name</th><th>Category</th><th>Barcode</th><th>Tracking</th><th>Unit</th><th>Cost</th></tr></thead>
+                <tbody>{batch.preview_rows.map((row) => <tr key={String(row.row_number)}><td>{row.row_number}</td><td>{row.part_number}</td><td>{row.name}</td><td>{row.category}</td><td>{row.barcode}</td><td>{row.tracking_mode}</td><td>{row.unit}</td><td>{row.default_cost}</td></tr>)}</tbody>
               </table>
             </div>
           )}

@@ -76,6 +76,12 @@ export interface Part {
   id: number;
   part_number: string;
   name: string;
+  category?: string | null;
+  barcode?: string | null;
+  item_type: string;
+  tracking_mode: "none" | "batch" | "serial";
+  is_active: boolean;
+  custom_fields: Record<string, unknown>;
   unit: string;
   default_cost: number;
   safety_stock: number;
