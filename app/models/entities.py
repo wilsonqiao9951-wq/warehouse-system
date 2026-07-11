@@ -332,6 +332,21 @@ class InventoryNotification(Base):
     warehouse = relationship("Warehouse")
 
 
+class ReplenishmentRequest(Base):
+    __tablename__ = "replenishment_requests"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False)
+    destination_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    source_warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id"), nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    work_order_id: Mapped[int | None] = mapped_column(ForeignKey("work_orders.id"), nullable=True)
+    requested_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="requested", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class ImportBatch(Base):
     __tablename__ = "import_batches"
 

@@ -21,6 +21,7 @@ from app.models import (
     AuditLog,
     InventoryTransaction,
     InventoryNotification,
+    ReplenishmentRequest,
     ImportBatch,
     JobStatus,
     Organization,
@@ -66,6 +67,7 @@ from app.schemas import (
     PartMachineAssociationRead,
     WorkOrderPartRecommendation,
     InventoryNotificationRead,
+    ReplenishmentRequestRead,
     OrganizationCreate,
     OrganizationRead,
     OrganizationUpdate,
@@ -934,6 +936,33 @@ def update_inventory_notification(
     db.commit()
     db.refresh(notification)
     return notification
+
+
+@router.post("/inventory/notifications/{notification_id}/create-request", response_model=ReplenishmentRequestRead)
+def create_replenishment_request(
+    notification_id: int,
+    quantity: int = Query(default=1, ge=1),
+    source_warehouse_id: int | None = Query(default=None),
+    db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    notification = db.get(InventoryNotification, notification_id)
+    if not notification:
+        raise HTTPException(status_code=404, detail="Inventory notification not found")
+    request = ReplenishmentRequest(
+        part_id=notification.part_id, destination_warehouse_id=notification.warehouse_id,
+        source_warehouse_id=source_warehouse_id, quantity=quantity,
+        work_order_id=notification.work_order_id, requested_by=actor.user_id,
+    )
+    notification.status = "acknowledged"
+    db.add(request); db.commit(); db.refresh(request)
+    return request
+
+
+@router.get("/inventory/replenishment-requests", response_model=list[ReplenishmentRequestRead])
+def list_replenishment_requests(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    return db.scalars(select(ReplenishmentRequest).order_by(ReplenishmentRequest.id.desc()).limit(100)).all()
 
 
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])

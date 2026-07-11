@@ -339,6 +339,21 @@ class InventoryNotificationRead(BaseModel):
         from_attributes = True
 
 
+class ReplenishmentRequestRead(BaseModel):
+    id: int
+    part_id: int
+    destination_warehouse_id: int
+    source_warehouse_id: int | None = None
+    quantity: int
+    work_order_id: int | None = None
+    requested_by: int | None = None
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class InventoryScanRequest(BaseModel):
     barcode: str | None = None
     part_number: str | None = None
