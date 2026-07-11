@@ -168,6 +168,17 @@ export const api = {
   commitPartsImport: (batchId: number) =>
     request<ImportBatch>(`/imports/parts/${batchId}/commit`, { method: "POST", body: JSON.stringify({}) }),
   listPartsImports: () => request<ImportBatch[]>("/imports/parts?limit=50"),
+  previewOpeningInventoryImport: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<ImportBatch>("/imports/opening-inventory/preview", { method: "POST", body: form });
+  },
+  commitOpeningInventoryImport: (batchId: number) =>
+    request<ImportBatch>(`/imports/opening-inventory/${batchId}/commit`, {
+      method: "POST",
+      body: JSON.stringify({})
+    }),
+  listOpeningInventoryImports: () => request<ImportBatch[]>("/imports/opening-inventory?limit=50"),
   listWorkOrders: (params?: {
     skip?: number;
     limit?: number;

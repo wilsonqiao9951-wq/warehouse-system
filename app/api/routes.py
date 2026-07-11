@@ -25,6 +25,7 @@ from app.models import (
     Part,
     QCPicture,
     ReturnEquipment,
+    TransactionType,
     User,
     UserRole,
     Warehouse,
@@ -69,6 +70,7 @@ from app.schemas import (
 from app.services.inventory import (
     create_transaction,
     get_employee_van_inventory,
+    get_stock_quantity,
     get_stock_balances,
     get_work_order_parts_cost,
     use_part_on_work_order,
@@ -1019,6 +1021,172 @@ def list_parts_imports(
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     batches = db.scalars(
         select(ImportBatch).where(ImportBatch.import_type == "parts").order_by(ImportBatch.id.desc()).offset(skip).limit(limit)
+    ).all()
+    return [_import_batch_read(batch) for batch in batches]
+
+
+@router.post("/imports/opening-inventory/preview", response_model=ImportBatchRead)
+async def preview_opening_inventory_import(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Please upload an .xlsx file")
+    content = await file.read(settings.max_import_upload_bytes + 1)
+    if len(content) > settings.max_import_upload_bytes:
+        raise HTTPException(status_code=413, detail="Import file exceeds the configured upload limit")
+    file_hash = sha256(content).hexdigest()
+    existing_batch = db.scalar(
+        select(ImportBatch)
+        .where(ImportBatch.import_type == "opening_inventory", ImportBatch.file_sha256 == file_hash)
+        .order_by(ImportBatch.id.desc())
+    )
+    if existing_batch:
+        return _import_batch_read(existing_batch)
+
+    try:
+        workbook = load_workbook(filename=BytesIO(content), data_only=True, read_only=True)
+        worksheet = workbook.active
+        raw_headers = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="The uploaded workbook could not be read") from exc
+    if not raw_headers:
+        raise HTTPException(status_code=400, detail="The workbook is empty")
+    headers = [_normalize_import_header(value) for value in raw_headers]
+    missing = [field for field in ("part_number", "warehouse", "quantity") if field not in headers]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing required columns: {', '.join(missing)}")
+
+    indexes = {field: headers.index(field) for field in ("part_number", "warehouse", "quantity", "unit_cost", "notes") if field in headers}
+    parts = {part.part_number: part for part in db.scalars(select(Part)).all()}
+    warehouses = {warehouse.name.strip().lower(): warehouse for warehouse in db.scalars(select(Warehouse)).all()}
+    normalized_rows: list[dict] = []
+    errors: list[dict] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    total_rows = 0
+    for row_number, row in enumerate(worksheet.iter_rows(min_row=2, values_only=True), start=2):
+        if not row or not any(value not in (None, "") for value in row):
+            continue
+        total_rows += 1
+        values = {field: row[index] if index < len(row) else None for field, index in indexes.items()}
+        part_number = str(values.get("part_number") or "").strip()
+        warehouse_name = str(values.get("warehouse") or "").strip()
+        part = parts.get(part_number)
+        warehouse = warehouses.get(warehouse_name.lower())
+        row_errors: list[str] = []
+        if not part:
+            row_errors.append("part_number does not exist in this organization")
+        if not warehouse:
+            row_errors.append("warehouse does not exist in this organization")
+        pair = (part_number, warehouse_name.lower())
+        if part_number and warehouse_name and pair in seen_pairs:
+            row_errors.append("duplicate part and warehouse in file")
+        seen_pairs.add(pair)
+        try:
+            quantity = int(values.get("quantity"))
+            if quantity <= 0:
+                raise ValueError("quantity must be greater than zero")
+        except (TypeError, ValueError) as exc:
+            row_errors.append(str(exc) if str(exc) else "quantity must be a whole number")
+            quantity = 0
+        try:
+            unit_cost = _parse_non_negative_number(values.get("unit_cost"), float, "unit_cost")
+        except (TypeError, ValueError) as exc:
+            row_errors.append(str(exc))
+            unit_cost = 0.0
+        if row_errors:
+            errors.append({"row": row_number, "part_number": part_number or None, "messages": row_errors})
+            continue
+        current_quantity = get_stock_quantity(db, part.id, warehouse.id)
+        normalized_rows.append(
+            {
+                "row_number": row_number,
+                "part_id": part.id,
+                "part_number": part.part_number,
+                "part_name": part.name,
+                "warehouse_id": warehouse.id,
+                "warehouse": warehouse.name,
+                "quantity": quantity,
+                "current_quantity": current_quantity,
+                "projected_quantity": current_quantity + quantity,
+                "unit_cost": unit_cost,
+                "notes": str(values.get("notes") or "").strip() or None,
+            }
+        )
+
+    batch = ImportBatch(
+        import_type="opening_inventory",
+        filename=Path(file.filename).name,
+        file_sha256=file_hash,
+        status="ready" if not errors else "invalid",
+        total_rows=total_rows,
+        valid_rows=len(normalized_rows),
+        error_rows=len(errors),
+        created_count=len(normalized_rows),
+        updated_count=0,
+        payload_json=json.dumps(normalized_rows, ensure_ascii=False),
+        errors_json=json.dumps(errors, ensure_ascii=False),
+        created_by=actor.user_id,
+    )
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return _import_batch_read(batch)
+
+
+@router.post("/imports/opening-inventory/{batch_id}/commit", response_model=ImportBatchRead)
+def commit_opening_inventory_import(
+    batch_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    batch = db.get(ImportBatch, batch_id)
+    if not batch or batch.import_type != "opening_inventory":
+        raise HTTPException(status_code=404, detail="Import batch not found")
+    if batch.status == "committed":
+        return _import_batch_read(batch)
+    if batch.status != "ready":
+        raise HTTPException(status_code=409, detail="Import batch has validation errors")
+    rows = json.loads(batch.payload_json or "[]")
+    for row in rows:
+        db.add(
+            InventoryTransaction(
+                part_id=row["part_id"],
+                transaction_type=TransactionType.INBOUND,
+                quantity=row["quantity"],
+                to_warehouse_id=row["warehouse_id"],
+                user_id=actor.user_id,
+                unit_cost=row["unit_cost"],
+                notes=f"Opening inventory import #{batch.id}. {row.get('notes') or ''}".strip(),
+            )
+        )
+    batch.status = "committed"
+    batch.created_count = len(rows)
+    batch.updated_count = 0
+    batch.committed_at = datetime.utcnow()
+    db.add(batch)
+    db.commit()
+    db.refresh(batch)
+    return _import_batch_read(batch)
+
+
+@router.get("/imports/opening-inventory", response_model=list[ImportBatchRead])
+def list_opening_inventory_imports(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    batches = db.scalars(
+        select(ImportBatch)
+        .where(ImportBatch.import_type == "opening_inventory")
+        .order_by(ImportBatch.id.desc())
+        .offset(skip)
+        .limit(limit)
     ).all()
     return [_import_batch_read(batch) for batch in batches]
 

@@ -68,6 +68,20 @@ Authorized organization administrators, managers and warehouse users can open `/
 
 The workbook columns may appear in any order. Duplicate uploads return the existing batch, and confirming an already committed batch does not import it again. `part_number` is unique inside an organization, so different customers may use the same SKU without sharing records.
 
+### Opening inventory workbench
+
+After Parts and Warehouses are confirmed, open `/inventory-import` and upload an `.xlsx` containing:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `part_number` | Yes | Existing Part in the current organization |
+| `warehouse` | Yes | Existing warehouse or Van name in the current organization |
+| `quantity` | Yes | Positive whole-number opening quantity |
+| `unit_cost` | No | Non-negative unit cost for the inbound transaction |
+| `notes` | No | Source count, location or reconciliation note |
+
+The preview shows current quantity, proposed opening quantity and projected quantity for each warehouse/SKU pair. Confirmation creates inbound inventory transactions; it does not overwrite or erase historical transactions. Duplicate confirmation is idempotent. Keep the physical count approval with the import batch record.
+
 ## 5. Customer acceptance and cutover
 
 The customer signs off on the part catalog and opening balances. Then import users, warehouses, parts, stock and open work orders in that order. Run a limited pilot before broad rollout.
