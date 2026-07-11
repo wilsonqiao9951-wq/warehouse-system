@@ -257,6 +257,21 @@ td {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
 }
 
+.install-hint {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 59;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #102a56;
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(16, 42, 86, .25);
+}
+
 body.has-bottom-nav .install-btn {
   bottom: calc(96px + env(safe-area-inset-bottom));
 }

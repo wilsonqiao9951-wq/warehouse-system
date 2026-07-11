@@ -30,8 +30,11 @@ const links = [
 ];
 
 function sortEngineerLinks(items: typeof links) {
-  const order = ["/today", "/map", "/my-jobs", "/my-van-inventory", "/profile"];
-  return [...items].sort((a, b) => order.indexOf(a.href) - order.indexOf(b.href));
+  const order = ["/today", "/my-jobs", "/inventory-scan", "/my-van-inventory", "/profile", "/map", "/part-observation"];
+  return [...items].sort((a, b) => {
+    const ai = order.indexOf(a.href); const bi = order.indexOf(b.href);
+    return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);
+  });
 }
 
 export default function Nav() {

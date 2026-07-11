@@ -10,6 +10,7 @@ export default function PwaClient() {
   const [canInstall, setCanInstall] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<DeferredPromptEvent | null>(null);
   const [offline, setOffline] = useState(false);
+  const [iosInstallHint, setIosInstallHint] = useState(false);
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -25,6 +26,8 @@ export default function PwaClient() {
     const onOnline = () => setOffline(false);
     const onOffline = () => setOffline(true);
     setOffline(!navigator.onLine);
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !("standalone" in window.navigator && (window.navigator as Navigator & { standalone?: boolean }).standalone);
+    setIosInstallHint(ios);
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstall);
     window.addEventListener("online", onOnline);
@@ -55,6 +58,9 @@ export default function PwaClient() {
         <button type="button" className="install-btn" onClick={triggerInstall}>
           Install app
         </button>
+      )}
+      {iosInstallHint && !offline && (
+        <div className="install-hint" role="status">Install OpenPartsFlow: tap Share, then “Add to Home Screen”.</div>
       )}
     </>
   );
