@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -930,18 +930,23 @@ def work_order_part_recommendations(
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     memories = db.scalars(select(WorkOrderPartMemory).where(
-        WorkOrderPartMemory.machine_type == work_order.machine_type,
-        WorkOrderPartMemory.job_type == work_order.job_type,
+        or_(
+            and_(WorkOrderPartMemory.machine_type == work_order.machine_type, WorkOrderPartMemory.job_type == work_order.job_type),
+            WorkOrderPartMemory.machine_type == work_order.machine_type,
+            WorkOrderPartMemory.job_type == work_order.job_type,
+        )
     ).order_by(WorkOrderPartMemory.usage_count.desc(), WorkOrderPartMemory.total_quantity.desc()).limit(20)).all()
     recommendations = []
     for memory in memories:
         part = db.get(Part, memory.part_id)
         if part:
             average = max(1, round(memory.total_quantity / memory.usage_count))
+            exact = memory.machine_type == work_order.machine_type and memory.job_type == work_order.job_type
+            basis = "相同机型和工单类型" if exact else ("相同机型" if memory.machine_type == work_order.machine_type else "相同工单类型")
             recommendations.append(WorkOrderPartRecommendation(
                 part=PartRead.model_validate(part), recommended_quantity=average,
                 usage_count=memory.usage_count, total_quantity=memory.total_quantity,
-                reason=f"历史上 {memory.usage_count} 个类似工单使用过，平均每单 {average} 件。",
+                reason=f"基于{basis}：历史上 {memory.usage_count} 个类似工单使用过，平均每单 {average} 件。",
             ))
     return recommendations
 
