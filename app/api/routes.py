@@ -965,6 +965,23 @@ def list_replenishment_requests(db: Session = Depends(get_db), actor: Actor = De
     return db.scalars(select(ReplenishmentRequest).order_by(ReplenishmentRequest.id.desc()).limit(100)).all()
 
 
+@router.patch("/inventory/replenishment-requests/{request_id}", response_model=ReplenishmentRequestRead)
+def update_replenishment_request(
+    request_id: int,
+    status: str = Query(..., pattern="^(requested|picking|shipped|received|completed|cancelled)$"),
+    db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
+    request = db.get(ReplenishmentRequest, request_id)
+    if not request:
+        raise HTTPException(status_code=404, detail="Replenishment request not found")
+    if actor.role == UserRole.ENGINEER and status not in {"received"}:
+        raise HTTPException(status_code=403, detail="Engineers can only confirm receipt")
+    request.status = status
+    db.commit(); db.refresh(request)
+    return request
+
+
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])
 def work_order_part_recommendations(
     work_order_id: int,

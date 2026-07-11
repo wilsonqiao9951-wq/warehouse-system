@@ -241,6 +241,7 @@ export const api = {
   updateInventoryNotification: (id: number, status: string) => request<InventoryNotification>(`/inventory/notifications/${id}?status=${status}`, { method: "PATCH" }),
   createReplenishmentRequest: (id: number, quantity: number, sourceWarehouseId?: number) => request<ReplenishmentRequest>(`/inventory/notifications/${id}/create-request?quantity=${quantity}${sourceWarehouseId ? `&source_warehouse_id=${sourceWarehouseId}` : ""}`, { method: "POST" }),
   listReplenishmentRequests: () => request<ReplenishmentRequest[]>("/inventory/replenishment-requests"),
+  updateReplenishmentRequest: (id: number, status: string) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}?status=${status}`, { method: "PATCH" }),
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),
