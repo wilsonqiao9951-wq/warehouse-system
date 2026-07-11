@@ -153,6 +153,12 @@ export interface WorkOrder {
   address?: string | null;
   contact_phone?: string | null;
   completed_at?: string | null;
+  paused_at?: string | null;
+  repair_result?: string | null;
+  checklist_json?: string | null;
+  customer_signature_name?: string | null;
+  customer_signature_data?: string | null;
+  customer_signed_at?: string | null;
   is_locked?: boolean;
   description?: string | null;
   problem_description?: string | null;

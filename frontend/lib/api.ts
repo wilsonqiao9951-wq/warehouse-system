@@ -327,8 +327,14 @@ export const api = {
     request<ReturnEquipment>("/return-equipments", { method: "POST", body: JSON.stringify(payload) }),
   startJob: (workOrderId: number) =>
     request<WorkOrder>(`/work-orders/${workOrderId}/start`, { method: "POST", body: JSON.stringify({}) }),
-  completeJob: (workOrderId: number) =>
-    request<WorkOrder>(`/work-orders/${workOrderId}/complete`, { method: "POST", body: JSON.stringify({}) }),
+  pauseJob: (workOrderId: number, notes?: string) =>
+    request<WorkOrder>(`/work-orders/${workOrderId}/pause`, { method: "POST", body: JSON.stringify({ notes }) }),
+  completeJob: (workOrderId: number, payload: {
+    repair_result?: string;
+    checklist_json?: string;
+    customer_signature_name?: string;
+    customer_signature_data?: string;
+  } = {}) => request<WorkOrder>(`/work-orders/${workOrderId}/complete`, { method: "POST", body: JSON.stringify(payload) }),
   getLowStockAlerts: () => request<LowStockAlert[]>("/inventory/low-stock-alerts?limit=300"),
   getAbnormalUsage: () => request<AbnormalUsageRow[]>("/reports/abnormal-usage?limit=300")
   ,

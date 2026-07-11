@@ -250,6 +250,12 @@ class WorkOrderRead(WorkOrderCreate):
     organization_id: int
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    paused_at: datetime | None = None
+    repair_result: str | None = None
+    checklist_json: str | None = None
+    customer_signature_name: str | None = None
+    customer_signature_data: str | None = None
+    customer_signed_at: datetime | None = None
     is_locked: bool = False
     created_at: datetime
     updated_at: datetime
@@ -398,6 +404,10 @@ class WorkOrderProfit(BaseModel):
 
 class WorkOrderFlowAction(BaseModel):
     notes: str | None = None
+    repair_result: str | None = None
+    checklist_json: str | None = None
+    customer_signature_name: str | None = None
+    customer_signature_data: str | None = None
 
 
 class LowStockAlert(BaseModel):

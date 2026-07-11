@@ -39,13 +39,26 @@ def test_full_technician_job_flow_and_lock(client):
     assert started.status_code == 200
     assert started.json()["status"] == "IN_PROGRESS"
 
+    paused = client.post(f"/api/work-orders/{wo}/pause", json={"notes": "Waiting for customer access"})
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "PAUSED"
+    resumed = client.post(f"/api/work-orders/{wo}/start", json={})
+    assert resumed.status_code == 200
+
     used = client.post(f"/api/work-orders/{wo}/use-part", json={"work_order_id": wo, "part_id": part, "warehouse_id": van, "user_id": tech, "quantity": 2, "unit_cost": 20})
     assert used.status_code == 200
 
-    completed = client.post(f"/api/work-orders/{wo}/complete", json={})
+    completed = client.post(f"/api/work-orders/{wo}/complete", json={
+        "repair_result": "Replaced failed filter and verified operation.",
+        "checklist_json": "{\"power_off\":true,\"site_clean\":true}",
+        "customer_signature_name": "Alex Customer",
+        "customer_signature_data": "data:image/png;base64,c2lnbmF0dXJl",
+    })
     assert completed.status_code == 200
     assert completed.json()["status"] == "COMPLETED"
     assert completed.json()["is_locked"] is True
+    assert completed.json()["repair_result"].startswith("Replaced")
+    assert completed.json()["customer_signed_at"] is not None
 
     blocked = client.post("/api/job-status", json={"work_order_id": wo, "status": "reopen"})
     assert blocked.status_code == 400
@@ -56,6 +69,7 @@ def test_full_technician_job_flow_and_lock(client):
     assert "start_job" in actions
     assert "use_part" in actions
     assert "complete_job" in actions
+    assert "pause_job" in actions
 
 
 def test_work_order_filters_low_stock_and_abnormal_reports(client):

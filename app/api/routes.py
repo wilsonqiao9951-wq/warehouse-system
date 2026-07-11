@@ -741,6 +741,16 @@ def complete_work_order(
         raise HTTPException(status_code=404, detail="Work order not found")
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order already completed")
+    if payload.repair_result is not None:
+        item.repair_result = payload.repair_result.strip() or None
+    if payload.checklist_json is not None:
+        item.checklist_json = payload.checklist_json
+    if payload.customer_signature_name is not None:
+        item.customer_signature_name = payload.customer_signature_name.strip() or None
+    if payload.customer_signature_data is not None:
+        item.customer_signature_data = payload.customer_signature_data
+    if item.customer_signature_name or item.customer_signature_data:
+        item.customer_signed_at = datetime.utcnow()
     _ = get_work_order_parts_cost(db, work_order_id)
     item.status = "COMPLETED"
     item.completed_at = datetime.utcnow()
@@ -748,6 +758,31 @@ def complete_work_order(
     db.add(item)
     db.add(JobStatus(work_order_id=work_order_id, status="COMPLETED", timestamp=datetime.utcnow()))
     _audit(db, actor, "complete_job", "work_order", work_order_id, {"parts_cost": get_work_order_parts_cost(db, work_order_id)})
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.post("/work-orders/{work_order_id}/pause", response_model=WorkOrderRead)
+def pause_work_order(
+    work_order_id: int,
+    payload: WorkOrderFlowAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    item = db.get(WorkOrder, work_order_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    if item.is_locked:
+        raise HTTPException(status_code=400, detail="Completed work order cannot be paused")
+    if item.status != "IN_PROGRESS":
+        raise HTTPException(status_code=409, detail="Only an in-progress work order can be paused")
+    item.status = "PAUSED"
+    item.paused_at = datetime.utcnow()
+    db.add(item)
+    db.add(JobStatus(work_order_id=work_order_id, status="PAUSED", timestamp=datetime.utcnow()))
+    _audit(db, actor, "pause_job", "work_order", work_order_id, {"notes": payload.notes})
     db.commit()
     db.refresh(item)
     return item

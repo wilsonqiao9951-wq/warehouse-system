@@ -29,6 +29,13 @@ export default function WorkOrderDetailsPage() {
   const [qcUploadPct, setQcUploadPct] = useState(0);
   const [qcBusy, setQcBusy] = useState(false);
   const [retForm, setRetForm] = useState({ equipment_type: "", quantity: "1" });
+  const [completion, setCompletion] = useState({
+    repairResult: "",
+    signatureName: "",
+    equipmentSafe: false,
+    siteClean: false,
+    customerBriefed: false
+  });
 
   const revokeQcPreview = (url: string) => {
     if (url.startsWith("blob:")) URL.revokeObjectURL(url);
@@ -106,14 +113,38 @@ export default function WorkOrderDetailsPage() {
 
   const onCompleteJob = async () => {
     if (!currentWorkOrderId) return;
+    if (!completion.repairResult.trim() || !completion.signatureName.trim()) {
+      setNotice({ type: "error", text: "Repair result and customer signature name are required." });
+      return;
+    }
     try {
-      await api.completeJob(currentWorkOrderId);
+      await api.completeJob(currentWorkOrderId, {
+        repair_result: completion.repairResult.trim(),
+        customer_signature_name: completion.signatureName.trim(),
+        checklist_json: JSON.stringify({
+          equipment_safe: completion.equipmentSafe,
+          site_clean: completion.siteClean,
+          customer_briefed: completion.customerBriefed
+        })
+      });
       setNotice({ type: "success", text: "Job completed and locked." });
       const wo = await api.listWorkOrders();
       setWorkOrders(wo);
       void reloadDetails();
     } catch (e) {
       setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to complete job." });
+    }
+  };
+
+  const onPauseJob = async () => {
+    if (!currentWorkOrderId) return;
+    try {
+      await api.pauseJob(currentWorkOrderId);
+      setNotice({ type: "success", text: "Job paused." });
+      setWorkOrders(await api.listWorkOrders());
+      void reloadDetails();
+    } catch (e) {
+      setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to pause job." });
     }
   };
 
@@ -231,7 +262,52 @@ export default function WorkOrderDetailsPage() {
               <button type="button" onClick={onCompleteJob} disabled={locked}>
                 Complete job
               </button>
+              <button type="button" onClick={onPauseJob} disabled={locked || selectedWorkOrder.status !== "IN_PROGRESS"}>
+                Pause
+              </button>
             </div>
+          </div>
+
+          <div className="card">
+            <h3 className="section-title">Field completion</h3>
+            <label>
+              Repair result
+              <textarea
+                value={completion.repairResult}
+                onChange={(e) => setCompletion((prev) => ({ ...prev, repairResult: e.target.value }))}
+                placeholder="Describe the repair, verification, and final condition"
+                disabled={locked}
+                rows={4}
+              />
+            </label>
+            <div style={{ display: "grid", gap: 8, margin: "12px 0" }}>
+              {([
+                ["equipmentSafe", "Equipment is safe and operational"],
+                ["siteClean", "Work area is clean"],
+                ["customerBriefed", "Customer was briefed on the result"]
+              ] as const).map(([key, label]) => (
+                <label key={key} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={completion[key]}
+                    onChange={(e) => setCompletion((prev) => ({ ...prev, [key]: e.target.checked }))}
+                    disabled={locked}
+                    style={{ width: 20, minHeight: 20 }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <label>
+              Customer signature name
+              <input
+                value={completion.signatureName}
+                onChange={(e) => setCompletion((prev) => ({ ...prev, signatureName: e.target.value }))}
+                placeholder="Customer full name"
+                disabled={locked}
+              />
+            </label>
+            <p className="muted">The signed name and completion checklist are stored with the locked work order.</p>
           </div>
 
           <div className="card">
