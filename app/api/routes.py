@@ -26,6 +26,7 @@ from app.models import (
     Part,
     QCPicture,
     ReturnEquipment,
+    StorageLocation,
     TransactionType,
     User,
     UserInvitation,
@@ -60,6 +61,8 @@ from app.schemas import (
     OrganizationUpdate,
     PasswordSet,
     StockBalance,
+    StorageLocationCreate,
+    StorageLocationRead,
     TokenResponse,
     UserCreate,
     UserRead,
@@ -440,7 +443,9 @@ def list_users(
 def create_warehouse(payload: WarehouseCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     _require_tenant_user(db, payload.assigned_user_id, "assigned_user_id")
-    item = Warehouse(**payload.model_dump())
+    values = payload.model_dump()
+    values["code"] = (payload.code or payload.name).strip().upper().replace(" ", "-")
+    item = Warehouse(**values)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -456,6 +461,37 @@ def list_warehouses(
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     return db.scalars(select(Warehouse).order_by(Warehouse.id.desc()).offset(skip).limit(limit)).all()
+
+
+@router.post("/storage-locations", response_model=StorageLocationRead)
+def create_storage_location(
+    payload: StorageLocationCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    if not db.get(Warehouse, payload.warehouse_id):
+        raise HTTPException(status_code=404, detail="Warehouse not found")
+    item = StorageLocation(**payload.model_dump())
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/storage-locations", response_model=list[StorageLocationRead])
+def list_storage_locations(
+    warehouse_id: int | None = None,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    query = select(StorageLocation).order_by(StorageLocation.code.asc())
+    if warehouse_id is not None:
+        if not db.get(Warehouse, warehouse_id):
+            raise HTTPException(status_code=404, detail="Warehouse not found")
+        query = query.where(StorageLocation.warehouse_id == warehouse_id)
+    return db.scalars(query).all()
 
 
 @router.post("/parts", response_model=PartRead)

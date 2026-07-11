@@ -67,9 +67,22 @@ export interface InvitationInfo {
 
 export interface Warehouse {
   id: number;
+  code?: string | null;
   name: string;
   location?: string | null;
+  warehouse_type?: string;
+  is_active?: boolean;
   assigned_user_id?: number | null;
+}
+
+export interface StorageLocation {
+  id: number;
+  warehouse_id: number;
+  code: string;
+  name?: string | null;
+  zone?: string | null;
+  location_type: string;
+  is_active: boolean;
 }
 
 export interface Part {

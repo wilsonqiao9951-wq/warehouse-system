@@ -8,6 +8,7 @@ import {
   QCPicture,
   ReturnEquipment,
   StockBalance,
+  StorageLocation,
   User,
   Warehouse,
   WorkOrder,
@@ -227,6 +228,10 @@ export const api = {
   },
   listParts: () => request<Part[]>("/parts?limit=200"),
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=200"),
+  listStorageLocations: (warehouseId?: number) =>
+    request<StorageLocation[]>(`/storage-locations${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
+  createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
+    request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),
   getVanInventory: (userId: number) =>
     request<StockBalance[]>(`/employees/${userId}/van-inventory?limit=500`),

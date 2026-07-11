@@ -93,13 +93,34 @@ class OrganizationRead(BaseModel):
 
 
 class WarehouseCreate(BaseModel):
+    code: str | None = None
     name: str
     location: str | None = None
     warehouse_type: str = "main"
+    is_active: bool = True
     assigned_user_id: int | None = None
 
 
 class WarehouseRead(WarehouseCreate):
+    id: int
+    organization_id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class StorageLocationCreate(BaseModel):
+    warehouse_id: int
+    code: str
+    name: str | None = None
+    zone: str | None = None
+    location_type: str = "bin"
+    is_active: bool = True
+
+
+class StorageLocationRead(StorageLocationCreate):
     id: int
     organization_id: int
     created_at: datetime

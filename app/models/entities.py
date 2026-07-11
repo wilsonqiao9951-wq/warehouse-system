@@ -57,18 +57,42 @@ class User(Base):
 
 class Warehouse(Base):
     __tablename__ = "warehouses"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "code", name="uq_warehouses_org_code"),
+        UniqueConstraint("organization_id", "name", name="uq_warehouses_org_name"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
-    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     warehouse_type: Mapped[str] = mapped_column(String(20), default="main")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     assigned_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     assigned_user = relationship("User")
     organization = relationship("Organization")
+
+
+class StorageLocation(Base):
+    __tablename__ = "storage_locations"
+    __table_args__ = (UniqueConstraint("warehouse_id", "code", name="uq_storage_locations_warehouse_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(80), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    zone: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    location_type: Mapped[str] = mapped_column(String(30), default="bin", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    warehouse = relationship("Warehouse")
 
 
 class Part(Base):
