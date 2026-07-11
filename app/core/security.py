@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import base64
 
 import jwt
 from jwt import InvalidTokenError
@@ -43,6 +44,17 @@ def create_access_token(user_id: int, organization_id: int) -> tuple[str, int]:
 
 def decode_access_token(token: str) -> tuple[int, int]:
     try:
+        # Reject non-canonical base64url segments. Without this check, changing
+        # unused padding bits in the final signature character can decode to the
+        # same bytes and bypass simple token-tampering checks.
+        segments = token.split(".")
+        if len(segments) != 3 or any(not segment for segment in segments):
+            raise InvalidTokenError("Malformed token")
+        for segment in segments:
+            padded = segment + "=" * (-len(segment) % 4)
+            canonical = base64.urlsafe_b64encode(base64.urlsafe_b64decode(padded)).rstrip(b"=").decode("ascii")
+            if canonical != segment:
+                raise InvalidTokenError("Non-canonical token")
         payload = jwt.decode(
             token,
             settings.jwt_secret_key,
