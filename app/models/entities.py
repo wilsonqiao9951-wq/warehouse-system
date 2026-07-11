@@ -251,6 +251,22 @@ class QCPicture(Base):
     organization = relationship("Organization")
 
 
+class WorkOrderPartMemory(Base):
+    __tablename__ = "work_order_part_memory"
+    __table_args__ = (UniqueConstraint("organization_id", "machine_type", "job_type", "part_id", name="uq_work_order_part_memory"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
+    machine_type: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    job_type: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False, index=True)
+    usage_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    total_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_used_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    part = relationship("Part")
+
+
 class JobStatus(Base):
     __tablename__ = "job_status"
 

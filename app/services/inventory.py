@@ -1,8 +1,9 @@
+from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import InventoryTransaction, Part, StorageLocation, TransactionType, User, Warehouse, WorkOrder, WorkOrderPart
+from app.models import InventoryTransaction, Part, StorageLocation, TransactionType, User, Warehouse, WorkOrder, WorkOrderPart, WorkOrderPartMemory
 from app.schemas import InventoryTransactionCreate, LocationStockBalance, StockBalance, WorkOrderPartCreate
 
 
@@ -71,6 +72,22 @@ def use_part_on_work_order(db: Session, payload: WorkOrderPartCreate) -> WorkOrd
         )
         db.add(tx)
         db.flush()
+        memory = db.scalar(select(WorkOrderPartMemory).where(
+            WorkOrderPartMemory.machine_type == (work_order.machine_type if work_order else None),
+            WorkOrderPartMemory.job_type == (work_order.job_type if work_order else None),
+            WorkOrderPartMemory.part_id == payload.part_id,
+        ))
+        if memory:
+            memory.usage_count += 1
+            memory.total_quantity += payload.quantity
+            memory.last_used_at = datetime.utcnow()
+        else:
+            db.add(WorkOrderPartMemory(
+                machine_type=work_order.machine_type if work_order else None,
+                job_type=work_order.job_type if work_order else None,
+                part_id=payload.part_id,
+                total_quantity=payload.quantity,
+            ))
         db.refresh(usage)
         return usage
 

@@ -317,6 +317,14 @@ class WorkOrderPartRead(WorkOrderPartCreate):
         from_attributes = True
 
 
+class WorkOrderPartRecommendation(BaseModel):
+    part: PartRead
+    recommended_quantity: int
+    usage_count: int
+    total_quantity: int
+    reason: str
+
+
 class InventoryScanRequest(BaseModel):
     barcode: str | None = None
     part_number: str | None = None

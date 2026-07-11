@@ -16,6 +16,7 @@ from app.models.entities import (
     Warehouse,
     WorkOrder,
     WorkOrderPart,
+    WorkOrderPartMemory,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "Warehouse",
     "WorkOrder",
     "WorkOrderPart",
+    "WorkOrderPartMemory",
 ]

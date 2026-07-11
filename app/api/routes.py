@@ -25,6 +25,7 @@ from app.models import (
     Organization,
     Part,
     PartMachineAssociation,
+    WorkOrderPartMemory,
     QCPicture,
     ReturnEquipment,
     StorageLocation,
@@ -62,6 +63,7 @@ from app.schemas import (
     PartCreate,
     PartRead,
     PartMachineAssociationRead,
+    WorkOrderPartRecommendation,
     OrganizationCreate,
     OrganizationRead,
     OrganizationUpdate,
@@ -891,6 +893,33 @@ def use_part_for_work_order(
     _audit(db, actor, "use_part", "work_order_part", usage.id, {"work_order_id": work_order_id, "part_id": payload.part_id, "qty": payload.quantity})
     db.commit()
     return usage
+
+
+@router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])
+def work_order_part_recommendations(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    work_order = db.get(WorkOrder, work_order_id)
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    memories = db.scalars(select(WorkOrderPartMemory).where(
+        WorkOrderPartMemory.machine_type == work_order.machine_type,
+        WorkOrderPartMemory.job_type == work_order.job_type,
+    ).order_by(WorkOrderPartMemory.usage_count.desc(), WorkOrderPartMemory.total_quantity.desc()).limit(20)).all()
+    recommendations = []
+    for memory in memories:
+        part = db.get(Part, memory.part_id)
+        if part:
+            average = max(1, round(memory.total_quantity / memory.usage_count))
+            recommendations.append(WorkOrderPartRecommendation(
+                part=PartRead.model_validate(part), recommended_quantity=average,
+                usage_count=memory.usage_count, total_quantity=memory.total_quantity,
+                reason=f"历史上 {memory.usage_count} 个类似工单使用过，平均每单 {average} 件。",
+            ))
+    return recommendations
 
 
 @router.get("/work-order-parts", response_model=list[WorkOrderPartRead])
