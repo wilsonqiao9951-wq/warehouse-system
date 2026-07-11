@@ -160,6 +160,20 @@ class PartRead(PartCreate):
         from_attributes = True
 
 
+class PartMachineAssociationRead(BaseModel):
+    id: int
+    machine_model: str
+    part_id: int
+    photo_url: str | None = None
+    recognition_source: str
+    confidence: float
+    confirmed_count: int
+    last_confirmed_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class ImportBatchRead(BaseModel):
     id: int
     organization_id: int

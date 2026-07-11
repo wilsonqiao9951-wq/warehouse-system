@@ -24,6 +24,7 @@ from app.models import (
     JobStatus,
     Organization,
     Part,
+    PartMachineAssociation,
     QCPicture,
     ReturnEquipment,
     StorageLocation,
@@ -60,6 +61,7 @@ from app.schemas import (
     EngineerDashboard,
     PartCreate,
     PartRead,
+    PartMachineAssociationRead,
     OrganizationCreate,
     OrganizationRead,
     OrganizationUpdate,
@@ -508,6 +510,61 @@ def create_part(payload: PartCreate, db: Session = Depends(get_db), actor: Actor
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.post("/parts/recognition/observations", response_model=PartMachineAssociationRead)
+async def record_part_observation(
+    machine_model: str = Form(..., min_length=1),
+    part_id: int | None = Form(None),
+    part_number: str | None = Form(None),
+    part_name: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
+    part = db.get(Part, part_id) if part_id else None
+    if not part and part_number:
+        part = db.scalar(select(Part).where(Part.part_number == part_number.strip()))
+    if not part:
+        if not part_number or not part_name:
+            raise HTTPException(status_code=400, detail="part_id or part_number and part_name are required")
+        part = Part(part_number=part_number.strip(), name=part_name.strip(), machine_type=machine_model.strip())
+        db.add(part)
+        db.flush()
+    photo_url = None
+    if file:
+        data = await file.read(settings.max_image_upload_bytes + 1)
+        if len(data) > settings.max_image_upload_bytes:
+            raise HTTPException(status_code=413, detail="Image exceeds the configured upload limit")
+        ext = _image_extension(data)
+        if not ext:
+            raise HTTPException(status_code=400, detail="Unsupported or invalid image file")
+        target_dir = Path("uploads/part-observations")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid4().hex}{ext}"
+        (target_dir / filename).write_bytes(data)
+        photo_url = f"/uploads/part-observations/{filename}"
+    association = db.scalar(select(PartMachineAssociation).where(
+        PartMachineAssociation.machine_model == machine_model.strip(), PartMachineAssociation.part_id == part.id
+    ))
+    if association:
+        association.confirmed_count += 1
+        association.last_confirmed_at = datetime.utcnow()
+        association.photo_url = photo_url or association.photo_url
+    else:
+        association = PartMachineAssociation(machine_model=machine_model.strip(), part_id=part.id, photo_url=photo_url)
+        db.add(association)
+    _audit(db, actor, "record_part_observation", "part_machine_association", association.id, {"machine_model": machine_model})
+    db.commit()
+    db.refresh(association)
+    return association
+
+
+@router.get("/parts/recognition/suggestions", response_model=list[PartMachineAssociationRead])
+def part_recognition_suggestions(machine_model: str, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
+    return db.scalars(select(PartMachineAssociation).where(PartMachineAssociation.machine_model.ilike(f"%{machine_model.strip()}%")).order_by(PartMachineAssociation.confirmed_count.desc())).all()
 
 
 @router.get("/parts", response_model=list[PartRead])

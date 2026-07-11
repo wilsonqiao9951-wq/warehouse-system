@@ -127,6 +127,23 @@ class Part(Base):
     organization = relationship("Organization")
 
 
+class PartMachineAssociation(Base):
+    __tablename__ = "part_machine_associations"
+    __table_args__ = (UniqueConstraint("organization_id", "machine_model", "part_id", name="uq_part_machine_part"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
+    machine_model: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False, index=True)
+    photo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    recognition_source: Mapped[str] = mapped_column(String(40), default="employee_photo", nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    confirmed_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    last_confirmed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    part = relationship("Part")
+
+
 class WorkOrder(Base):
     __tablename__ = "work_orders"
 
