@@ -167,6 +167,11 @@ export async function syncOfflineQueue(): Promise<number> {
   return synced;
 }
 
+export function getOfflineQueue(): Array<{ path: string; method: string; queuedAt: string }> {
+  if (typeof window === "undefined") return [];
+  return (JSON.parse(window.localStorage.getItem("opf_offline_queue") || "[]") as Array<{ path: string; method: string; body: string; queuedAt: string }>).map(({ path, method, queuedAt }) => ({ path, method, queuedAt }));
+}
+
 export const api = {
   login: (email: string, password: string) => {
     const form = new URLSearchParams({ username: email, password });
