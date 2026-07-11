@@ -12,6 +12,7 @@ const links = [
   { href: "/map", label: "Map", roles: ["manager", "admin", "engineer"] },
   { href: "/inventory", label: "Inventory", roles: ["warehouse", "manager", "admin"] },
   { href: "/inventory-scan", label: "Scan & Check", roles: ["warehouse", "manager", "admin", "engineer"] },
+  { href: "/warehouse-tasks", label: "Warehouse Tasks", roles: ["warehouse", "manager", "admin"] },
   { href: "/part-observation", label: "Photo Memory", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/employees", label: "Employees", roles: ["manager", "admin"] },
   { href: "/reports", label: "Reports", roles: ["manager", "admin"] },

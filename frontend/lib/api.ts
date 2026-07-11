@@ -11,6 +11,8 @@ import {
   StockBalance,
   StorageLocation,
   InventoryScanResult,
+  InventoryNotification,
+  ReplenishmentRequest,
   User,
   Warehouse,
   WorkOrder,
@@ -235,6 +237,10 @@ export const api = {
     request<StorageLocation[]>(`/storage-locations${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   scanInventory: (payload: { barcode?: string; part_number?: string; quantity?: number; warehouse_id?: number; location_id?: number }) =>
     request<InventoryScanResult>("/inventory/scan", { method: "POST", body: JSON.stringify(payload) }),
+  listInventoryNotifications: () => request<InventoryNotification[]>("/inventory/notifications"),
+  updateInventoryNotification: (id: number, status: string) => request<InventoryNotification>(`/inventory/notifications/${id}?status=${status}`, { method: "PATCH" }),
+  createReplenishmentRequest: (id: number, quantity: number, sourceWarehouseId?: number) => request<ReplenishmentRequest>(`/inventory/notifications/${id}/create-request?quantity=${quantity}${sourceWarehouseId ? `&source_warehouse_id=${sourceWarehouseId}` : ""}`, { method: "POST" }),
+  listReplenishmentRequests: () => request<ReplenishmentRequest[]>("/inventory/replenishment-requests"),
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),

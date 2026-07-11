@@ -98,6 +98,16 @@ export interface InventoryScanResult {
   feedback: string;
 }
 
+export interface InventoryNotification {
+  id: number; part_id: number; warehouse_id: number; work_order_id?: number | null;
+  notification_type: string; message: string; status: string; created_at: string;
+}
+
+export interface ReplenishmentRequest {
+  id: number; part_id: number; destination_warehouse_id: number; source_warehouse_id?: number | null;
+  quantity: number; work_order_id?: number | null; requested_by?: number | null; status: string; created_at: string;
+}
+
 export interface LocationStockBalance {
   part_id: number;
   part_number: string;
