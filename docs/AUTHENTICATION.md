@@ -63,6 +63,8 @@ Manual replenishment creation requires a client-generated `client_request_id` an
 
 Vehicle returns follow the inverse custody rule. Only the vehicle owner on a registered device may create the request or confirm handover. Handover requires the current account password and records the engineer plus device before vehicle stock is deducted. Warehouse/admin users may approve and receive, but cannot impersonate the engineer handover.
 
+Inventory counts separate observation from authority. Warehouse users may record and submit physical quantities, but only an administrator who re-enters their current password can approve discrepancies and create linked adjustment transactions.
+
 Notification/manual request creation, picking, shipping, receipt, completion, cancellation, and reconciliation are online-only. The frontend never writes these operations or either password step-up to its offline queue.
 
 ## Legacy identity headers

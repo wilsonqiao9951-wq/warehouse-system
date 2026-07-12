@@ -35,6 +35,8 @@ from app.models import (
     Equipment,
     InventoryTransaction,
     InventoryNotification,
+    InventoryCountLine,
+    InventoryCountSession,
     ReplenishmentRequest,
     VehicleReturnRequest,
     ImportBatch,
@@ -71,6 +73,11 @@ from app.schemas import (
     ReturnEquipmentCreate,
     ReturnEquipmentRead,
     InventoryTransactionCreate,
+    InventoryCountAction,
+    InventoryCountCreate,
+    InventoryCountLineUpsert,
+    InventoryCountRead,
+    InventoryCountLineRead,
     LowStockAlert,
     LocationStockBalance,
     InventoryScanRequest,
@@ -2669,6 +2676,235 @@ def act_on_vehicle_return_request(
     db.commit()
     db.refresh(item)
     return _vehicle_return_read_for_actor(db, actor, item)
+
+
+def _inventory_count_quantity(db: Session, item: InventoryCountSession, part_id: int) -> int:
+    if item.location_id is not None:
+        return get_location_stock_quantity(db, part_id, item.location_id)
+    return get_stock_quantity(db, part_id, item.warehouse_id)
+
+
+def _inventory_count_read(db: Session, actor: Actor, item: InventoryCountSession) -> InventoryCountRead:
+    warehouse = db.get(Warehouse, item.warehouse_id)
+    location = db.get(StorageLocation, item.location_id) if item.location_id else None
+    rows = db.scalars(
+        select(InventoryCountLine).where(InventoryCountLine.session_id == item.id).order_by(InventoryCountLine.id)
+    ).all()
+    lines = []
+    for row in rows:
+        part = db.get(Part, row.part_id)
+        lines.append(InventoryCountLineRead(
+            id=row.id, part_id=row.part_id, part_number=part.part_number if part else None,
+            part_name=part.name if part else None, counted_quantity=row.counted_quantity,
+            submitted_book_quantity=row.submitted_book_quantity,
+            approved_book_quantity=row.approved_book_quantity, variance_quantity=row.variance_quantity,
+            counted_by=row.counted_by, counted_at=row.counted_at,
+            adjustment_transaction_id=row.adjustment_transaction_id, notes=row.notes,
+        ))
+    operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    return InventoryCountRead(
+        id=item.id, client_request_id=item.client_request_id, warehouse_id=item.warehouse_id,
+        warehouse_name=warehouse.name if warehouse else None, location_id=item.location_id,
+        location_code=location.code if location else None, title=item.title, notes=item.notes,
+        status=item.status, version=item.version, created_by=item.created_by,
+        submitted_by=item.submitted_by, submitted_at=item.submitted_at,
+        approved_by=item.approved_by, approved_at=item.approved_at,
+        cancelled_by=item.cancelled_by, cancelled_at=item.cancelled_at,
+        cancellation_reason=item.cancellation_reason, lines=lines,
+        can_edit=operator and item.status == "draft",
+        can_submit=operator and item.status == "draft" and bool(lines),
+        can_approve=actor.role == UserRole.ADMIN and item.status == "submitted",
+        can_cancel=operator and item.status == "draft" or actor.role == UserRole.ADMIN and item.status == "submitted",
+        created_at=item.created_at, updated_at=item.updated_at,
+    )
+
+
+@router.post("/inventory/counts", response_model=InventoryCountRead)
+def create_inventory_count(
+    payload: InventoryCountCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.WAREHOUSE)
+    client_request_id = payload.client_request_id.strip()
+    title = payload.title.strip()
+    if len(client_request_id) < 8:
+        raise HTTPException(status_code=422, detail="client_request_id must contain at least 8 non-whitespace characters")
+    if len(title) < 3:
+        raise HTTPException(status_code=422, detail="Count title must contain at least 3 non-whitespace characters")
+    existing = db.scalar(select(InventoryCountSession).where(
+        InventoryCountSession.client_request_id == client_request_id
+    ))
+    if existing:
+        if (existing.warehouse_id, existing.location_id, existing.title) != (
+            payload.warehouse_id, payload.location_id, title
+        ):
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another count")
+        return _inventory_count_read(db, actor, existing)
+    warehouse = db.get(Warehouse, payload.warehouse_id)
+    if not warehouse or not warehouse.is_active:
+        raise HTTPException(status_code=404, detail="Active warehouse not found")
+    if warehouse_is_vehicle(db, warehouse):
+        raise HTTPException(status_code=409, detail="Vehicle stock requires an engineer-owned count workflow")
+    location = db.get(StorageLocation, payload.location_id) if payload.location_id else None
+    if location and (not location.is_active or location.warehouse_id != warehouse.id):
+        raise HTTPException(status_code=400, detail="Active location does not belong to warehouse")
+    item = InventoryCountSession(
+        client_request_id=client_request_id, warehouse_id=warehouse.id,
+        location_id=location.id if location else None, title=title, notes=payload.notes,
+        created_by=actor.user_id,
+    )
+    try:
+        db.add(item)
+        db.flush()
+        _audit(db, actor, "inventory_count_created", "inventory_count", item.id, {
+            "warehouse_id": item.warehouse_id, "location_id": item.location_id, "title": item.title,
+        })
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.scalar(select(InventoryCountSession).where(
+            InventoryCountSession.client_request_id == client_request_id
+        ))
+        if existing and (existing.warehouse_id, existing.location_id, existing.title) == (
+            payload.warehouse_id, payload.location_id, title
+        ):
+            return _inventory_count_read(db, actor, existing)
+        raise HTTPException(status_code=409, detail="Inventory count could not be created") from exc
+    db.refresh(item)
+    return _inventory_count_read(db, actor, item)
+
+
+@router.get("/inventory/counts", response_model=list[InventoryCountRead])
+def list_inventory_counts(
+    status: str | None = Query(default=None, pattern="^(draft|submitted|approved|cancelled)$"),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    stmt = select(InventoryCountSession).order_by(InventoryCountSession.id.desc())
+    if status:
+        stmt = stmt.where(InventoryCountSession.status == status)
+    return [_inventory_count_read(db, actor, item) for item in db.scalars(stmt.limit(limit)).all()]
+
+
+@router.put("/inventory/counts/{count_id}/lines", response_model=InventoryCountRead)
+def upsert_inventory_count_line(
+    count_id: int,
+    payload: InventoryCountLineUpsert,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.WAREHOUSE)
+    begin_inventory_write(db)
+    item = db.scalar(select(InventoryCountSession).where(
+        InventoryCountSession.id == count_id,
+        InventoryCountSession.organization_id == actor.organization_id,
+    ).with_for_update())
+    if not item:
+        raise HTTPException(status_code=404, detail="Inventory count not found")
+    if item.status != "draft" or item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Count is no longer editable; refresh before continuing")
+    if not db.get(Part, payload.part_id):
+        raise HTTPException(status_code=404, detail="Part not found")
+    line = db.scalar(select(InventoryCountLine).where(
+        InventoryCountLine.session_id == item.id, InventoryCountLine.part_id == payload.part_id
+    ))
+    if line:
+        previous = line.counted_quantity
+        line.counted_quantity = payload.counted_quantity
+        line.notes = payload.notes
+        line.counted_by = actor.user_id
+        line.counted_at = datetime.utcnow()
+    else:
+        previous = None
+        line = InventoryCountLine(session_id=item.id, part_id=payload.part_id,
+            counted_quantity=payload.counted_quantity, notes=payload.notes, counted_by=actor.user_id)
+        db.add(line)
+    item.version += 1
+    db.flush()
+    _audit(db, actor, "inventory_count_line_recorded", "inventory_count", item.id, {
+        "line_id": line.id, "part_id": line.part_id, "previous_quantity": previous,
+        "counted_quantity": line.counted_quantity, "new_version": item.version,
+    })
+    db.commit()
+    db.refresh(item)
+    return _inventory_count_read(db, actor, item)
+
+
+@router.post("/inventory/counts/{count_id}/actions", response_model=InventoryCountRead)
+def act_on_inventory_count(
+    count_id: int,
+    payload: InventoryCountAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.WAREHOUSE)
+    begin_inventory_write(db)
+    item = db.scalar(select(InventoryCountSession).where(
+        InventoryCountSession.id == count_id,
+        InventoryCountSession.organization_id == actor.organization_id,
+    ).with_for_update())
+    if not item:
+        raise HTTPException(status_code=404, detail="Inventory count not found")
+    if item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Inventory count changed; refresh before continuing")
+    now = datetime.utcnow()
+    previous_status = item.status
+    lines = db.scalars(select(InventoryCountLine).where(InventoryCountLine.session_id == item.id)).all()
+    if payload.action == "submit":
+        if item.status != "draft" or not lines:
+            raise HTTPException(status_code=409, detail="Only a non-empty draft count can be submitted")
+        for line in lines:
+            line.submitted_book_quantity = _inventory_count_quantity(db, item, line.part_id)
+        item.status, item.submitted_by, item.submitted_at = "submitted", actor.user_id, now
+    elif payload.action == "approve":
+        if actor.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Administrator approval is required to adjust inventory")
+        if item.status != "submitted":
+            raise HTTPException(status_code=409, detail="Only a submitted count can be approved")
+        _require_account_reauthentication(db, actor, payload.password)
+        for line in lines:
+            part = db.scalar(select(Part).where(Part.id == line.part_id).with_for_update())
+            if not part:
+                raise HTTPException(status_code=409, detail="Counted part no longer exists")
+            book = _inventory_count_quantity(db, item, line.part_id)
+            variance = line.counted_quantity - book
+            line.approved_book_quantity, line.variance_quantity = book, variance
+            if variance:
+                tx = InventoryTransaction(
+                    part_id=line.part_id, transaction_type=TransactionType.ADJUSTMENT,
+                    quantity=abs(variance),
+                    from_warehouse_id=item.warehouse_id if variance < 0 else None,
+                    to_warehouse_id=item.warehouse_id if variance > 0 else None,
+                    from_location_id=item.location_id if variance < 0 else None,
+                    to_location_id=item.location_id if variance > 0 else None,
+                    inventory_count_line_id=line.id, user_id=actor.user_id,
+                    unit_cost=part.default_cost, notes=f"Approved inventory count #{item.id}",
+                )
+                db.add(tx)
+                db.flush()
+                line.adjustment_transaction_id = tx.id
+        item.status, item.approved_by, item.approved_at = "approved", actor.user_id, now
+    else:
+        allowed = item.status == "draft" or actor.role == UserRole.ADMIN and item.status == "submitted"
+        if not allowed:
+            raise HTTPException(status_code=409, detail="This inventory count cannot be cancelled")
+        if not payload.reason or len(payload.reason.strip()) < 3:
+            raise HTTPException(status_code=422, detail="Cancellation reason must be at least 3 characters")
+        item.status, item.cancelled_by, item.cancelled_at = "cancelled", actor.user_id, now
+        item.cancellation_reason = payload.reason.strip()
+    item.version += 1
+    _audit(db, actor, f"inventory_count_{payload.action}", "inventory_count", item.id, {
+        "from_status": previous_status, "to_status": item.status, "line_count": len(lines),
+        "previous_version": payload.expected_version, "new_version": item.version,
+        "warehouse_id": item.warehouse_id, "location_id": item.location_id,
+        "reason": item.cancellation_reason if payload.action == "cancel" else None,
+    })
+    db.commit()
+    db.refresh(item)
+    return _inventory_count_read(db, actor, item)
 
 
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])

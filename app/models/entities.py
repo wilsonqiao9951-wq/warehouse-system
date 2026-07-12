@@ -322,6 +322,7 @@ class InventoryTransaction(Base):
     work_order_id: Mapped[int | None] = mapped_column(ForeignKey("work_orders.id"), nullable=True)
     replenishment_request_id: Mapped[int | None] = mapped_column(ForeignKey("replenishment_requests.id"), nullable=True, index=True)
     vehicle_return_request_id: Mapped[int | None] = mapped_column(ForeignKey("vehicle_return_requests.id"), nullable=True, index=True)
+    inventory_count_line_id: Mapped[int | None] = mapped_column(ForeignKey("inventory_count_lines.id"), nullable=True, unique=True, index=True)
     movement_stage: Mapped[str | None] = mapped_column(String(20), nullable=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     unit_cost: Mapped[float] = mapped_column(Float, default=0.0)
@@ -571,6 +572,59 @@ class VehicleReturnRequest(Base):
     cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     shipment_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     receipt_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class InventoryCountSession(Base):
+    __tablename__ = "inventory_count_sessions"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "client_request_id", name="uq_inventory_count_org_client_request"),
+        CheckConstraint("version >= 0", name="ck_inventory_count_version_non_negative"),
+        CheckConstraint("status IN ('draft', 'submitted', 'approved', 'cancelled')", name="ck_inventory_count_status"),
+        Index("ix_inventory_count_org_status", "organization_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    client_request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False, index=True)
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("storage_locations.id"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    submitted_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class InventoryCountLine(Base):
+    __tablename__ = "inventory_count_lines"
+    __table_args__ = (
+        UniqueConstraint("session_id", "part_id", name="uq_inventory_count_session_part"),
+        CheckConstraint("counted_quantity >= 0", name="ck_inventory_count_line_quantity_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("inventory_count_sessions.id"), nullable=False, index=True)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False, index=True)
+    counted_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    submitted_book_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approved_book_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    variance_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    counted_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    counted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    adjustment_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

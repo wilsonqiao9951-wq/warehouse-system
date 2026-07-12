@@ -283,3 +283,10 @@ Added `vehicle_return_requests` and the strict reverse logistics chain `requeste
 - Downgrade is blocked while linked vehicle-return movements exist.
 
 Verification: full backend suite 70 passed, vehicle custody target suite 18 passed, migration base-to-`0020` and empty `0020 -> 0019 -> 0020` passed, ESLint passed, and the Next.js production build generated all 26 static routes.
+
+## 20260712_0021 - Auditable inventory counts
+
+- Adds tenant-scoped count sessions and lines with actor timestamps and optimistic versions.
+- Submission records book snapshots; administrator approval recalculates current book stock and posts one uniquely linked adjustment per non-zero variance.
+- Administrator password reauthentication is required before ledger changes. Managers remain read-only and vehicle warehouses are excluded.
+- Downgrade is blocked while approved count adjustment movements exist.

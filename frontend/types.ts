@@ -207,6 +207,40 @@ export interface VehicleReturnRequest {
   updated_at: string;
 }
 
+export interface InventoryCountLine {
+  id: number;
+  part_id: number;
+  part_number?: string | null;
+  part_name?: string | null;
+  counted_quantity: number;
+  submitted_book_quantity?: number | null;
+  approved_book_quantity?: number | null;
+  variance_quantity?: number | null;
+  adjustment_transaction_id?: number | null;
+  notes?: string | null;
+}
+
+export interface InventoryCount {
+  id: number;
+  client_request_id: string;
+  warehouse_id: number;
+  warehouse_name?: string | null;
+  location_id?: number | null;
+  location_code?: string | null;
+  title: string;
+  notes?: string | null;
+  status: "draft" | "submitted" | "approved" | "cancelled";
+  version: number;
+  lines: InventoryCountLine[];
+  can_edit: boolean;
+  can_submit: boolean;
+  can_approve: boolean;
+  can_cancel: boolean;
+  cancellation_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LocationStockBalance {
   part_id: number;
   part_number: string;

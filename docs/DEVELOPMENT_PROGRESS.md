@@ -206,3 +206,23 @@ Verification:
 - Database: fresh base-to-`0020` and empty `0020 -> 0019 -> 0020` passed on SQLite.
 - Frontend: ESLint and Next.js 16.2.10 production build passed for all 26 static routes.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-12 - Phase 2 inventory count custody
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added `draft -> submitted -> approved` warehouse counts with pre-approval cancellation.
+- Added physical entry, submission book snapshots, approval-time recalculation, explicit variances, optimistic versions, tenant isolation, and audit events.
+- Warehouse users count and submit; managers are read-only; administrators re-enter their password before uniquely linked adjustment movements change the ledger.
+- Added the Inventory Counts workspace and made all count mutations online-only.
+- Excluded engineer vehicle warehouses and added Alembic revision `20260712_0021` with downgrade protection.
+
+Verification:
+
+- Inventory count security/workflow tests: 2 passed.
+- Backend: full suite passed, 72 tests.
+- Database: fresh base-to-`0021` and empty `0021 -> 0020 -> 0021` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Source hygiene: `git diff --check` passed.

@@ -171,3 +171,15 @@ SQLite enables foreign-key enforcement on every connection and uses `BEGIN IMMED
 | Cancel before handover | Allow own | Deny | Deny | Allow | Allow |
 
 After approval, the return quantity is reserved against vehicle availability. Handover writes `OUTBOUND`; receipt writes `INBOUND`. Shipped returns cannot be cancelled, generic `RETURN` remains disabled, and all return mutations are online-only.
+
+## Inventory count custody
+
+| Operation | Manager | Admin | Warehouse |
+|---|---:|---:|---:|
+| View counts | Allow | Allow | Allow |
+| Create / record / submit | Deny | Allow | Allow |
+| Approve and adjust ledger | Deny | Allow, password | Deny |
+| Cancel draft | Deny | Allow | Allow |
+| Cancel submitted | Deny | Allow | Deny |
+
+Vehicle warehouses are excluded. Every mutation requires the matching optimistic version and remains online-only.

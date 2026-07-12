@@ -1,6 +1,7 @@
 from datetime import date, datetime
 import base64
 import binascii
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
@@ -306,6 +307,7 @@ class InventoryTransactionRead(InventoryTransactionCreate):
     organization_id: int
     replenishment_request_id: int | None = None
     vehicle_return_request_id: int | None = None
+    inventory_count_line_id: int | None = None
     movement_stage: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -693,6 +695,71 @@ class VehicleReturnRequestRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class InventoryCountCreate(BaseModel):
+    client_request_id: str = Field(min_length=8, max_length=100)
+    warehouse_id: int
+    location_id: int | None = None
+    title: str = Field(min_length=3, max_length=160)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class InventoryCountLineUpsert(BaseModel):
+    part_id: int
+    counted_quantity: int = Field(ge=0)
+    notes: str | None = Field(default=None, max_length=1000)
+    expected_version: int = Field(ge=0)
+
+
+class InventoryCountAction(BaseModel):
+    action: Literal["submit", "approve", "cancel"]
+    expected_version: int = Field(ge=0)
+    reason: str | None = Field(default=None, max_length=2000)
+    password: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class InventoryCountLineRead(BaseModel):
+    id: int
+    part_id: int
+    part_number: str | None = None
+    part_name: str | None = None
+    counted_quantity: int
+    submitted_book_quantity: int | None = None
+    approved_book_quantity: int | None = None
+    variance_quantity: int | None = None
+    counted_by: int
+    counted_at: datetime
+    adjustment_transaction_id: int | None = None
+    notes: str | None = None
+
+
+class InventoryCountRead(BaseModel):
+    id: int
+    client_request_id: str
+    warehouse_id: int
+    warehouse_name: str | None = None
+    location_id: int | None = None
+    location_code: str | None = None
+    title: str
+    notes: str | None = None
+    status: str
+    version: int
+    created_by: int
+    submitted_by: int | None = None
+    submitted_at: datetime | None = None
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    lines: list[InventoryCountLineRead] = Field(default_factory=list)
+    can_edit: bool = False
+    can_submit: bool = False
+    can_approve: bool = False
+    can_cancel: bool = False
+    created_at: datetime
+    updated_at: datetime
 
 
 class CustomerCreate(BaseModel):

@@ -14,6 +14,7 @@ import {
   InventoryNotification,
   ReplenishmentRequest,
   VehicleReturnRequest,
+  InventoryCount,
   User,
   Warehouse,
   WorkOrder,
@@ -96,6 +97,7 @@ function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
   if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
   if (path === "/inventory/vehicle-returns" || path.startsWith("/inventory/vehicle-returns/")) return true;
+  if (path === "/inventory/counts" || path.startsWith("/inventory/counts/")) return true;
   if (/^\/inventory\/notifications\/\d+\/create-request(?:\?|$)/.test(path)) return true;
   if (/^\/work-orders\/\d+\/(claim|release|start|pause|complete|request-completion|approve-completion|reject-completion)$/.test(path)) return true;
   return path === "/job-status";
@@ -516,6 +518,16 @@ export const api = {
     method: "POST",
     body: JSON.stringify(payload)
   }),
+  listInventoryCounts: () => request<InventoryCount[]>("/inventory/counts"),
+  createInventoryCount: (payload: {
+    client_request_id: string; warehouse_id: number; location_id?: number; title: string; notes?: string;
+  }) => request<InventoryCount>("/inventory/counts", { method: "POST", body: JSON.stringify(payload) }),
+  recordInventoryCountLine: (id: number, payload: {
+    part_id: number; counted_quantity: number; notes?: string; expected_version: number;
+  }) => request<InventoryCount>(`/inventory/counts/${id}/lines`, { method: "PUT", body: JSON.stringify(payload) }),
+  actOnInventoryCount: (id: number, payload: {
+    action: "submit" | "approve" | "cancel"; expected_version: number; reason?: string; password?: string;
+  }) => request<InventoryCount>(`/inventory/counts/${id}/actions`, { method: "POST", body: JSON.stringify(payload) }),
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),
