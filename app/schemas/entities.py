@@ -214,6 +214,9 @@ class WorkOrderCreate(BaseModel):
     contact_phone: str | None = None
     machine_type: str | None = None
     problem_description: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
     assigned_user_id: int | None = None
     engineer_id: int | None = None
     assistant_id: int | None = None
@@ -245,6 +248,12 @@ class WorkOrderUpdate(BaseModel):
     contact_phone: str | None = None
     machine_type: str | None = None
     problem_description: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
+    final_outcome: str | None = Field(default=None, max_length=120)
+    first_time_fix: bool | None = None
+    is_rework: bool | None = None
     assigned_user_id: int | None = None
     engineer_id: int | None = None
     assistant_id: int | None = None
@@ -260,6 +269,10 @@ class WorkOrderRead(WorkOrderCreate):
     completed_at: datetime | None = None
     paused_at: datetime | None = None
     repair_result: str | None = None
+    final_outcome: str | None = None
+    first_time_fix: bool | None = None
+    is_rework: bool = False
+    repair_duration_minutes: int | None = None
     checklist_json: str | None = None
     customer_signature_name: str | None = None
     customer_signature_data: str | None = None
@@ -515,6 +528,12 @@ class WorkOrderFlowAction(BaseModel):
     notes: str | None = None
     account_password: str | None = Field(default=None, max_length=128)
     repair_result: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
+    final_outcome: str | None = Field(default=None, max_length=120)
+    first_time_fix: bool | None = None
+    is_rework: bool | None = None
     checklist_json: str | None = None
     customer_signature_name: str | None = None
     customer_signature_data: str | None = None
@@ -860,6 +879,13 @@ class ServiceHistoryItem(BaseModel):
     job_type: str | None = None
     problem_description: str | None = None
     repair_result: str | None = None
+    fault_type: str | None = None
+    error_code: str | None = None
+    environment_info: str | None = None
+    final_outcome: str | None = None
+    first_time_fix: bool | None = None
+    is_rework: bool = False
+    repair_duration_minutes: int | None = None
     status: str
     completed_at: datetime | None = None
     engineer_id: int | None = None

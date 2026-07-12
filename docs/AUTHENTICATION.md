@@ -42,6 +42,8 @@ Claim and completion are online-only operations. Completion requires the current
 
 Managers may approve completion or release a claim with a reason, but cannot edit field records. Administrators may correct unlocked field records with their own audit attribution, but cannot request or directly complete a job as if they were the engineer. The immutable completion attribution remains the claiming engineer and device.
 
+Fault type, error code, environment, final outcome, first-time-fix, and rework evidence follow the same owner-only field-write rules. They freeze while completion approval is pending and become immutable when the work order is locked. Repair duration is calculated by the server from the recorded start and engineer completion-submission times; clients cannot submit it.
+
 ## Engineer vehicle-receipt authentication
 
 Vehicle replenishment receipt uses the same registered-device session with an additional password step-up. A successful `receive` action requires all of the following at the same time:

@@ -230,6 +230,12 @@ class CompletionPolicy(Base):
 
 class WorkOrder(Base):
     __tablename__ = "work_orders"
+    __table_args__ = (
+        CheckConstraint(
+            "repair_duration_minutes IS NULL OR repair_duration_minutes >= 0",
+            name="ck_work_order_repair_duration_non_negative",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
@@ -255,6 +261,9 @@ class WorkOrder(Base):
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     machine_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     problem_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fault_type: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    error_code: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    environment_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     assigned_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     engineer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     assistant_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -265,6 +274,10 @@ class WorkOrder(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     paused_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     repair_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    final_outcome: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    first_time_fix: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    is_rework: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    repair_duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     checklist_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     customer_signature_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     customer_signature_data: Mapped[str | None] = mapped_column(Text, nullable=True)

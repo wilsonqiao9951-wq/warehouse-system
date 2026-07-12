@@ -192,3 +192,43 @@ def test_work_order_rejects_customer_equipment_mismatch(client):
     })
     assert response.status_code == 400
     assert "does not belong" in response.text
+
+
+def test_completion_records_learning_fields_and_server_duration(client):
+    tech = _mk_user(client, "learning-tech")
+    work_order_id = _mk_wo(client, "LEARN-001", tech, job_type="cooling repair")
+    started = client.post(f"/api/work-orders/{work_order_id}/start", json={})
+    assert started.status_code == 200, started.text
+    with client.app.state.testing_session_local() as db:
+        item = db.get(WorkOrder, work_order_id)
+        item.started_at = datetime.utcnow() - timedelta(minutes=67, seconds=30)
+        db.commit()
+
+    completed = client.post(f"/api/work-orders/{work_order_id}/complete", json={
+        "repair_result": "Replaced contactor and verified cooling under load.",
+        "fault_type": "electrical control failure",
+        "error_code": "E-42",
+        "environment_info": "Rooftop unit, 94F ambient temperature",
+        "final_outcome": "repaired",
+        "first_time_fix": True,
+        "is_rework": False,
+    })
+    assert completed.status_code == 200, completed.text
+    body = completed.json()
+    assert body["fault_type"] == "electrical control failure"
+    assert body["error_code"] == "E-42"
+    assert body["environment_info"].startswith("Rooftop")
+    assert body["final_outcome"] == "repaired"
+    assert body["first_time_fix"] is True
+    assert body["is_rework"] is False
+    assert body["repair_duration_minutes"] >= 67
+
+    with client.app.state.testing_session_local() as db:
+        audit = db.query(AuditLog).filter(
+            AuditLog.entity_type == "work_order", AuditLog.entity_id == work_order_id,
+            AuditLog.action == "complete_job",
+        ).one()
+        assert '"error_code":"E-42"' in audit.metadata_json
+from datetime import datetime, timedelta
+
+from app.models import AuditLog, WorkOrder

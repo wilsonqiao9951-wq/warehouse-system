@@ -264,3 +264,23 @@ Verification:
 - Database: fresh base-to-`0022` and empty `0022 -> 0021 -> 0022` passed on SQLite.
 - Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-12 - Phase 3 work-order learning data foundation
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added fault type, error code, environment information, final outcome, first-time-fix, rework, and server-measured repair duration.
+- Integrated learning capture into the authenticated engineer completion form and immutable completion evidence lifecycle.
+- Added structured learning details to equipment service history and completion audit metadata.
+- Preserved legacy compatibility by allowing historical unknown values while new mobile completions explicitly capture the result fields.
+- Added indexed lookup fields and Alembic revision `20260712_0023` with a non-negative duration constraint.
+
+Verification:
+
+- Work-order flow, completion policy, and ownership target suites: 17 passed.
+- Backend: full suite passed, 77 tests.
+- Database: fresh base-to-`0023` and empty `0023 -> 0022 -> 0023` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Source hygiene: `git diff --check` passed.

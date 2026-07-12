@@ -41,6 +41,12 @@ export default function WorkOrderDetailsPage() {
   const [retForm, setRetForm] = useState({ equipment_type: "", quantity: "1" });
   const [completion, setCompletion] = useState({
     repairResult: "",
+    faultType: "",
+    errorCode: "",
+    environmentInfo: "",
+    finalOutcome: "repaired",
+    firstTimeFix: false,
+    isRework: false,
     signatureName: "",
     signatureData: "",
     equipmentSafe: false,
@@ -105,6 +111,12 @@ export default function WorkOrderDetailsPage() {
     }
     setCompletion({
       repairResult: selectedWorkOrder.repair_result || "",
+      faultType: selectedWorkOrder.fault_type || selectedWorkOrder.job_type || "",
+      errorCode: selectedWorkOrder.error_code || "",
+      environmentInfo: selectedWorkOrder.environment_info || "",
+      finalOutcome: selectedWorkOrder.final_outcome || "repaired",
+      firstTimeFix: selectedWorkOrder.first_time_fix ?? false,
+      isRework: selectedWorkOrder.is_rework || false,
       signatureName: selectedWorkOrder.customer_signature_name || "",
       signatureData: selectedWorkOrder.customer_signature_data || "",
       equipmentSafe: Boolean(checklist.equipment_safe),
@@ -220,6 +232,12 @@ export default function WorkOrderDetailsPage() {
     try {
       const result = await api.completeJob(currentWorkOrderId, {
         repair_result: completion.repairResult.trim(),
+        fault_type: completion.faultType.trim(),
+        error_code: completion.errorCode.trim(),
+        environment_info: completion.environmentInfo.trim(),
+        final_outcome: completion.finalOutcome,
+        first_time_fix: completion.firstTimeFix,
+        is_rework: completion.isRework,
         customer_signature_name: completion.signatureName.trim(),
         customer_signature_data: completion.signatureData,
         checklist_json: JSON.stringify({
@@ -453,6 +471,8 @@ export default function WorkOrderDetailsPage() {
                 </summary>
                 <p><strong>Problem:</strong> {item.problem_description || "Not recorded"}</p>
                 <p><strong>Result:</strong> {item.repair_result || "Not recorded"}</p>
+                <p><strong>Learning:</strong> {[item.fault_type, item.error_code, item.final_outcome].filter(Boolean).join(" · ") || "Not recorded"}</p>
+                <p><strong>First-time fix:</strong> {item.first_time_fix === null || item.first_time_fix === undefined ? "Unknown" : item.first_time_fix ? "Yes" : "No"} · <strong>Rework:</strong> {item.is_rework ? "Yes" : "No"} · <strong>Duration:</strong> {item.repair_duration_minutes ?? "—"} min</p>
                 {item.parts_used.length > 0 && <div><strong>Parts:</strong><ul>{item.parts_used.map((part) => (
                   <li key={part.part_number}>{part.part_number} · {part.name} × {part.quantity}</li>
                 ))}</ul></div>}
@@ -474,6 +494,42 @@ export default function WorkOrderDetailsPage() {
                 completionPolicy.require_manager_approval && "manager approval"
               ].filter(Boolean).join(", ") || "No additional company requirements"}
             </div>}
+            <div className="form-grid">
+              <label>
+                Fault type
+                <input value={completion.faultType} onChange={(e) => setCompletion((prev) => ({ ...prev, faultType: e.target.value }))}
+                  placeholder="Cooling failure, leak, electrical..." disabled={evidenceFrozen} maxLength={120} />
+              </label>
+              <label>
+                Error code
+                <input value={completion.errorCode} onChange={(e) => setCompletion((prev) => ({ ...prev, errorCode: e.target.value }))}
+                  placeholder="Optional equipment error code" disabled={evidenceFrozen} maxLength={120} />
+              </label>
+              <label>
+                Final outcome
+                <select value={completion.finalOutcome} onChange={(e) => setCompletion((prev) => ({ ...prev, finalOutcome: e.target.value }))} disabled={evidenceFrozen}>
+                  <option value="repaired">Repaired</option>
+                  <option value="temporary_fix">Temporary fix</option>
+                  <option value="parts_required">Parts required</option>
+                  <option value="referred">Referred / escalated</option>
+                  <option value="unresolved">Unresolved</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              Environment information
+              <textarea value={completion.environmentInfo} onChange={(e) => setCompletion((prev) => ({ ...prev, environmentInfo: e.target.value }))}
+                placeholder="Temperature, installation conditions, access constraints, contamination..." disabled={evidenceFrozen} rows={3} maxLength={4000} />
+            </label>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", margin: "12px 0" }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={completion.firstTimeFix}
+                onChange={(e) => setCompletion((prev) => ({ ...prev, firstTimeFix: e.target.checked }))} disabled={evidenceFrozen} /> Fixed on first visit</label>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={completion.isRework}
+                onChange={(e) => setCompletion((prev) => ({ ...prev, isRework: e.target.checked }))} disabled={evidenceFrozen} /> This job is rework</label>
+            </div>
+            {selectedWorkOrder.repair_duration_minutes !== null && selectedWorkOrder.repair_duration_minutes !== undefined && (
+              <p className="muted">Server-recorded field duration: {selectedWorkOrder.repair_duration_minutes} minutes.</p>
+            )}
             <label>
               Repair result
               <textarea

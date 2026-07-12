@@ -323,6 +323,13 @@ export interface WorkOrder {
   completed_at?: string | null;
   paused_at?: string | null;
   repair_result?: string | null;
+  fault_type?: string | null;
+  error_code?: string | null;
+  environment_info?: string | null;
+  final_outcome?: string | null;
+  first_time_fix?: boolean | null;
+  is_rework: boolean;
+  repair_duration_minutes?: number | null;
   checklist_json?: string | null;
   customer_signature_name?: string | null;
   customer_signature_data?: string | null;
@@ -380,6 +387,9 @@ export interface Equipment {
 export interface ServiceHistoryItem {
   id: number; ticket_number: string; schedule_date?: string | null; job_type?: string | null;
   problem_description?: string | null; repair_result?: string | null; status: string;
+  fault_type?: string | null; error_code?: string | null; environment_info?: string | null;
+  final_outcome?: string | null; first_time_fix?: boolean | null; is_rework: boolean;
+  repair_duration_minutes?: number | null;
   completed_at?: string | null; engineer_id?: number | null;
   parts_used: Array<{ part_number: string; name: string; quantity: number }>;
 }

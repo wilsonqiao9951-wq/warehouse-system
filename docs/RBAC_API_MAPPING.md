@@ -66,6 +66,8 @@ Completion requires the engineer's current account password in `account_password
 
 Completed work orders are locked. Managers and administrators cannot overwrite the recorded engineer through approval or correction workflows.
 
+Structured learning fields (`fault_type`, `error_code`, `environment_info`, `final_outcome`, `first_time_fix`, `is_rework`) are field evidence: only the claimed engineer/device or an explicitly attributed administrator correction may write them before evidence freeze. `repair_duration_minutes` is server-owned.
+
 ## Authentication safety
 
 - Secure defaults: `RBAC_ENFORCE=true`, `LEGACY_HEADER_AUTH=false`.

@@ -296,3 +296,9 @@ Verification: full backend suite 70 passed, vehicle custody target suite 18 pass
 - Adds pending/approved/rejected decision state plus approver/rejector identities, timestamps, and rejection reason.
 - Managers and administrators decide requests; warehouse users cannot self-approve and cannot pick pending requests.
 - Existing in-progress/completed custody rows are migrated as approved. Rejected rows downgrade safely to cancelled with their reason preserved.
+
+## 20260712_0023 - Work-order learning data
+
+- Adds indexed fault type, error code, and final outcome plus environment information, first-time-fix, rework, and repair duration.
+- Duration is non-negative and server-calculated from field start through the engineer's completion submission, so manager approval delay does not inflate it.
+- Learning evidence is returned in work-order and equipment service-history APIs and is frozen with the existing completion evidence.

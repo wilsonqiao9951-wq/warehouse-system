@@ -605,6 +605,12 @@ export const api = {
     request<WorkOrder>(`/work-orders/${workOrderId}/pause`, { method: "POST", body: JSON.stringify({ notes }) }),
   completeJob: (workOrderId: number, payload: {
     repair_result?: string;
+    fault_type?: string;
+    error_code?: string;
+    environment_info?: string;
+    final_outcome?: string;
+    first_time_fix?: boolean;
+    is_rework?: boolean;
     checklist_json?: string;
     customer_signature_name?: string;
     customer_signature_data?: string;

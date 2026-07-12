@@ -1069,6 +1069,13 @@ def get_work_order_service_context(
             "job_type": row.job_type,
             "problem_description": row.problem_description,
             "repair_result": row.repair_result,
+            "fault_type": row.fault_type,
+            "error_code": row.error_code,
+            "environment_info": row.environment_info,
+            "final_outcome": row.final_outcome,
+            "first_time_fix": row.first_time_fix,
+            "is_rework": row.is_rework,
+            "repair_duration_minutes": row.repair_duration_minutes,
             "status": row.status,
             "completed_at": row.completed_at,
             "engineer_id": row.engineer_id,
@@ -1184,6 +1191,7 @@ def complete_work_order(
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order already completed")
     _apply_completion_payload(item, payload)
+    _capture_repair_duration(item, datetime.utcnow())
     policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
     _validate_completion_evidence(db, item, policy)
     if policy.get("require_manager_approval") and actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
@@ -1248,6 +1256,14 @@ def _effective_completion_policy(db: Session, organization_id: int, job_type: st
 def _apply_completion_payload(item: WorkOrder, payload: WorkOrderFlowAction) -> None:
     if payload.repair_result is not None:
         item.repair_result = payload.repair_result.strip() or None
+    for field in ("fault_type", "error_code", "environment_info", "final_outcome"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(item, field, value.strip() or None)
+    if payload.first_time_fix is not None:
+        item.first_time_fix = payload.first_time_fix
+    if payload.is_rework is not None:
+        item.is_rework = payload.is_rework
     if payload.checklist_json is not None:
         item.checklist_json = payload.checklist_json
     if payload.customer_signature_name is not None:
@@ -1255,6 +1271,15 @@ def _apply_completion_payload(item: WorkOrder, payload: WorkOrderFlowAction) -> 
     if payload.customer_signature_data is not None:
         item.customer_signature_data = payload.customer_signature_data
     item.customer_signed_at = datetime.utcnow() if item.customer_signature_name and item.customer_signature_data else None
+
+
+def _capture_repair_duration(item: WorkOrder, finished_at: datetime) -> None:
+    if item.repair_duration_minutes is None and item.started_at:
+        item.repair_duration_minutes = max(0, int((finished_at - item.started_at).total_seconds() // 60))
+    if not item.final_outcome:
+        item.final_outcome = "repaired" if (item.repair_result or "").strip() else "completed"
+    if not item.fault_type and item.job_type:
+        item.fault_type = item.job_type.strip() or None
 
 
 def _validate_completion_evidence(db: Session, item: WorkOrder, policy: dict) -> None:
@@ -1296,10 +1321,12 @@ def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrde
         completed_device_id = actor.device_record_id
     if actor.auth_method != "test" and (completed_by_id is None or completed_device_id is None):
         raise HTTPException(status_code=409, detail="Work order has no authenticated engineer claim")
+    finished_at = datetime.utcnow()
+    _capture_repair_duration(item, finished_at)
     item.completed_by_id = completed_by_id
     item.completed_device_id = completed_device_id
     item.status = "COMPLETED"
-    item.completed_at = datetime.utcnow()
+    item.completed_at = finished_at
     item.is_locked = True
     db.add(item)
     db.add(JobStatus(work_order_id=work_order_id, status="COMPLETED", timestamp=datetime.utcnow()))
@@ -1314,6 +1341,12 @@ def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrde
             "completed_by_id": completed_by_id,
             "completed_device_id": completed_device_id,
             "claim_version": item.claim_version,
+            "fault_type": item.fault_type,
+            "error_code": item.error_code,
+            "final_outcome": item.final_outcome,
+            "first_time_fix": item.first_time_fix,
+            "is_rework": item.is_rework,
+            "repair_duration_minutes": item.repair_duration_minutes,
         },
     )
     db.commit()
@@ -1418,6 +1451,7 @@ def request_work_order_completion(
     if not policy.get("require_manager_approval"):
         raise HTTPException(status_code=409, detail="This work order does not require manager approval")
     _apply_completion_payload(item, payload)
+    _capture_repair_duration(item, datetime.utcnow())
     _validate_completion_evidence(db, item, policy)
     item.status = "PENDING_APPROVAL"
     item.completion_requested_by = actor.user_id
@@ -1460,6 +1494,7 @@ def reject_work_order_completion(
     if not item or item.status != "PENDING_APPROVAL" or item.is_locked:
         raise HTTPException(status_code=409, detail="Work order is not pending completion approval")
     item.status = "APPROVAL_REJECTED"
+    item.repair_duration_minutes = None
     db.add(item)
     db.add(JobStatus(work_order_id=work_order_id, status="APPROVAL_REJECTED", timestamp=datetime.utcnow()))
     _audit(db, actor, "reject_completion", "work_order", work_order_id, {"notes": payload.notes})
