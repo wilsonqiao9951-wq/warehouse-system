@@ -305,6 +305,7 @@ class InventoryTransactionRead(InventoryTransactionCreate):
     id: int
     organization_id: int
     replenishment_request_id: int | None = None
+    vehicle_return_request_id: int | None = None
     movement_stage: str | None = None
     created_at: datetime
     updated_at: datetime
@@ -620,6 +621,78 @@ class ReplenishmentRequestReconcile(BaseModel):
     resolution: str = Field(pattern=r"^(reset_requested|accept_historical)$")
     reason: str = Field(min_length=3, max_length=500)
     account_password: str | None = Field(default=None, max_length=128)
+
+
+class VehicleReturnRequestCreate(BaseModel):
+    part_id: int = Field(ge=1)
+    source_warehouse_id: int = Field(ge=1)
+    destination_warehouse_id: int = Field(ge=1)
+    quantity: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=500)
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$",
+    )
+
+
+class VehicleReturnRequestAction(BaseModel):
+    action: str = Field(pattern=r"^(approve|ship|receive|cancel)$")
+    expected_version: int = Field(ge=0)
+    reason: str | None = Field(default=None, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
+
+
+class VehicleReturnRequestRead(BaseModel):
+    id: int
+    organization_id: int
+    client_request_id: str
+    part_id: int
+    source_warehouse_id: int
+    destination_warehouse_id: int
+    engineer_id: int
+    quantity: int
+    reason: str
+    version: int
+    status: str
+    requested_by: int
+    requested_device_id: int
+    requested_at: datetime
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    shipped_by: int | None = None
+    shipped_device_id: int | None = None
+    shipped_at: datetime | None = None
+    received_by: int | None = None
+    received_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    shipment_transaction_id: int | None = None
+    receipt_transaction_id: int | None = None
+    part_number: str | None = None
+    part_name: str | None = None
+    source_warehouse_name: str | None = None
+    destination_warehouse_name: str | None = None
+    engineer_name: str | None = None
+    requested_by_name: str | None = None
+    requested_device_name: str | None = None
+    approved_by_name: str | None = None
+    shipped_by_name: str | None = None
+    shipped_device_name: str | None = None
+    received_by_name: str | None = None
+    cancelled_by_name: str | None = None
+    source_quantity: int = 0
+    destination_quantity: int = 0
+    can_approve: bool = False
+    can_ship: bool = False
+    can_receive: bool = False
+    can_cancel: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class CustomerCreate(BaseModel):

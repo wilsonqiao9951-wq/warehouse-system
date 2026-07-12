@@ -16,6 +16,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Reserved picking stock with separate shipment OUTBOUND and receipt INBOUND inventory movements
 - Idempotent manual first-fill replenishment for newly assigned engineer vehicles
 - Vehicle inventory isolation from generic transactions and opening-stock imports
+- Authenticated vehicle-to-warehouse return custody with reservation and engineer handover
 - Real-time inventory balance
 - Excel export
 
@@ -87,6 +88,8 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 - `POST /api/inventory/replenishment-requests/{id}/actions` advances the strict replenishment custody workflow using an `expected_version`.
 - `POST /api/inventory/replenishment-requests/{id}/reconcile` lets an administrator resolve flagged legacy custody with a reason and password re-verification.
 - `GET /api/inventory/my-van` returns only the authenticated engineer's assigned vehicle inventory.
+- `POST /api/inventory/vehicle-returns` lets the authenticated engineer request a return from their own vehicle.
+- `POST /api/inventory/vehicle-returns/{id}/actions` enforces warehouse approval, engineer password handover, and warehouse receipt.
 - The former generic replenishment status PATCH is deprecated and returns `410`; clients must use the authenticated action endpoint.
 - `POST /api/inventory/transactions` is limited to non-vehicle `INBOUND`, `OUTBOUND`, `TRANSFER`, and `DAMAGE`; vehicle, `RETURN`, and `WORK_ORDER_USED` changes require their authenticated business workflows.
 - Full custody contract: [`docs/REPLENISHMENT_CUSTODY_API.md`](docs/REPLENISHMENT_CUSTODY_API.md).

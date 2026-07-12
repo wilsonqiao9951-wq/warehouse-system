@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState, useEffect } from "react";
 import ManagerShell from "@/components/manager-shell";
 import ReplenishmentTimeline from "@/components/replenishment-timeline";
 import { api } from "@/lib/api";
-import { InventoryNotification, Part, ReplenishmentRequest, Warehouse } from "@/types";
+import { InventoryNotification, Part, ReplenishmentRequest, VehicleReturnRequest, Warehouse } from "@/types";
 
 type ReplenishmentAction = "start_picking" | "ship" | "complete" | "cancel";
 type ReconciliationResolution = "reset_requested" | "accept_historical";
@@ -75,6 +75,7 @@ function warehouseLabel(name: string | null | undefined, id: number | null | und
 export default function WarehouseTasksPage() {
   const [notifications, setNotifications] = useState<InventoryNotification[]>([]);
   const [requests, setRequests] = useState<ReplenishmentRequest[]>([]);
+  const [vehicleReturns, setVehicleReturns] = useState<VehicleReturnRequest[]>([]);
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [parts, setParts] = useState<Part[]>([]);
   const [sourceSelections, setSourceSelections] = useState<Record<number, number | "">>({});
@@ -90,14 +91,16 @@ export default function WarehouseTasksPage() {
 
   const refresh = useCallback(async () => {
     try {
-      const [notificationRows, requestRows, warehouseRows, partRows] = await Promise.all([
+      const [notificationRows, requestRows, returnRows, warehouseRows, partRows] = await Promise.all([
         api.listInventoryNotifications(),
         api.listReplenishmentRequests(),
+        api.listVehicleReturnRequests(),
         api.listWarehouses(),
         api.listParts()
       ]);
       setNotifications(notificationRows);
       setRequests(requestRows);
+      setVehicleReturns(returnRows);
       setWarehouses(warehouseRows);
       setParts(partRows);
       setError("");
@@ -122,8 +125,8 @@ export default function WarehouseTasksPage() {
   const metrics = useMemo(() => ({
     queue: requests.filter((item) => item.status === "requested" || item.status === "picking").length,
     waiting: requests.filter((item) => item.status === "shipped").length,
-    received: requests.filter((item) => item.status === "received").length
-  }), [requests]);
+    returns: vehicleReturns.filter((item) => !["received", "cancelled"].includes(item.status)).length
+  }), [requests, vehicleReturns]);
   const vehicleWarehouses = useMemo(
     () => warehouses.filter((warehouse) =>
       warehouse.is_active !== false
@@ -308,6 +311,34 @@ export default function WarehouseTasksPage() {
     }
   };
 
+  const runReturnAction = async (
+    item: VehicleReturnRequest,
+    action: "approve" | "receive" | "cancel",
+    reason?: string
+  ) => {
+    setBusy(`return-${item.id}`);
+    setError("");
+    setMessage("");
+    try {
+      await api.actOnVehicleReturnRequest(item.id, {
+        action,
+        expected_version: item.version,
+        ...(reason ? { reason } : {})
+      });
+      setMessage(`Vehicle return #${item.id} updated.`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to update vehicle return.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const cancelVehicleReturn = (item: VehicleReturnRequest) => {
+    const reason = window.prompt("Reason for cancelling this vehicle return:")?.trim();
+    if (reason) void runReturnAction(item, "cancel", reason);
+  };
+
   return (
     <ManagerShell
       title="Warehouse tasks"
@@ -315,7 +346,7 @@ export default function WarehouseTasksPage() {
       metrics={[
         { label: "Pick queue", value: metrics.queue },
         { label: "Awaiting receipt", value: metrics.waiting },
-        { label: "Ready to close", value: metrics.received }
+        { label: "Vehicle returns", value: metrics.returns }
       ]}
     >
       {error && <div className="notice notice-error">{error}</div>}
@@ -454,6 +485,77 @@ export default function WarehouseTasksPage() {
                     </button>
                   </div>
                 </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="card">
+        <div className="section-heading-row">
+          <div>
+            <h3 style={{ margin: 0 }}>Vehicle returns</h3>
+            <p className="muted" style={{ margin: "4px 0 0" }}>
+              Approve requested quantities, wait for the engineer&apos;s authenticated handover, then receive into the warehouse.
+            </p>
+          </div>
+          <span className="status-count">{vehicleReturns.length}</span>
+        </div>
+        {vehicleReturns.length === 0 ? (
+          <div className="empty-state">No vehicle return requests.</div>
+        ) : (
+          <div className="warehouse-task-grid">
+            {vehicleReturns.map((item) => {
+              const returnBusy = busy === `return-${item.id}`;
+              return (
+                <article className="job-card replenishment-card" key={item.id}>
+                  <div className="section-heading-row">
+                    <div>
+                      <strong>{item.part_number || `Part #${item.part_id}`} — {item.part_name}</strong>
+                      <div className="muted">Qty {item.quantity} · Return #{item.id} · v{item.version}</div>
+                    </div>
+                    <span className={`status-pill status-pill--${item.status}`}>{item.status}</span>
+                  </div>
+                  <div className="custody-route">
+                    <div>
+                      <span className="muted">Engineer vehicle</span>
+                      <strong>{item.source_warehouse_name}</strong>
+                      <span className="muted">{item.engineer_name}</span>
+                    </div>
+                    <span aria-hidden="true">→</span>
+                    <div>
+                      <span className="muted">Destination</span>
+                      <strong>{item.destination_warehouse_name}</strong>
+                    </div>
+                  </div>
+                  <div className="notice" style={{ marginTop: 10 }}>{item.reason}</div>
+                  <div className="muted">Vehicle stock: {item.source_quantity} · Warehouse stock: {item.destination_quantity}</div>
+                  {item.status === "approved" && (
+                    <p className="muted">Reserved. Waiting for {item.engineer_name || "the engineer"} to confirm handover.</p>
+                  )}
+                  {item.status === "shipped" && (
+                    <p className="muted">Engineer handover verified on {item.shipped_device_name || "registered device"}.</p>
+                  )}
+                  {item.shipment_transaction_id && <div className="muted">Vehicle outbound transaction #{item.shipment_transaction_id}</div>}
+                  {item.receipt_transaction_id && <div className="muted">Warehouse inbound transaction #{item.receipt_transaction_id}</div>}
+                  <div className="one-hand-actions">
+                    {item.can_approve && (
+                      <button type="button" disabled={returnBusy || !online} onClick={() => void runReturnAction(item, "approve") }>
+                        Approve and reserve
+                      </button>
+                    )}
+                    {item.can_receive && (
+                      <button type="button" disabled={returnBusy || !online} onClick={() => void runReturnAction(item, "receive") }>
+                        Receive into warehouse
+                      </button>
+                    )}
+                    {item.can_cancel && (
+                      <button type="button" className="secondary-button" disabled={returnBusy} onClick={() => cancelVehicleReturn(item)}>
+                        Cancel return
+                      </button>
+                    )}
+                  </div>
+                </article>
               );
             })}
           </div>

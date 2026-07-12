@@ -268,3 +268,18 @@ Verification:
 - Linked-movement downgrade was rejected before any downgrade DDL executed.
 - Frontend upgraded to Next.js 16.2.10 and ESLint 9; lint and the production build passed for all 26 static routes.
 - npm dependency installation/audit resolved to 0 known vulnerabilities; PostCSS is pinned to the patched 8.5.17 release.
+
+## 20260712_0020 - Authenticated vehicle return custody
+
+Added `vehicle_return_requests` and the strict reverse logistics chain `requested -> approved -> shipped -> received`.
+
+- Engineers create returns only from their own assigned vehicle and registered device.
+- Warehouse/admin approval reserves the vehicle quantity.
+- Only the same engineer can confirm handover, using the bound device and current password; this posts `return_ship` vehicle `OUTBOUND`.
+- Warehouse/admin receipt validates the linked shipment and posts `return_receive` warehouse `INBOUND` with the same cost.
+- Cancellation is allowed only before handover and releases approved reservations.
+- Unique client request IDs, workflow versions, transaction stages, tenant indexes, and audit events make retries and concurrent requests safe.
+- Generic `RETURN` remains disabled; all return mutations are online-only.
+- Downgrade is blocked while linked vehicle-return movements exist.
+
+Verification: full backend suite 70 passed, vehicle custody target suite 18 passed, migration base-to-`0020` and empty `0020 -> 0019 -> 0020` passed, ESLint passed, and the Next.js production build generated all 26 static routes.

@@ -3,7 +3,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.models import InventoryTransaction, Part, ReplenishmentRequest, StorageLocation, TransactionType, User, UserRole, Warehouse, WorkOrder, WorkOrderPart, WorkOrderPartMemory
+from app.models import InventoryTransaction, Part, ReplenishmentRequest, StorageLocation, TransactionType, User, UserRole, VehicleReturnRequest, Warehouse, WorkOrder, WorkOrderPart, WorkOrderPartMemory
 from app.schemas import InventoryTransactionCreate, LocationStockBalance, StockBalance, WorkOrderPartCreate
 
 
@@ -184,8 +184,27 @@ def get_reserved_replenishment_quantity(
 
 
 def get_available_stock_quantity(db: Session, part_id: int, warehouse_id: int) -> int:
-    return get_stock_quantity(db, part_id, warehouse_id) - get_reserved_replenishment_quantity(
-        db, part_id, warehouse_id
+    return (
+        get_stock_quantity(db, part_id, warehouse_id)
+        - get_reserved_replenishment_quantity(db, part_id, warehouse_id)
+        - get_reserved_vehicle_return_quantity(db, part_id, warehouse_id)
+    )
+
+
+def get_reserved_vehicle_return_quantity(
+    db: Session,
+    part_id: int,
+    warehouse_id: int,
+) -> int:
+    return int(
+        db.scalar(
+            select(func.coalesce(func.sum(VehicleReturnRequest.quantity), 0)).where(
+                VehicleReturnRequest.part_id == part_id,
+                VehicleReturnRequest.source_warehouse_id == warehouse_id,
+                VehicleReturnRequest.status == "approved",
+            )
+        )
+        or 0
     )
 
 

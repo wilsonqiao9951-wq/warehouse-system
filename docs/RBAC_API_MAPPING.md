@@ -158,3 +158,16 @@ An explicit `warehouse_type=van` or assignment to an engineer classifies a wareh
 - `RETURN` and `WORK_ORDER_USED` cannot be submitted through the generic transaction endpoint; they require the authenticated return and work-order usage workflows.
 
 SQLite enables foreign-key enforcement on every connection and uses `BEGIN IMMEDIATE` to serialize inventory-affecting custody writes before stock is read. PostgreSQL uses row locks. These database controls support, but do not replace, the API role and capability checks above.
+
+## Vehicle return custody
+
+| Operation | Vehicle owner engineer | Other engineer | Manager | Admin | Warehouse |
+|---|---:|---:|---:|---:|---:|
+| Create request from assigned vehicle | Allow, bound device | Deny | Deny | Deny | Deny |
+| View requests | Own only | Own only | Allow | Allow | Allow |
+| Approve and reserve | Deny | Deny | Deny | Allow | Allow |
+| Confirm physical handover | Allow, bound device + password | Deny | Deny | Deny | Deny |
+| Receive into warehouse | Deny | Deny | Deny | Allow | Allow |
+| Cancel before handover | Allow own | Deny | Deny | Allow | Allow |
+
+After approval, the return quantity is reserved against vehicle availability. Handover writes `OUTBOUND`; receipt writes `INBOUND`. Shipped returns cannot be cancelled, generic `RETURN` remains disabled, and all return mutations are online-only.

@@ -295,13 +295,17 @@ class InventoryTransaction(Base):
     __tablename__ = "inventory_transactions"
     __table_args__ = (
         UniqueConstraint("replenishment_request_id", "movement_stage", name="uq_inventory_replenishment_stage"),
+        UniqueConstraint("vehicle_return_request_id", "movement_stage", name="uq_inventory_vehicle_return_stage"),
         CheckConstraint(
-            "movement_stage IS NULL OR movement_stage IN ('ship', 'receive')",
+            "movement_stage IS NULL OR movement_stage IN ('ship', 'receive', 'return_ship', 'return_receive')",
             name="ck_inventory_replenishment_stage",
         ),
         CheckConstraint(
-            "(replenishment_request_id IS NULL AND movement_stage IS NULL) OR "
-            "(replenishment_request_id IS NOT NULL AND movement_stage IS NOT NULL)",
+            "(replenishment_request_id IS NULL AND vehicle_return_request_id IS NULL AND movement_stage IS NULL) OR "
+            "(replenishment_request_id IS NOT NULL AND vehicle_return_request_id IS NULL "
+            "AND movement_stage IN ('ship', 'receive')) OR "
+            "(replenishment_request_id IS NULL AND vehicle_return_request_id IS NOT NULL "
+            "AND movement_stage IN ('return_ship', 'return_receive'))",
             name="ck_inventory_replenishment_link",
         ),
     )
@@ -317,6 +321,7 @@ class InventoryTransaction(Base):
     to_location_id: Mapped[int | None] = mapped_column(ForeignKey("storage_locations.id"), nullable=True)
     work_order_id: Mapped[int | None] = mapped_column(ForeignKey("work_orders.id"), nullable=True)
     replenishment_request_id: Mapped[int | None] = mapped_column(ForeignKey("replenishment_requests.id"), nullable=True, index=True)
+    vehicle_return_request_id: Mapped[int | None] = mapped_column(ForeignKey("vehicle_return_requests.id"), nullable=True, index=True)
     movement_stage: Mapped[str | None] = mapped_column(String(20), nullable=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     unit_cost: Mapped[float] = mapped_column(Float, default=0.0)
@@ -520,6 +525,52 @@ class ReplenishmentRequest(Base):
     shipment_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     receipt_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="requested", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class VehicleReturnRequest(Base):
+    __tablename__ = "vehicle_return_requests"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "client_request_id", name="uq_vehicle_return_org_client_request"),
+        UniqueConstraint("shipment_transaction_id", name="uq_vehicle_return_shipment_transaction_id"),
+        UniqueConstraint("receipt_transaction_id", name="uq_vehicle_return_receipt_transaction_id"),
+        CheckConstraint("quantity > 0", name="ck_vehicle_return_quantity_positive"),
+        CheckConstraint("version >= 0", name="ck_vehicle_return_version_non_negative"),
+        CheckConstraint(
+            "status IN ('requested', 'approved', 'shipped', 'received', 'cancelled')",
+            name="ck_vehicle_return_status",
+        ),
+        Index("ix_vehicle_return_org_status", "organization_id", "status"),
+        Index("ix_vehicle_return_org_engineer_status", "organization_id", "engineer_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
+    client_request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False)
+    source_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    destination_warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    engineer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="requested", nullable=False)
+    requested_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    requested_device_id: Mapped[int] = mapped_column(ForeignKey("user_devices.id"), nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    shipped_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    shipped_device_id: Mapped[int | None] = mapped_column(ForeignKey("user_devices.id"), nullable=True)
+    shipped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    received_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancelled_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    shipment_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    receipt_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

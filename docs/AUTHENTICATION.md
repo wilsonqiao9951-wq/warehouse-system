@@ -61,6 +61,8 @@ Legacy custody rows marked `requires_reconciliation` reject every normal workflo
 
 Manual replenishment creation requires a client-generated `client_request_id` and business reason. The ID provides organization-scoped retry idempotency; it is not an authentication credential and never replaces Bearer/device authorization.
 
+Vehicle returns follow the inverse custody rule. Only the vehicle owner on a registered device may create the request or confirm handover. Handover requires the current account password and records the engineer plus device before vehicle stock is deducted. Warehouse/admin users may approve and receive, but cannot impersonate the engineer handover.
+
 Notification/manual request creation, picking, shipping, receipt, completion, cancellation, and reconciliation are online-only. The frontend never writes these operations or either password step-up to its offline queue.
 
 ## Legacy identity headers

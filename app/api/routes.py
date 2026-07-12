@@ -36,6 +36,7 @@ from app.models import (
     InventoryTransaction,
     InventoryNotification,
     ReplenishmentRequest,
+    VehicleReturnRequest,
     ImportBatch,
     JobStatus,
     Organization,
@@ -92,6 +93,9 @@ from app.schemas import (
     ReplenishmentRequestAction,
     ReplenishmentRequestCreate,
     ReplenishmentRequestReconcile,
+    VehicleReturnRequestAction,
+    VehicleReturnRequestCreate,
+    VehicleReturnRequestRead,
     OrganizationCreate,
     OrganizationRead,
     OrganizationUpdate,
@@ -2335,6 +2339,336 @@ def act_on_replenishment_request(
 )
 def update_replenishment_request(request_id: int):
     raise HTTPException(status_code=410, detail="Use the authenticated replenishment action endpoint")
+
+
+def _validate_vehicle_return_warehouses(
+    db: Session,
+    source: Warehouse,
+    destination: Warehouse,
+    engineer_id: int,
+) -> None:
+    if not source.is_active or not warehouse_is_vehicle(db, source):
+        raise HTTPException(status_code=409, detail="Return source must be an active engineer vehicle")
+    if source.assigned_user_id != engineer_id:
+        raise HTTPException(status_code=403, detail="Return source is not assigned to this engineer")
+    if not destination.is_active or warehouse_is_vehicle(db, destination):
+        raise HTTPException(status_code=409, detail="Return destination must be an active non-vehicle warehouse")
+    if source.id == destination.id:
+        raise HTTPException(status_code=400, detail="Return source and destination must be different")
+
+
+def _vehicle_return_read_for_actor(
+    db: Session,
+    actor: Actor,
+    item: VehicleReturnRequest,
+) -> VehicleReturnRequestRead:
+    payload = VehicleReturnRequestRead.model_validate(item).model_dump()
+    part = db.get(Part, item.part_id)
+    source = db.get(Warehouse, item.source_warehouse_id)
+    destination = db.get(Warehouse, item.destination_warehouse_id)
+    requested_device = db.get(UserDevice, item.requested_device_id)
+    shipped_device = db.get(UserDevice, item.shipped_device_id) if item.shipped_device_id else None
+
+    def user_name(user_id: int | None) -> str | None:
+        user = db.get(User, user_id) if user_id else None
+        return user.name if user else None
+
+    warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    is_engineer_owner = bool(actor.role == UserRole.ENGINEER and actor.user_id == item.engineer_id)
+    payload.update(
+        part_number=part.part_number if part else None,
+        part_name=part.name if part else None,
+        source_warehouse_name=source.name if source else None,
+        destination_warehouse_name=destination.name if destination else None,
+        engineer_name=user_name(item.engineer_id),
+        requested_by_name=user_name(item.requested_by),
+        requested_device_name=requested_device.device_name if requested_device else None,
+        approved_by_name=user_name(item.approved_by),
+        shipped_by_name=user_name(item.shipped_by),
+        shipped_device_name=shipped_device.device_name if shipped_device else None,
+        received_by_name=user_name(item.received_by),
+        cancelled_by_name=user_name(item.cancelled_by),
+        source_quantity=get_stock_quantity(db, item.part_id, item.source_warehouse_id),
+        destination_quantity=get_stock_quantity(db, item.part_id, item.destination_warehouse_id),
+        can_approve=warehouse_operator and item.status == "requested",
+        can_ship=is_engineer_owner and actor.device_verified and item.status == "approved",
+        can_receive=warehouse_operator and item.status == "shipped",
+        can_cancel=(warehouse_operator or is_engineer_owner) and item.status in {"requested", "approved"},
+    )
+    return VehicleReturnRequestRead(**payload)
+
+
+@router.get("/inventory/vehicle-return-destinations", response_model=list[WarehouseRead])
+def vehicle_return_destinations(
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
+    rows = db.scalars(select(Warehouse).where(Warehouse.is_active.is_(True)).order_by(Warehouse.name)).all()
+    return [warehouse for warehouse in rows if not warehouse_is_vehicle(db, warehouse)]
+
+
+@router.post("/inventory/vehicle-returns", response_model=VehicleReturnRequestRead)
+def create_vehicle_return_request(
+    payload: VehicleReturnRequestCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.role != UserRole.ENGINEER or actor.user_id is None:
+        raise HTTPException(status_code=403, detail="Only an engineer can request a vehicle return")
+    require_bound_device(actor)
+    client_request_id = payload.client_request_id.strip()
+    reason = payload.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(status_code=422, detail="Return reason must be at least 3 non-whitespace characters")
+
+    def matches_existing(candidate: VehicleReturnRequest) -> bool:
+        return (
+            candidate.part_id == payload.part_id
+            and candidate.source_warehouse_id == payload.source_warehouse_id
+            and candidate.destination_warehouse_id == payload.destination_warehouse_id
+            and candidate.quantity == payload.quantity
+            and candidate.reason == reason
+            and candidate.engineer_id == actor.user_id
+        )
+
+    existing = db.scalar(
+        select(VehicleReturnRequest).where(VehicleReturnRequest.client_request_id == client_request_id)
+    )
+    if existing:
+        if not matches_existing(existing):
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another return")
+        return _vehicle_return_read_for_actor(db, actor, existing)
+
+    part = db.get(Part, payload.part_id)
+    source = db.get(Warehouse, payload.source_warehouse_id)
+    destination = db.get(Warehouse, payload.destination_warehouse_id)
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    if not source or not destination:
+        raise HTTPException(status_code=404, detail="Return warehouse not found")
+    _validate_vehicle_return_warehouses(db, source, destination, actor.user_id)
+    if get_stock_quantity(db, part.id, source.id) < payload.quantity:
+        raise HTTPException(status_code=409, detail="Vehicle stock is insufficient for this return")
+
+    item = VehicleReturnRequest(
+        client_request_id=client_request_id,
+        part_id=part.id,
+        source_warehouse_id=source.id,
+        destination_warehouse_id=destination.id,
+        engineer_id=actor.user_id,
+        quantity=payload.quantity,
+        reason=reason,
+        requested_by=actor.user_id,
+        requested_device_id=actor.device_record_id,
+    )
+    try:
+        db.add(item)
+        db.flush()
+        _audit(
+            db,
+            actor,
+            "vehicle_return_requested",
+            "vehicle_return_request",
+            item.id,
+            {
+                "part_id": item.part_id,
+                "quantity": item.quantity,
+                "source_warehouse_id": item.source_warehouse_id,
+                "destination_warehouse_id": item.destination_warehouse_id,
+                "engineer_id": item.engineer_id,
+                "client_request_id": item.client_request_id,
+                "reason": item.reason,
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.scalar(
+            select(VehicleReturnRequest).where(VehicleReturnRequest.client_request_id == client_request_id)
+        )
+        if existing and matches_existing(existing):
+            return _vehicle_return_read_for_actor(db, actor, existing)
+        if existing:
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another return")
+        raise HTTPException(status_code=409, detail="Vehicle return request could not be created") from exc
+    db.refresh(item)
+    return _vehicle_return_read_for_actor(db, actor, item)
+
+
+@router.get("/inventory/vehicle-returns", response_model=list[VehicleReturnRequestRead])
+def list_vehicle_return_requests(
+    status: str | None = Query(default=None, pattern="^(requested|approved|shipped|received|cancelled)$"),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
+    stmt = select(VehicleReturnRequest).order_by(VehicleReturnRequest.id.desc())
+    if actor.role == UserRole.ENGINEER:
+        stmt = stmt.where(VehicleReturnRequest.engineer_id == actor.user_id)
+    if status:
+        stmt = stmt.where(VehicleReturnRequest.status == status)
+    rows = db.scalars(stmt.limit(limit)).all()
+    return [_vehicle_return_read_for_actor(db, actor, item) for item in rows]
+
+
+@router.post("/inventory/vehicle-returns/{request_id}/actions", response_model=VehicleReturnRequestRead)
+def act_on_vehicle_return_request(
+    request_id: int,
+    payload: VehicleReturnRequestAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    begin_inventory_write(db)
+    item = db.scalar(
+        select(VehicleReturnRequest)
+        .where(
+            VehicleReturnRequest.id == request_id,
+            VehicleReturnRequest.organization_id == actor.organization_id,
+        )
+        .with_for_update()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Vehicle return request not found")
+
+    warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    engineer_owner = bool(actor.role == UserRole.ENGINEER and actor.user_id == item.engineer_id)
+    target_status = {
+        "approve": "approved",
+        "ship": "shipped",
+        "receive": "received",
+        "cancel": "cancelled",
+    }[payload.action]
+    if payload.action in {"approve", "receive"} and not warehouse_operator:
+        raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+    if payload.action == "ship":
+        if not engineer_owner:
+            raise HTTPException(status_code=403, detail="Only the vehicle owner can hand over this return")
+        require_bound_device(actor)
+        if item.status == "shipped" and item.shipped_device_id != actor.device_record_id:
+            raise HTTPException(status_code=403, detail="Return was handed over on another registered device")
+    if payload.action == "cancel" and not (warehouse_operator or engineer_owner):
+        raise HTTPException(status_code=403, detail="Only the vehicle owner or warehouse can cancel this return")
+    if item.status == target_status:
+        return _vehicle_return_read_for_actor(db, actor, item)
+    if item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Vehicle return changed; refresh before continuing")
+
+    part = db.scalar(select(Part).where(Part.id == item.part_id).with_for_update())
+    source = db.get(Warehouse, item.source_warehouse_id)
+    destination = db.get(Warehouse, item.destination_warehouse_id)
+    if not part or not source or not destination:
+        raise HTTPException(status_code=409, detail="Return inventory references are incomplete")
+
+    previous_status = item.status
+    transaction_id: int | None = None
+    now = datetime.utcnow()
+    if payload.action == "approve":
+        if item.status != "requested":
+            raise HTTPException(status_code=409, detail="Only a requested return can be approved")
+        _validate_vehicle_return_warehouses(db, source, destination, item.engineer_id)
+        if get_available_stock_quantity(db, item.part_id, item.source_warehouse_id) < item.quantity:
+            raise HTTPException(status_code=409, detail="Vehicle stock is no longer available for approval")
+        item.approved_by = actor.user_id
+        item.approved_at = now
+
+    elif payload.action == "ship":
+        if item.status != "approved":
+            raise HTTPException(status_code=409, detail="Only an approved return can be handed over")
+        _validate_vehicle_return_warehouses(db, source, destination, item.engineer_id)
+        if source.assigned_user_id != actor.user_id:
+            raise HTTPException(status_code=409, detail="Vehicle assignment changed after approval")
+        _require_account_reauthentication(db, actor, payload.account_password)
+        if get_stock_quantity(db, item.part_id, item.source_warehouse_id) < item.quantity:
+            raise HTTPException(status_code=409, detail="Vehicle stock is insufficient for handover")
+        transaction = InventoryTransaction(
+            part_id=item.part_id,
+            transaction_type=TransactionType.OUTBOUND,
+            quantity=item.quantity,
+            from_warehouse_id=item.source_warehouse_id,
+            vehicle_return_request_id=item.id,
+            movement_stage="return_ship",
+            user_id=actor.user_id,
+            unit_cost=part.default_cost,
+            notes=f"Vehicle return #{item.id} handed over",
+        )
+        db.add(transaction)
+        db.flush()
+        transaction_id = transaction.id
+        item.shipment_transaction_id = transaction.id
+        item.shipped_by = actor.user_id
+        item.shipped_device_id = actor.device_record_id
+        item.shipped_at = now
+
+    elif payload.action == "receive":
+        if item.status != "shipped":
+            raise HTTPException(status_code=409, detail="Only a handed-over return can be received")
+        if not destination.is_active or warehouse_is_vehicle(db, destination):
+            raise HTTPException(status_code=409, detail="Return destination is no longer an active warehouse")
+        shipment = db.get(InventoryTransaction, item.shipment_transaction_id) if item.shipment_transaction_id else None
+        if (
+            not shipment
+            or shipment.vehicle_return_request_id != item.id
+            or shipment.movement_stage != "return_ship"
+            or shipment.transaction_type != TransactionType.OUTBOUND
+            or shipment.part_id != item.part_id
+            or shipment.quantity != item.quantity
+            or shipment.from_warehouse_id != item.source_warehouse_id
+        ):
+            raise HTTPException(status_code=409, detail="Return shipment ledger is incomplete")
+        transaction = InventoryTransaction(
+            part_id=item.part_id,
+            transaction_type=TransactionType.INBOUND,
+            quantity=item.quantity,
+            to_warehouse_id=item.destination_warehouse_id,
+            vehicle_return_request_id=item.id,
+            movement_stage="return_receive",
+            user_id=actor.user_id,
+            unit_cost=shipment.unit_cost,
+            notes=f"Vehicle return #{item.id} received",
+        )
+        db.add(transaction)
+        db.flush()
+        transaction_id = transaction.id
+        item.receipt_transaction_id = transaction.id
+        item.received_by = actor.user_id
+        item.received_at = now
+
+    else:
+        if item.status not in {"requested", "approved"}:
+            raise HTTPException(status_code=409, detail="Only requested or approved returns can be cancelled")
+        if not payload.reason or len(payload.reason.strip()) < 3:
+            raise HTTPException(status_code=422, detail="Cancellation reason must be at least 3 characters")
+        item.cancelled_by = actor.user_id
+        item.cancelled_at = now
+        item.cancellation_reason = payload.reason.strip()
+
+    item.status = target_status
+    item.version += 1
+    _audit(
+        db,
+        actor,
+        f"vehicle_return_{payload.action}",
+        "vehicle_return_request",
+        item.id,
+        {
+            "from_status": previous_status,
+            "to_status": target_status,
+            "previous_version": payload.expected_version,
+            "new_version": item.version,
+            "part_id": item.part_id,
+            "quantity": item.quantity,
+            "source_warehouse_id": item.source_warehouse_id,
+            "destination_warehouse_id": item.destination_warehouse_id,
+            "engineer_id": item.engineer_id,
+            "inventory_transaction_id": transaction_id,
+            "reason": item.cancellation_reason if payload.action == "cancel" else None,
+        },
+    )
+    db.commit()
+    db.refresh(item)
+    return _vehicle_return_read_for_actor(db, actor, item)
 
 
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])

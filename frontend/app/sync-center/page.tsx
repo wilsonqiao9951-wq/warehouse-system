@@ -52,7 +52,7 @@ export default function SyncCenterPage() {
           <h3 style={{ margin: 0 }}>Pending operations</h3>
           <button type="button" onClick={() => void sync()}>Sync now</button>
         </div>
-        <p className="muted">Claiming, work-order status changes, manual replenishment requests, picking, shipping, engineer receipt, vehicle inventory posting, and historical reconciliation always require a live connection. Other queued records are rejected if the job was released or reclaimed.</p>
+        <p className="muted">Claiming, work-order status changes, replenishment custody, vehicle return approval/handover/receipt, vehicle inventory posting, and historical reconciliation always require a live connection. Other queued records are rejected if the job was released or reclaimed.</p>
         {message && <div className="notice notice-success">{message}</div>}
         {queue.length === 0 ? (
           <div className="empty-state">All eligible operations are synchronized.</div>

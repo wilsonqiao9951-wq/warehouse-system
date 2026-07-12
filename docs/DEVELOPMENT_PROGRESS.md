@@ -184,3 +184,25 @@ Verification:
 - Frontend: Next.js 16.2.10 production build passed with ESLint 9/type validation and all 26 static routes.
 - Dependency security: npm resolved to 0 known vulnerabilities after the Next.js 16 upgrade and the PostCSS security override.
 - Source hygiene: frontend and documentation `git diff --check` passed.
+
+## 2026-07-12 - Phase 2 vehicle return custody
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added engineer-owned vehicle return requests with organization-scoped idempotency keys.
+- Added warehouse approval and vehicle-stock reservation so work-order usage and competing returns cannot consume committed units.
+- Added exact-engineer, registered-device, current-password handover; administrators and warehouse users cannot impersonate this step.
+- Added linked vehicle `OUTBOUND` and warehouse `INBOUND` transactions with unique stages, copied cost, actor/device timestamps, and audit history.
+- Added warehouse receipt validation, pre-handover cancellation, optimistic versions, tenant isolation, and retry safety.
+- Added My Van request/handover UI and warehouse approval/receipt UI; every mutation is online-only.
+- Added Alembic revision `20260712_0020` and downgrade protection for linked return movements.
+
+Verification:
+
+- Backend: full suite passed, 70 tests.
+- Vehicle/replenishment custody target suite: 18 tests passed.
+- Database: fresh base-to-`0020` and empty `0020 -> 0019 -> 0020` passed on SQLite.
+- Frontend: ESLint and Next.js 16.2.10 production build passed for all 26 static routes.
+- Source hygiene: `git diff --check` passed.

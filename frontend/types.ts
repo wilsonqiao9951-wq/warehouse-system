@@ -158,6 +158,55 @@ export interface ReplenishmentRequest {
   updated_at?: string | null;
 }
 
+export interface VehicleReturnRequest {
+  id: number;
+  organization_id: number;
+  client_request_id: string;
+  part_id: number;
+  part_number?: string | null;
+  part_name?: string | null;
+  source_warehouse_id: number;
+  source_warehouse_name?: string | null;
+  destination_warehouse_id: number;
+  destination_warehouse_name?: string | null;
+  engineer_id: number;
+  engineer_name?: string | null;
+  quantity: number;
+  reason: string;
+  version: number;
+  status: "requested" | "approved" | "shipped" | "received" | "cancelled";
+  requested_by: number;
+  requested_by_name?: string | null;
+  requested_device_id: number;
+  requested_device_name?: string | null;
+  requested_at: string;
+  approved_by?: number | null;
+  approved_by_name?: string | null;
+  approved_at?: string | null;
+  shipped_by?: number | null;
+  shipped_by_name?: string | null;
+  shipped_device_id?: number | null;
+  shipped_device_name?: string | null;
+  shipped_at?: string | null;
+  received_by?: number | null;
+  received_by_name?: string | null;
+  received_at?: string | null;
+  cancelled_by?: number | null;
+  cancelled_by_name?: string | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  shipment_transaction_id?: number | null;
+  receipt_transaction_id?: number | null;
+  source_quantity: number;
+  destination_quantity: number;
+  can_approve: boolean;
+  can_ship: boolean;
+  can_receive: boolean;
+  can_cancel: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LocationStockBalance {
   part_id: number;
   part_number: string;

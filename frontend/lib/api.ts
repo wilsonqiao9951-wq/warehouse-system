@@ -13,6 +13,7 @@ import {
   InventoryScanResult,
   InventoryNotification,
   ReplenishmentRequest,
+  VehicleReturnRequest,
   User,
   Warehouse,
   WorkOrder,
@@ -94,6 +95,7 @@ function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (method === "GET") return false;
   if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
   if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
+  if (path === "/inventory/vehicle-returns" || path.startsWith("/inventory/vehicle-returns/")) return true;
   if (/^\/inventory\/notifications\/\d+\/create-request(?:\?|$)/.test(path)) return true;
   if (/^\/work-orders\/\d+\/(claim|release|start|pause|complete|request-completion|approve-completion|reject-completion)$/.test(path)) return true;
   return path === "/job-status";
@@ -486,6 +488,31 @@ export const api = {
       account_password: string;
     }
   ) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}/reconcile`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listVehicleReturnDestinations: () => request<Warehouse[]>("/inventory/vehicle-return-destinations"),
+  createVehicleReturnRequest: (payload: {
+    part_id: number;
+    source_warehouse_id: number;
+    destination_warehouse_id: number;
+    quantity: number;
+    reason: string;
+    client_request_id: string;
+  }) => request<VehicleReturnRequest>("/inventory/vehicle-returns", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listVehicleReturnRequests: () => request<VehicleReturnRequest[]>("/inventory/vehicle-returns"),
+  actOnVehicleReturnRequest: (
+    id: number,
+    payload: {
+      action: "approve" | "ship" | "receive" | "cancel";
+      expected_version: number;
+      reason?: string;
+      account_password?: string;
+    }
+  ) => request<VehicleReturnRequest>(`/inventory/vehicle-returns/${id}/actions`, {
     method: "POST",
     body: JSON.stringify(payload)
   }),

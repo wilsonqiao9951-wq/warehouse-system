@@ -1574,3 +1574,224 @@ def test_engineer_can_only_consume_parts_from_own_van_and_my_van_is_account_scop
         assert len(usages) == 1
         assert usages[0].warehouse_id == setup["van_a"]["id"]
         assert usages[0].user_id == setup["engineer_a"]["id"]
+
+
+def _return_action(client, request_id: int, headers: dict[str, str], action: str, version: int, **extra):
+    return client.post(
+        f"/api/inventory/vehicle-returns/{request_id}/actions",
+        headers=headers,
+        json={"action": action, "expected_version": version, **extra},
+    )
+
+
+def test_vehicle_return_full_chain_requires_owner_handover_and_warehouse_receipt(client, seed_inventory_ledger):
+    setup = _standard_setup(client)
+    seed_inventory_ledger(
+        part_id=setup["part"]["id"],
+        quantity=5,
+        to_warehouse_id=setup["van_a"]["id"],
+        user_id=setup["engineer_a"]["id"],
+    )
+
+    with _enforced_rbac():
+        headers = _headers(client, setup)
+        created = client.post(
+            "/api/inventory/vehicle-returns",
+            headers=headers["engineer_a"],
+            json={
+                "part_id": setup["part"]["id"],
+                "source_warehouse_id": setup["van_a"]["id"],
+                "destination_warehouse_id": setup["source"]["id"],
+                "quantity": 3,
+                "reason": "Unused service stock",
+                "client_request_id": "return-full-chain-001",
+            },
+        )
+        assert created.status_code == 200, created.text
+        item = created.json()
+        assert (item["status"], item["version"], item["engineer_id"]) == (
+            "requested",
+            0,
+            setup["engineer_a"]["id"],
+        )
+
+        approved = _return_action(client, item["id"], headers["warehouse"], "approve", 0)
+        assert approved.status_code == 200, approved.text
+        assert (approved.json()["status"], approved.json()["version"]) == ("approved", 1)
+        assert _return_action(
+            client,
+            item["id"],
+            headers["engineer_b"],
+            "ship",
+            1,
+            account_password=ENGINEER_PASSWORD,
+        ).status_code == 403
+        assert _return_action(
+            client,
+            item["id"],
+            headers["admin"],
+            "ship",
+            1,
+            account_password=STAFF_PASSWORD,
+        ).status_code == 403
+        assert _return_action(
+            client,
+            item["id"],
+            headers["engineer_a"],
+            "ship",
+            1,
+            account_password="wrong-password",
+        ).status_code == 401
+
+        shipped = _return_action(
+            client,
+            item["id"],
+            headers["engineer_a"],
+            "ship",
+            1,
+            account_password=ENGINEER_PASSWORD,
+        )
+        assert shipped.status_code == 200, shipped.text
+        assert (shipped.json()["status"], shipped.json()["version"]) == ("shipped", 2)
+        assert _balance(client, headers["warehouse"], setup["part"]["id"], setup["van_a"]["id"]) == 2
+        assert _return_action(client, item["id"], headers["engineer_a"], "receive", 2).status_code == 403
+
+        received = _return_action(client, item["id"], headers["warehouse"], "receive", 2)
+        assert received.status_code == 200, received.text
+        assert (received.json()["status"], received.json()["version"]) == ("received", 3)
+        assert _balance(client, headers["warehouse"], setup["part"]["id"], setup["source"]["id"]) == 13
+
+    with client.app.state.testing_session_local() as db:
+        transactions = db.scalars(
+            select(InventoryTransaction)
+            .where(InventoryTransaction.vehicle_return_request_id == item["id"])
+            .order_by(InventoryTransaction.id)
+        ).all()
+        assert [row.movement_stage for row in transactions] == ["return_ship", "return_receive"]
+        assert transactions[0].user_id == setup["engineer_a"]["id"]
+        assert transactions[1].user_id == setup["warehouse_user"]["id"]
+        audits = db.scalars(
+            select(AuditLog)
+            .where(AuditLog.entity_type == "vehicle_return_request", AuditLog.entity_id == item["id"])
+            .order_by(AuditLog.id)
+        ).all()
+        assert [row.action for row in audits] == [
+            "vehicle_return_requested",
+            "vehicle_return_approve",
+            "vehicle_return_ship",
+            "vehicle_return_receive",
+        ]
+
+
+def test_vehicle_return_approval_reserves_stock_and_cancel_releases_it(client, seed_inventory_ledger):
+    setup = _standard_setup(client, source_quantity=0)
+    seed_inventory_ledger(
+        part_id=setup["part"]["id"],
+        quantity=5,
+        to_warehouse_id=setup["van_a"]["id"],
+    )
+    with _enforced_rbac():
+        headers = _headers(client, setup)
+
+        def create(key: str):
+            response = client.post(
+                "/api/inventory/vehicle-returns",
+                headers=headers["engineer_a"],
+                json={
+                    "part_id": setup["part"]["id"],
+                    "source_warehouse_id": setup["van_a"]["id"],
+                    "destination_warehouse_id": setup["source"]["id"],
+                    "quantity": 4,
+                    "reason": "Reduce vehicle stock",
+                    "client_request_id": key,
+                },
+            )
+            assert response.status_code == 200, response.text
+            return response.json()
+
+        first = create("return-reservation-001")
+        second = create("return-reservation-002")
+        assert _return_action(client, first["id"], headers["warehouse"], "approve", 0).status_code == 200
+        competing = _return_action(client, second["id"], headers["warehouse"], "approve", 0)
+        assert competing.status_code == 409, competing.text
+        cancelled = _return_action(
+            client,
+            first["id"],
+            headers["engineer_a"],
+            "cancel",
+            1,
+            reason="Return no longer needed",
+        )
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["status"] == "cancelled"
+        assert _return_action(client, second["id"], headers["warehouse"], "approve", 0).status_code == 200
+
+
+def test_vehicle_return_creation_is_device_bound_idempotent_and_tenant_safe(client, seed_inventory_ledger):
+    setup = _standard_setup(client)
+    seed_inventory_ledger(
+        part_id=setup["part"]["id"],
+        quantity=2,
+        to_warehouse_id=setup["van_a"]["id"],
+    )
+    payload = {
+        "part_id": setup["part"]["id"],
+        "source_warehouse_id": setup["van_a"]["id"],
+        "destination_warehouse_id": setup["source"]["id"],
+        "quantity": 1,
+        "reason": "Duplicate return test",
+        "client_request_id": "return-idempotent-001",
+    }
+    with _enforced_rbac():
+        headers = _headers(client, setup)
+        assert client.post("/api/inventory/vehicle-returns", headers=_login(client, setup["engineer_a"], ENGINEER_PASSWORD), json=payload).status_code == 401
+        assert client.post("/api/inventory/vehicle-returns", headers=headers["engineer_b"], json=payload).status_code == 403
+        first = client.post("/api/inventory/vehicle-returns", headers=headers["engineer_a"], json=payload)
+        repeated = client.post("/api/inventory/vehicle-returns", headers=headers["engineer_a"], json=payload)
+        assert first.status_code == repeated.status_code == 200
+        assert first.json()["id"] == repeated.json()["id"]
+        conflict = client.post(
+            "/api/inventory/vehicle-returns",
+            headers=headers["engineer_a"],
+            json={**payload, "quantity": 2},
+        )
+        assert conflict.status_code == 409
+        engineer_list = client.get("/api/inventory/vehicle-returns", headers=headers["engineer_a"])
+        other_list = client.get("/api/inventory/vehicle-returns", headers=headers["engineer_b"])
+        assert {row["id"] for row in engineer_list.json()} == {first.json()["id"]}
+        assert other_list.json() == []
+
+
+def test_vehicle_return_retries_do_not_duplicate_inventory_movements(client, seed_inventory_ledger):
+    setup = _standard_setup(client)
+    seed_inventory_ledger(part_id=setup["part"]["id"], quantity=2, to_warehouse_id=setup["van_a"]["id"])
+    with _enforced_rbac():
+        headers = _headers(client, setup)
+        created = client.post(
+            "/api/inventory/vehicle-returns",
+            headers=headers["engineer_a"],
+            json={
+                "part_id": setup["part"]["id"],
+                "source_warehouse_id": setup["van_a"]["id"],
+                "destination_warehouse_id": setup["source"]["id"],
+                "quantity": 1,
+                "reason": "Retry safety",
+                "client_request_id": "return-retry-001",
+            },
+        ).json()
+        assert _return_action(client, created["id"], headers["warehouse"], "approve", 0).status_code == 200
+        first_ship = _return_action(
+            client, created["id"], headers["engineer_a"], "ship", 1, account_password=ENGINEER_PASSWORD
+        )
+        retry_ship = _return_action(
+            client, created["id"], headers["engineer_a"], "ship", 1, account_password=ENGINEER_PASSWORD
+        )
+        assert first_ship.status_code == retry_ship.status_code == 200
+        first_receive = _return_action(client, created["id"], headers["warehouse"], "receive", 2)
+        retry_receive = _return_action(client, created["id"], headers["warehouse"], "receive", 2)
+        assert first_receive.status_code == retry_receive.status_code == 200
+    with client.app.state.testing_session_local() as db:
+        rows = db.scalars(
+            select(InventoryTransaction).where(InventoryTransaction.vehicle_return_request_id == created["id"])
+        ).all()
+        assert sorted(row.movement_stage for row in rows) == ["return_receive", "return_ship"]
