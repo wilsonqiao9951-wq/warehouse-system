@@ -290,3 +290,9 @@ Verification: full backend suite 70 passed, vehicle custody target suite 18 pass
 - Submission records book snapshots; administrator approval recalculates current book stock and posts one uniquely linked adjustment per non-zero variance.
 - Administrator password reauthentication is required before ledger changes. Managers remain read-only and vehicle warehouses are excluded.
 - Downgrade is blocked while approved count adjustment movements exist.
+
+## 20260712_0022 - Replenishment approvals
+
+- Adds pending/approved/rejected decision state plus approver/rejector identities, timestamps, and rejection reason.
+- Managers and administrators decide requests; warehouse users cannot self-approve and cannot pick pending requests.
+- Existing in-progress/completed custody rows are migrated as approved. Rejected rows downgrade safely to cancelled with their reason preserved.

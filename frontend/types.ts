@@ -124,9 +124,17 @@ export interface ReplenishmentRequest {
   work_order_ticket_number?: string | null;
   requested_by?: number | null;
   requested_by_name?: string | null;
-  status: "requested" | "picking" | "shipped" | "received" | "completed" | "cancelled";
+  status: "requested" | "picking" | "shipped" | "received" | "completed" | "cancelled" | "rejected";
   version: number;
   requires_reconciliation: boolean;
+  approval_status: "pending" | "approved" | "rejected";
+  approved_by?: number | null;
+  approved_by_name?: string | null;
+  approved_at?: string | null;
+  rejected_by?: number | null;
+  rejected_by_name?: string | null;
+  rejected_at?: string | null;
+  rejection_reason?: string | null;
   picking_by?: number | null;
   picking_by_name?: string | null;
   picking_at?: string | null;
@@ -149,6 +157,8 @@ export interface ReplenishmentRequest {
   source_available_quantity?: number | null;
   destination_quantity?: number | null;
   can_start_picking: boolean;
+  can_approve: boolean;
+  can_reject: boolean;
   can_ship: boolean;
   can_receive: boolean;
   can_complete: boolean;

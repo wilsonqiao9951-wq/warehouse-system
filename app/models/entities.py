@@ -491,8 +491,12 @@ class ReplenishmentRequest(Base):
         CheckConstraint("quantity > 0", name="ck_replenishment_quantity_positive"),
         CheckConstraint("version >= 0", name="ck_replenishment_version_non_negative"),
         CheckConstraint(
-            "status IN ('requested', 'picking', 'shipped', 'received', 'completed', 'cancelled')",
+            "status IN ('requested', 'picking', 'shipped', 'received', 'completed', 'cancelled', 'rejected')",
             name="ck_replenishment_status",
+        ),
+        CheckConstraint(
+            "approval_status IN ('pending', 'approved', 'rejected')",
+            name="ck_replenishment_approval_status",
         ),
         Index("ix_replenishment_org_status", "organization_id", "status"),
         Index("ix_replenishment_org_target_status", "organization_id", "target_user_id", "status"),
@@ -511,6 +515,12 @@ class ReplenishmentRequest(Base):
     target_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     requires_reconciliation: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    approval_status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     picking_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     picking_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     shipped_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

@@ -13,6 +13,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Account- and registered-device-bound field execution
 - Password re-verification and exact engineer/device completion attribution
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
+- Manager/administrator replenishment approval with rejection evidence before warehouse picking
 - Reserved picking stock with separate shipment OUTBOUND and receipt INBOUND inventory movements
 - Idempotent manual first-fill replenishment for newly assigned engineer vehicles
 - Vehicle inventory isolation from generic transactions and opening-stock imports
@@ -144,7 +145,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260711_0019` (auditable replenishment custody and linked inventory movements).
+- Current schema head: `20260712_0022` (replenishment approval decisions).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

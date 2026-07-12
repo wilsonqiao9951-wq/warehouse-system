@@ -245,3 +245,22 @@ Verification:
 - Backend: full suite passed, 75 tests; migration head remains `20260712_0021` because this batch adds no database tables.
 - Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-12 - Phase 2 replenishment request approval
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added manager/administrator approval or reason-required rejection before warehouse picking.
+- Separated business authorization from physical custody: warehouse users cannot self-approve and pending requests cannot reserve or move stock.
+- Added approver/rejector identity, timestamps, rejection evidence, capability-driven UI, timeline display, optimistic checks, and audit events.
+- Added Alembic revision `20260712_0022`; historical in-progress custody is marked approved and rejected rows downgrade to cancelled without losing the reason.
+
+Verification:
+
+- Replenishment custody/approval suite: 19 passed.
+- Backend: full suite passed, 76 tests.
+- Database: fresh base-to-`0022` and empty `0022 -> 0021 -> 0022` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Source hygiene: `git diff --check` passed.

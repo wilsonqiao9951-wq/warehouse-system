@@ -388,6 +388,12 @@ class ReplenishmentRequestRead(BaseModel):
     target_user_id: int | None = None
     version: int = 0
     requires_reconciliation: bool = False
+    approval_status: str = "pending"
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    rejected_by: int | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
     picking_by: int | None = None
     picking_at: datetime | None = None
     shipped_by: int | None = None
@@ -409,6 +415,8 @@ class ReplenishmentRequestRead(BaseModel):
     destination_warehouse_name: str | None = None
     target_user_name: str | None = None
     requested_by_name: str | None = None
+    approved_by_name: str | None = None
+    rejected_by_name: str | None = None
     picking_by_name: str | None = None
     shipped_by_name: str | None = None
     received_by_name: str | None = None
@@ -419,6 +427,8 @@ class ReplenishmentRequestRead(BaseModel):
     source_available_quantity: int | None = None
     destination_quantity: int = 0
     can_start_picking: bool = False
+    can_approve: bool = False
+    can_reject: bool = False
     can_ship: bool = False
     can_receive: bool = False
     can_complete: bool = False
@@ -626,7 +636,7 @@ class QCPictureRead(QCPictureCreate):
 
 
 class ReplenishmentRequestAction(BaseModel):
-    action: str = Field(pattern=r"^(start_picking|ship|receive|complete|cancel)$")
+    action: str = Field(pattern=r"^(approve|reject|start_picking|ship|receive|complete|cancel)$")
     expected_version: int = Field(ge=0)
     source_warehouse_id: int | None = Field(default=None, ge=1)
     reason: str | None = Field(default=None, max_length=500)

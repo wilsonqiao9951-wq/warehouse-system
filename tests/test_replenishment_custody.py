@@ -207,6 +207,19 @@ def _action(
     reason: str | None = None,
     account_password: str | None = None,
 ):
+    if action == "start_picking":
+        approval_login = client.post(
+            "/api/auth/login",
+            data={"username": "custody-manager@custody.test", "password": STAFF_PASSWORD},
+        )
+        if approval_login.status_code == 200:
+            approval = client.post(
+                f"/api/inventory/replenishment-requests/{request_id}/actions",
+                headers={"Authorization": f"Bearer {approval_login.json()['access_token']}"},
+                json={"action": "approve", "expected_version": expected_version},
+            )
+            if approval.status_code != 200:
+                return approval
     payload: dict[str, object] = {
         "action": action,
         "expected_version": expected_version,
@@ -406,6 +419,7 @@ def test_replenishment_full_custody_chain_moves_stock_once_and_audits_every_acto
         ).all()
         assert [row.action for row in audits] == [
             "replenishment_requested",
+            "replenishment_approve",
             "replenishment_start_picking",
             "replenishment_ship",
             "replenishment_receive",
@@ -413,12 +427,13 @@ def test_replenishment_full_custody_chain_moves_stock_once_and_audits_every_acto
         ]
         assert [row.user_id for row in audits] == [
             setup["warehouse_user"]["id"],
+            setup["manager"]["id"],
             setup["warehouse_user"]["id"],
             setup["warehouse_user"]["id"],
             setup["engineer_a"]["id"],
             setup["warehouse_user"]["id"],
         ]
-        receive_metadata = json.loads(audits[3].metadata_json)
+        receive_metadata = json.loads(audits[4].metadata_json)
         assert receive_metadata["from_status"] == "shipped"
         assert receive_metadata["to_status"] == "received"
         assert receive_metadata["inventory_transaction_id"] == stored.receipt_transaction_id
@@ -514,6 +529,7 @@ def test_replenishment_rejects_illegal_transitions_and_stale_versions_without_si
         ).all()
         assert {row.action for row in action_audits} == {
             "replenishment_requested",
+            "replenishment_approve",
             "replenishment_start_picking",
             "replenishment_ship",
         }
@@ -693,7 +709,53 @@ def test_replenishment_action_retries_are_idempotent_and_do_not_duplicate_ledger
                 AuditLog.entity_id == item["id"],
             )
         ).all()
-        assert len(audits) == 5
+        assert len(audits) == 6
+
+
+def test_replenishment_requires_independent_approval_and_records_rejection(client):
+    setup = _standard_setup(client)
+    first_notification = _create_notification(client, setup["part"]["id"], setup["van_a"]["id"])
+    second_notification = _create_notification(client, setup["part"]["id"], setup["van_b"]["id"])
+    with _enforced_rbac():
+        headers = _headers(client, setup)
+        item = _create_request(client, first_notification, headers["warehouse"], quantity=2,
+                               source_warehouse_id=setup["source"]["id"])
+        assert item["approval_status"] == "pending"
+        direct_pick = client.post(
+            f"/api/inventory/replenishment-requests/{item['id']}/actions",
+            headers=headers["warehouse"],
+            json={"action": "start_picking", "expected_version": 0,
+                  "source_warehouse_id": setup["source"]["id"]},
+        )
+        assert direct_pick.status_code == 409
+        assert _action(client, item["id"], headers["warehouse"], "approve", 0).status_code == 403
+        approved = _action(client, item["id"], headers["manager"], "approve", 0)
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["approval_status"] == "approved"
+        assert approved.json()["approved_by"] == setup["manager"]["id"]
+        assert approved.json()["can_start_picking"] is False
+        warehouse_view = client.get("/api/inventory/replenishment-requests", headers=headers["warehouse"]).json()
+        assert next(row for row in warehouse_view if row["id"] == item["id"])["can_start_picking"] is True
+
+        rejected_item = _create_request(client, second_notification, headers["warehouse"], quantity=1,
+                                        source_warehouse_id=setup["source"]["id"])
+        missing_reason = _action(client, rejected_item["id"], headers["admin"], "reject", 0)
+        assert missing_reason.status_code == 422
+        rejected = _action(client, rejected_item["id"], headers["admin"], "reject", 0,
+                           reason="Duplicate replenishment request")
+        assert rejected.status_code == 200, rejected.text
+        assert rejected.json()["status"] == "rejected"
+        assert rejected.json()["approval_status"] == "rejected"
+        assert rejected.json()["rejection_reason"] == "Duplicate replenishment request"
+        assert rejected.json()["rejected_by"] == setup["admin"]["id"]
+        assert _action(client, rejected_item["id"], headers["manager"], "approve", 1).status_code == 409
+
+    with client.app.state.testing_session_local() as db:
+        actions = {row.action for row in db.scalars(select(AuditLog).where(
+            AuditLog.entity_type == "replenishment_request",
+            AuditLog.entity_id == rejected_item["id"],
+        )).all()}
+        assert actions == {"replenishment_requested", "replenishment_reject"}
 
 
 def test_same_notification_creates_only_one_replenishment_request(client):

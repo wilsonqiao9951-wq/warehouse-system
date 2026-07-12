@@ -6,7 +6,7 @@ import ReplenishmentTimeline from "@/components/replenishment-timeline";
 import { api } from "@/lib/api";
 import { InventoryNotification, Part, ReplenishmentRequest, VehicleReturnRequest, Warehouse } from "@/types";
 
-type ReplenishmentAction = "start_picking" | "ship" | "complete" | "cancel";
+type ReplenishmentAction = "approve" | "reject" | "start_picking" | "ship" | "complete" | "cancel";
 type ReconciliationResolution = "reset_requested" | "accept_historical";
 
 interface ManualRequestForm {
@@ -37,8 +37,8 @@ const workflowGroups: Array<{
   statuses: ReplenishmentRequest["status"][];
 }> = [
   {
-    title: "Needs picking",
-    description: "Assign a source warehouse and begin physical picking.",
+    title: "Approval and picking queue",
+    description: "Managers approve the business request before warehouse custody can begin.",
     statuses: ["requested"]
   },
   {
@@ -58,8 +58,8 @@ const workflowGroups: Array<{
   },
   {
     title: "History",
-    description: "Completed and cancelled custody records remain visible for audit.",
-    statuses: ["completed", "cancelled"]
+    description: "Completed, rejected, and cancelled custody records remain visible for audit.",
+    statuses: ["completed", "cancelled", "rejected"]
   }
 ];
 
@@ -248,6 +248,12 @@ export default function WarehouseTasksPage() {
     const reason = window.prompt("Reason for cancelling this replenishment request:")?.trim();
     if (!reason) return;
     void runAction(item, "cancel", { reason });
+  };
+
+  const rejectRequest = (item: ReplenishmentRequest) => {
+    const reason = window.prompt("Reason for rejecting this replenishment request:")?.trim();
+    if (!reason) return;
+    void runAction(item, "reject", { reason });
   };
 
   const reconciliationDraft = (item: ReplenishmentRequest): ReconciliationDraft =>
@@ -583,7 +589,7 @@ export default function WarehouseTasksPage() {
                   const draft = reconciliationDraft(item);
                   const selectedSource = sourceSelections[item.id] ?? item.source_warehouse_id ?? "";
                   const hasActions = !item.requires_reconciliation
-                    && (item.can_start_picking || item.can_ship || item.can_complete || item.can_cancel);
+                    && (item.can_approve || item.can_reject || item.can_start_picking || item.can_ship || item.can_complete || item.can_cancel);
                   return (
                     <article className="job-card replenishment-card" key={item.id}>
                       <div className="section-heading-row">
@@ -620,6 +626,18 @@ export default function WarehouseTasksPage() {
                         <div className="notice" style={{ marginTop: 10 }}>
                           <strong>Request reason</strong>
                           <div>{item.request_reason}</div>
+                        </div>
+                      )}
+                      {item.status === "requested" && (
+                        <div className={`notice ${item.approval_status === "pending" ? "notice-warn" : ""}`} style={{ marginTop: 10 }}>
+                          <strong>Approval: {item.approval_status}</strong>
+                          {item.approved_by_name && <div>Approved by {item.approved_by_name}</div>}
+                        </div>
+                      )}
+                      {item.status === "rejected" && (
+                        <div className="notice notice-error" style={{ marginTop: 10 }}>
+                          <strong>Rejected by {item.rejected_by_name || "authorized approver"}</strong>
+                          <div>{item.rejection_reason}</div>
                         </div>
                       )}
 
@@ -724,6 +742,16 @@ export default function WarehouseTasksPage() {
 
                       {hasActions ? (
                         <div className="one-hand-actions">
+                          {item.can_approve && (
+                            <button type="button" disabled={requestBusy || !online} onClick={() => void runAction(item, "approve")}>
+                              Approve request
+                            </button>
+                          )}
+                          {item.can_reject && (
+                            <button type="button" className="secondary-button" disabled={requestBusy || !online} onClick={() => rejectRequest(item)}>
+                              Reject request
+                            </button>
+                          )}
                           {item.can_start_picking && (
                             <button type="button" disabled={requestBusy || !selectedSource} onClick={() => startPicking(item)}>
                               {requestBusy ? "Working…" : "Start picking"}

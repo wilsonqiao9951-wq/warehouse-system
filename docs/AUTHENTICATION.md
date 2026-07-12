@@ -55,7 +55,7 @@ Vehicle replenishment receipt uses the same registered-device session with an ad
 
 The server records `received_by`, `received_device_id`, and `received_at`, then posts the vehicle `INBOUND` inventory movement in the same transaction. Passwords and raw device secrets are never stored in custody or audit data.
 
-Managers can create and supervise replenishment requests but cannot pick, ship, receive, complete, or cancel them. Warehouse users and administrators can pick, ship, complete, and cancel eligible requests, but cannot receive a delivery assigned to an engineer's van. Another engineer, another registered device, legacy header authentication, or an expired/revoked device cannot sign for the target engineer.
+Managers and administrators approve or reject replenishment requests before custody begins; rejection requires a reason. Managers cannot pick, ship, receive, complete, or cancel. Warehouse users cannot approve their own queue and may only begin picking after approval. Warehouse users and administrators perform later custody actions, but cannot receive a delivery assigned to an engineer's van.
 
 Legacy custody rows marked `requires_reconciliation` reject every normal workflow action. Only an administrator may reconcile one through the dedicated endpoint, using a reason, matching version, and current administrator password. A row with linked inventory movements cannot use the historical reconciliation path. The password is verified and discarded exactly like the engineer receipt password.
 

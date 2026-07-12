@@ -7,13 +7,14 @@ The replenishment API provides an auditable warehouse-to-vehicle chain. Clients 
 ## State and inventory model
 
 ```text
-requested → picking → shipped → received → completed
+requested/pending → requested/approved → picking → shipped → received → completed
 ```
 
 | Transition | Authorized actor | Inventory effect |
 | --- | --- | --- |
-| Create → `requested` | Manager, admin, warehouse | None |
-| `requested` → `picking` | Admin or warehouse | Requested quantity becomes reserved in source available-stock calculations |
+| Create → `requested/pending` | Manager, admin, warehouse | None |
+| Pending → approved/rejected | Manager or admin | Rejection is terminal and requires a reason |
+| `requested/approved` → `picking` | Admin or warehouse | Requested quantity becomes reserved in source available-stock calculations |
 | `picking` → `shipped` | Admin or warehouse | One linked `OUTBOUND` transaction removes stock from the source |
 | `shipped` → `received` for a van | Exact target engineer on registered device, with current password | One linked `INBOUND` transaction adds stock to that engineer's destination van |
 | `received` → `completed` | Admin or warehouse | No additional movement; originating alert becomes resolved |
@@ -76,7 +77,7 @@ Allowed roles: manager, admin, warehouse. The endpoint is online-only.
 GET /api/inventory/replenishment-requests?status=shipped&limit=100
 ```
 
-`status` is optional and accepts `requested`, `picking`, `shipped`, `received`, `completed`, or `cancelled`. Managers, admins, and warehouse users see their organization queue. Engineers see only requests assigned to them as `target_user_id`.
+`status` accepts `requested`, `picking`, `shipped`, `received`, `completed`, `cancelled`, or `rejected`. Managers, admins, and warehouse users see their organization queue. Engineers see only requests assigned to them as `target_user_id`.
 
 Important response fields include:
 
@@ -86,7 +87,7 @@ Important response fields include:
 - requester, picker, shipper, receiver, receiving device, completer, and canceller labels/timestamps;
 - `shipment_transaction_id` and `receipt_transaction_id`;
 - `source_available_quantity` and `destination_quantity`;
-- `can_start_picking`, `can_ship`, `can_receive`, `can_complete`, `can_cancel`, and `can_reconcile`.
+- `can_approve`, `can_reject`, `can_start_picking`, `can_ship`, `can_receive`, `can_complete`, `can_cancel`, and `can_reconcile`.
 
 Clients must render actions from these capability fields, but must still handle authorization and conflict responses because capabilities can become stale after another user acts.
 

@@ -477,7 +477,7 @@ export const api = {
   actOnReplenishmentRequest: (
     id: number,
     payload: {
-      action: "start_picking" | "ship" | "receive" | "complete" | "cancel";
+      action: "approve" | "reject" | "start_picking" | "ship" | "receive" | "complete" | "cancel";
       expected_version: number;
       source_warehouse_id?: number;
       reason?: string;

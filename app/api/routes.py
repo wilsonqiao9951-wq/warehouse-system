@@ -1898,6 +1898,8 @@ def _replenishment_read_for_actor(
         destination_warehouse_name=destination.name if destination else None,
         target_user_name=target.name if target else None,
         requested_by_name=user_name(item.requested_by),
+        approved_by_name=user_name(item.approved_by),
+        rejected_by_name=user_name(item.rejected_by),
         picking_by_name=user_name(item.picking_by),
         shipped_by_name=user_name(item.shipped_by),
         received_by_name=user_name(item.received_by),
@@ -1915,7 +1917,12 @@ def _replenishment_read_for_actor(
             if destination
             else 0
         ),
-        can_start_picking=warehouse_operator and not item.requires_reconciliation and item.status == "requested",
+        can_approve=(actor.role in {UserRole.ADMIN, UserRole.MANAGER} and not item.requires_reconciliation
+                     and item.status == "requested" and item.approval_status == "pending"),
+        can_reject=(actor.role in {UserRole.ADMIN, UserRole.MANAGER} and not item.requires_reconciliation
+                    and item.status == "requested" and item.approval_status == "pending"),
+        can_start_picking=(warehouse_operator and not item.requires_reconciliation and item.status == "requested"
+                           and item.approval_status == "approved"),
         can_ship=warehouse_operator and not item.requires_reconciliation and item.status == "picking",
         can_receive=can_receive and not item.requires_reconciliation,
         can_complete=warehouse_operator and not item.requires_reconciliation and item.status == "received",
@@ -2116,7 +2123,7 @@ def create_manual_replenishment_request(
 
 @router.get("/inventory/replenishment-requests", response_model=list[ReplenishmentRequestRead])
 def list_replenishment_requests(
-    status: str | None = Query(default=None, pattern="^(requested|picking|shipped|received|completed|cancelled)$"),
+    status: str | None = Query(default=None, pattern="^(requested|picking|shipped|received|completed|cancelled|rejected)$"),
     limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
@@ -2230,6 +2237,8 @@ def act_on_replenishment_request(
             detail="Historical replenishment requires administrator reconciliation before workflow actions",
         )
     target_status = {
+        "approve": "requested",
+        "reject": "rejected",
         "start_picking": "picking",
         "ship": "shipped",
         "receive": "received",
@@ -2237,6 +2246,9 @@ def act_on_replenishment_request(
         "cancel": "cancelled",
     }[payload.action]
     warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    approval_operator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    if payload.action in {"approve", "reject"} and not approval_operator:
+        raise HTTPException(status_code=403, detail="Manager or administrator approval access required")
     if payload.action in {"start_picking", "ship", "complete", "cancel"} and not warehouse_operator:
         raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
     if payload.action == "receive":
@@ -2248,7 +2260,11 @@ def act_on_replenishment_request(
                 raise HTTPException(status_code=403, detail="Shipment was received on another registered device")
         elif not warehouse_operator:
             raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
-    if item.status == target_status:
+    if payload.action == "approve" and item.approval_status == "approved":
+        return _replenishment_read_for_actor(db, actor, item)
+    if payload.action == "reject" and item.status == "rejected":
+        return _replenishment_read_for_actor(db, actor, item)
+    if payload.action not in {"approve", "reject"} and item.status == target_status:
         return _replenishment_read_for_actor(db, actor, item)
     if item.version != payload.expected_version:
         raise HTTPException(status_code=409, detail="Replenishment request changed; refresh before continuing")
@@ -2256,11 +2272,32 @@ def act_on_replenishment_request(
     previous_status = item.status
     transaction_id: int | None = None
     now = datetime.utcnow()
-    if payload.action == "start_picking":
+    if payload.action == "approve":
+        if item.status != "requested" or item.approval_status != "pending":
+            raise HTTPException(status_code=409, detail="Only a pending replenishment request can be approved")
+        item.approval_status = "approved"
+        item.approved_by = actor.user_id
+        item.approved_at = now
+
+    elif payload.action == "reject":
+        if item.status != "requested" or item.approval_status != "pending":
+            raise HTTPException(status_code=409, detail="Only a pending replenishment request can be rejected")
+        if not payload.reason or len(payload.reason.strip()) < 3:
+            raise HTTPException(status_code=422, detail="Rejection reason must be at least 3 characters")
+        item.approval_status = "rejected"
+        item.rejected_by = actor.user_id
+        item.rejected_at = now
+        item.rejection_reason = payload.reason.strip()
+        if item.notification_id:
+            notification = db.get(InventoryNotification, item.notification_id)
+            if notification:
+                notification.status = "resolved"
+
+    elif payload.action == "start_picking":
         if not warehouse_operator:
             raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
-        if item.status != "requested":
-            raise HTTPException(status_code=409, detail="Only requested replenishments can start picking")
+        if item.status != "requested" or item.approval_status != "approved":
+            raise HTTPException(status_code=409, detail="Only an approved replenishment can start picking")
         if (
             item.source_warehouse_id is not None
             and payload.source_warehouse_id is not None
@@ -2422,8 +2459,11 @@ def act_on_replenishment_request(
             if notification:
                 notification.status = "resolved"
 
-    item.status = target_status
-    item.version += 1
+    if payload.action == "approve":
+        item.status = "requested"
+    else:
+        item.status = target_status
+        item.version += 1
     db.add(item)
     _audit(
         db,
@@ -2442,6 +2482,8 @@ def act_on_replenishment_request(
             "destination_warehouse_id": item.destination_warehouse_id,
             "target_user_id": item.target_user_id,
             "inventory_transaction_id": transaction_id,
+            "approval_status": item.approval_status,
+            "reason": item.rejection_reason if payload.action == "reject" else None,
         },
     )
     db.commit()

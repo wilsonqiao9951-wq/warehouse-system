@@ -14,6 +14,11 @@ export default function ReplenishmentTimeline({ item }: { item: ReplenishmentReq
       at: item.created_at
     },
     {
+      label: "Approved",
+      person: item.approved_by_name,
+      at: item.approved_at
+    },
+    {
       label: "Picking",
       person: item.picking_by_name,
       at: item.picking_at
@@ -56,6 +61,13 @@ export default function ReplenishmentTimeline({ item }: { item: ReplenishmentReq
           Cancelled by {item.cancelled_by_name || "authorized user"}
           {item.cancelled_at ? ` · ${formatTimestamp(item.cancelled_at)}` : ""}
           {item.cancellation_reason ? ` · ${item.cancellation_reason}` : ""}
+        </div>
+      )}
+      {item.status === "rejected" && (
+        <div className="notice notice-error" style={{ marginTop: 8 }}>
+          Rejected by {item.rejected_by_name || "authorized approver"}
+          {item.rejected_at ? ` · ${formatTimestamp(item.rejected_at)}` : ""}
+          {item.rejection_reason ? ` · ${item.rejection_reason}` : ""}
         </div>
       )}
     </div>

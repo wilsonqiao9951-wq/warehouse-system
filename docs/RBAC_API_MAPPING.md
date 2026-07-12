@@ -97,6 +97,7 @@ The replenishment workflow separates request supervision, physical warehouse cus
 | Operation | Other engineer | Target vehicle engineer | Manager | Admin | Warehouse |
 | --- | --- | --- | --- | --- | --- |
 | View replenishment queue | Assigned requests only | Assigned requests only | Allow | Allow | Allow |
+| Approve / reject pending request | Deny | Deny | Allow with rejection reason | Allow | Deny |
 | Create request from an inventory alert | Deny | Deny | Allow | Allow | Allow |
 | Start picking / assign source | Deny | Deny | Deny | Allow | Allow |
 | Ship from source warehouse | Deny | Deny | Deny | Allow | Allow |
@@ -105,7 +106,7 @@ The replenishment workflow separates request supervision, physical warehouse cus
 | Cancel a requested/picking request | Deny | Deny | Deny | Allow with reason | Allow with reason |
 | Reconcile a flagged historical request | Deny | Deny | Deny | Allow with reason and current password | Deny |
 
-Managers may create requests, inspect progress, and supervise the queue, but cannot impersonate warehouse custody actors or the receiving engineer. Administrators and warehouse users perform picking, shipping, completion, and eligible cancellation. A vehicle delivery can be received only by `target_user_id`, while the destination van is still assigned to that same active engineer.
+Managers may create, approve, or reject requests and inspect progress, but cannot impersonate warehouse custody actors or the receiving engineer. Warehouse users cannot self-approve and can only pick an approved request. Administrators may approve and perform warehouse custody.
 
 Requests may originate from a low-stock notification or from `POST /api/inventory/replenishment-requests`. The manual endpoint is limited to an active assigned vehicle destination and requires a business reason plus an organization-scoped `client_request_id`. Repeating the same ID and payload returns the existing request; reusing the ID for different data returns `409`.
 
@@ -118,7 +119,7 @@ Requests may originate from a low-stock notification or from `POST /api/inventor
 - `requires_reconciliation` and `can_reconcile`;
 - `can_start_picking`, `can_ship`, `can_receive`, `can_complete`, and `can_cancel`.
 
-`POST /api/inventory/replenishment-requests/{id}/actions` accepts one of `start_picking`, `ship`, `receive`, `complete`, or `cancel`. Every request includes `expected_version`; a stale version returns `409`. The server rejects skipped, reversed, or otherwise invalid transitions.
+`POST /api/inventory/replenishment-requests/{id}/actions` accepts `approve`, `reject`, `start_picking`, `ship`, `receive`, `complete`, or `cancel`. Approval is manager/admin-only; rejection is terminal and requires a reason. The server rejects skipped, reversed, stale, or unauthorized transitions.
 
 All normal action capabilities are false while `requires_reconciliation` is set. Only an exact administrator can call `POST /api/inventory/replenishment-requests/{id}/reconcile`, and the call requires a matching version, a reason, and current-password verification. `reset_requested` is valid only for a reopened requested row; `accept_historical` is valid only for a legacy completed row. Any linked inventory movement blocks this historical reconciliation path.
 
@@ -135,7 +136,8 @@ The receipt password is discarded after verification and never written to the re
 
 ## Replenishment inventory and audit rules
 
-- `requested → picking` reserves source quantity through the available-stock calculation.
+- `requested/pending → requested/approved` records the manager or administrator decision without moving stock.
+- `requested/approved → picking` reserves source quantity through the available-stock calculation.
 - `picking → shipped` creates one linked source `OUTBOUND` transaction.
 - `shipped → received` creates one linked destination `INBOUND` transaction and records the engineer/device.
 - `received → completed` closes the custody task and resolves its originating alert without moving stock again.
@@ -143,7 +145,7 @@ The receipt password is discarded after verification and never written to the re
 - Cancellation resolves its originating notification; it does not reopen the alert and create a duplicate request loop.
 - Unique request/stage and transaction-link constraints prevent retries from posting duplicate shipment or receipt movements.
 
-The audit actions are `replenishment_requested`, `replenishment_start_picking`, `replenishment_ship`, `replenishment_receive`, `replenishment_complete`, `replenishment_cancel`, and `replenishment_reconciled`. Transition audit metadata includes previous/new state or reconciliation resolution, reason where required, previous/new version, part, quantity, source/destination warehouses, target engineer, and the applicable inventory transaction ID. Normal authentication audit context also supplies the actor, role, authentication method, device record, and server timestamp.
+The audit actions include `replenishment_requested`, `replenishment_approve`, `replenishment_reject`, `replenishment_start_picking`, `replenishment_ship`, `replenishment_receive`, `replenishment_complete`, `replenishment_cancel`, and `replenishment_reconciled`.
 
 All notification/manual request creation, custody mutations, and reconciliation are online-only in the mobile client. They are never stored in or replayed from the offline queue.
 
