@@ -82,6 +82,9 @@ from app.schemas import (
     LocationStockBalance,
     InventoryScanRequest,
     InventoryScanRead,
+    InventoryLocationScanRequest,
+    InventoryLocationScanRead,
+    InventoryLocationLabelRead,
     WorkOrderFlowAction,
     InventoryTransactionRead,
     ImportBatchRead,
@@ -1586,6 +1589,98 @@ def inventory_location_balances(
     return get_location_stock_balances(db, warehouse_id)
 
 
+def _warehouse_label_token(warehouse: Warehouse) -> str:
+    return f"OPF:WH:{warehouse.id}:{warehouse.code or ''}"
+
+
+def _location_label_token(location: StorageLocation) -> str:
+    return f"OPF:LOC:{location.id}:{location.code}"
+
+
+@router.get("/inventory/location-labels", response_model=list[InventoryLocationLabelRead])
+def inventory_location_labels(
+    warehouse_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    warehouse = db.get(Warehouse, warehouse_id)
+    if not warehouse or not warehouse.is_active:
+        raise HTTPException(status_code=404, detail="Active warehouse not found")
+    rows = [InventoryLocationLabelRead(
+        label_token=_warehouse_label_token(warehouse), warehouse_id=warehouse.id,
+        warehouse_code=warehouse.code or "", warehouse_name=warehouse.name,
+    )]
+    locations = db.scalars(select(StorageLocation).where(
+        StorageLocation.warehouse_id == warehouse.id,
+        StorageLocation.is_active.is_(True),
+    ).order_by(StorageLocation.code)).all()
+    rows.extend(InventoryLocationLabelRead(
+        label_token=_location_label_token(location), warehouse_id=warehouse.id,
+        warehouse_code=warehouse.code or "", warehouse_name=warehouse.name,
+        location_id=location.id, location_code=location.code, location_name=location.name, zone=location.zone,
+    ) for location in locations)
+    return rows
+
+
+@router.post("/inventory/location-scan", response_model=InventoryLocationScanRead)
+def scan_inventory_location(
+    payload: InventoryLocationScanRequest,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    label = payload.label.strip()
+    if not label:
+        raise HTTPException(status_code=422, detail="Scan label cannot be blank")
+    warehouse: Warehouse | None = None
+    location: StorageLocation | None = None
+    pieces = label.split(":", 3)
+    if len(pieces) == 4 and pieces[0].upper() == "OPF" and pieces[2].isdigit():
+        entity_id, printed_code = int(pieces[2]), pieces[3]
+        if pieces[1].upper() == "WH":
+            warehouse = db.get(Warehouse, entity_id)
+            if warehouse and (warehouse.code or "") != printed_code:
+                raise HTTPException(status_code=409, detail="Warehouse label is stale or invalid")
+        elif pieces[1].upper() == "LOC":
+            location = db.get(StorageLocation, entity_id)
+            if location and location.code != printed_code:
+                raise HTTPException(status_code=409, detail="Location label is stale or invalid")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported OpenPartsFlow label type")
+    else:
+        warehouse = db.scalar(select(Warehouse).where(func.lower(Warehouse.code) == label.lower()))
+        if not warehouse:
+            location_stmt = select(StorageLocation).where(func.lower(StorageLocation.code) == label.lower())
+            if payload.expected_warehouse_id:
+                location_stmt = location_stmt.where(StorageLocation.warehouse_id == payload.expected_warehouse_id)
+            matches = db.scalars(location_stmt.limit(2)).all()
+            if len(matches) > 1:
+                raise HTTPException(status_code=409, detail="Location code is ambiguous; scan its warehouse first")
+            location = matches[0] if matches else None
+    if location:
+        warehouse = db.get(Warehouse, location.warehouse_id)
+    if not warehouse:
+        raise HTTPException(status_code=404, detail="Warehouse or location label not found")
+    if not warehouse.is_active or (location and not location.is_active):
+        raise HTTPException(status_code=409, detail="Scanned warehouse or location is inactive")
+    if payload.expected_warehouse_id and warehouse.id != payload.expected_warehouse_id:
+        raise HTTPException(status_code=409, detail="Location belongs to a different warehouse")
+    scan_type = "location" if location else "warehouse"
+    label_token = _location_label_token(location) if location else _warehouse_label_token(warehouse)
+    _audit(db, actor, f"inventory_{scan_type}_scanned", scan_type, location.id if location else warehouse.id, {
+        "label_token": label_token, "warehouse_id": warehouse.id,
+        "location_id": location.id if location else None,
+    })
+    db.commit()
+    return InventoryLocationScanRead(
+        scan_type=scan_type, label_token=label_token, warehouse_id=warehouse.id,
+        warehouse_code=warehouse.code or "", warehouse_name=warehouse.name,
+        location_id=location.id if location else None, location_code=location.code if location else None,
+        location_name=location.name if location else None, zone=location.zone if location else None,
+    )
+
+
 @router.post("/inventory/scan", response_model=InventoryScanRead)
 def scan_inventory(
     payload: InventoryScanRequest,
@@ -1607,25 +1702,40 @@ def scan_inventory(
         return InventoryScanRead(
             matched=False, confidence=0.0, recognition_method=method,
             quantity_requested=payload.quantity, warehouse_id=payload.warehouse_id,
-            location_id=payload.location_id, feedback="未匹配到物料，请拍摄清晰标签或人工选择物料。",
+            location_id=payload.location_id, feedback="Part label was not recognized. Scan a clear barcode or select the part manually.",
         )
+    effective_warehouse_id = payload.warehouse_id
     if payload.location_id:
         location = db.get(StorageLocation, payload.location_id)
-        if not location or (payload.warehouse_id and location.warehouse_id != payload.warehouse_id):
+        if not location or not location.is_active or (payload.warehouse_id and location.warehouse_id != payload.warehouse_id):
             raise HTTPException(status_code=400, detail="Location does not belong to warehouse")
+        effective_warehouse_id = location.warehouse_id
+        warehouse = db.get(Warehouse, location.warehouse_id)
+        if not warehouse or not warehouse.is_active:
+            raise HTTPException(status_code=409, detail="Location warehouse is inactive")
         current = get_location_stock_quantity(db, part.id, payload.location_id)
     elif payload.warehouse_id:
+        warehouse = db.get(Warehouse, payload.warehouse_id)
+        if not warehouse or not warehouse.is_active:
+            raise HTTPException(status_code=404, detail="Active warehouse not found")
         current = get_stock_quantity(db, part.id, payload.warehouse_id)
     else:
         current = None
+    if actor.role == UserRole.ENGINEER and effective_warehouse_id is not None:
+        warehouse = db.get(Warehouse, effective_warehouse_id)
+        if not warehouse or not warehouse_is_vehicle(db, warehouse) or warehouse.assigned_user_id != actor.user_id:
+            raise HTTPException(status_code=403, detail="Engineers can only scan stock in their assigned vehicle")
     projected = current - payload.quantity if current is not None else None
-    feedback = "识别成功，库存充足。" if projected is None or projected >= 0 else f"库存不足，还差 {abs(projected)} 件。"
-    _audit(db, actor, "inventory_scan", "part", part.id, {"method": method, "quantity": payload.quantity})
+    feedback = "Part recognized and the checked quantity is available." if projected is None or projected >= 0 else f"Insufficient stock by {abs(projected)} unit(s)."
+    _audit(db, actor, "inventory_scan", "part", part.id, {
+        "method": method, "quantity": payload.quantity, "warehouse_id": effective_warehouse_id,
+        "location_id": payload.location_id, "current_quantity": current,
+    })
     db.commit()
     return InventoryScanRead(
         matched=True, confidence=1.0 if method == "barcode" else 0.95,
         recognition_method=method, part=PartRead.model_validate(part),
-        quantity_requested=payload.quantity, warehouse_id=payload.warehouse_id,
+        quantity_requested=payload.quantity, warehouse_id=effective_warehouse_id,
         location_id=payload.location_id, current_quantity=current,
         projected_quantity=projected, feedback=feedback,
     )

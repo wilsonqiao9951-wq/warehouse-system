@@ -11,6 +11,8 @@ import {
   StockBalance,
   StorageLocation,
   InventoryScanResult,
+  InventoryLocationScan,
+  InventoryLocationLabel,
   InventoryNotification,
   ReplenishmentRequest,
   VehicleReturnRequest,
@@ -453,6 +455,10 @@ export const api = {
     request<StorageLocation[]>(`/storage-locations${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   scanInventory: (payload: { barcode?: string; part_number?: string; quantity?: number; warehouse_id?: number; location_id?: number }) =>
     request<InventoryScanResult>("/inventory/scan", { method: "POST", body: JSON.stringify(payload) }),
+  scanInventoryLocation: (payload: { label: string; expected_warehouse_id?: number }) =>
+    request<InventoryLocationScan>("/inventory/location-scan", { method: "POST", body: JSON.stringify(payload) }),
+  listInventoryLocationLabels: (warehouseId: number) =>
+    request<InventoryLocationLabel[]>(`/inventory/location-labels?warehouse_id=${warehouseId}`),
   listInventoryNotifications: () => request<InventoryNotification[]>("/inventory/notifications"),
   updateInventoryNotification: (id: number, status: string) => request<InventoryNotification>(`/inventory/notifications/${id}?status=${status}`, { method: "PATCH" }),
   createReplenishmentRequest: (id: number, quantity: number, sourceWarehouseId?: number) => request<ReplenishmentRequest>(`/inventory/notifications/${id}/create-request?quantity=${quantity}${sourceWarehouseId ? `&source_warehouse_id=${sourceWarehouseId}` : ""}`, { method: "POST" }),

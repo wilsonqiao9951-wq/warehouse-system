@@ -183,3 +183,13 @@ After approval, the return quantity is reserved against vehicle availability. Ha
 | Cancel submitted | Deny | Allow | Deny |
 
 Vehicle warehouses are excluded. Every mutation requires the matching optimistic version and remains online-only.
+
+## Warehouse and location scanning
+
+| Endpoint | Manager | Admin | Warehouse | Engineer |
+|---|---:|---:|---:|---:|
+| `GET /inventory/location-labels` | Allow | Allow | Allow | Deny |
+| `POST /inventory/location-scan` | Allow | Allow | Allow | Deny |
+| `POST /inventory/scan` | Allow | Allow | Allow | Own vehicle only |
+
+Location labels are validated against both their database ID and current printed code. A location scan can require an expected warehouse, preventing a same-code shelf in another warehouse from becoming the active context.

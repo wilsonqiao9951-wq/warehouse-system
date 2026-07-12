@@ -158,6 +158,29 @@ export interface ReplenishmentRequest {
   updated_at?: string | null;
 }
 
+export interface InventoryLocationScan {
+  scan_type: "warehouse" | "location";
+  label_token: string;
+  warehouse_id: number;
+  warehouse_code: string;
+  warehouse_name: string;
+  location_id?: number | null;
+  location_code?: string | null;
+  location_name?: string | null;
+  zone?: string | null;
+}
+
+export interface InventoryLocationLabel {
+  label_token: string;
+  warehouse_id: number;
+  warehouse_code: string;
+  warehouse_name: string;
+  location_id?: number | null;
+  location_code?: string | null;
+  location_name?: string | null;
+  zone?: string | null;
+}
+
 export interface VehicleReturnRequest {
   id: number;
   organization_id: number;

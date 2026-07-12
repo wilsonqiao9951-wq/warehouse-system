@@ -18,6 +18,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Vehicle inventory isolation from generic transactions and opening-stock imports
 - Authenticated vehicle-to-warehouse return custody with reservation and engineer handover
 - Auditable inventory counts with administrator-approved, ledger-linked adjustments
+- Validated warehouse → shelf/bin → part scanning with stale-label and cross-warehouse protection
 - Real-time inventory balance
 - Excel export
 

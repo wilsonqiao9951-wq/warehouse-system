@@ -452,6 +452,34 @@ class InventoryScanRead(BaseModel):
     feedback: str
 
 
+class InventoryLocationScanRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    expected_warehouse_id: int | None = None
+
+
+class InventoryLocationScanRead(BaseModel):
+    scan_type: Literal["warehouse", "location"]
+    label_token: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name: str
+    location_id: int | None = None
+    location_code: str | None = None
+    location_name: str | None = None
+    zone: str | None = None
+
+
+class InventoryLocationLabelRead(BaseModel):
+    label_token: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name: str
+    location_id: int | None = None
+    location_code: str | None = None
+    location_name: str | None = None
+    zone: str | None = None
+
+
 class StockBalance(BaseModel):
     part_id: int
     part_number: str

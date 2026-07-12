@@ -226,3 +226,22 @@ Verification:
 - Database: fresh base-to-`0021` and empty `0021 -> 0020 -> 0021` passed on SQLite.
 - Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-12 - Phase 2 warehouse and location scanning
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added warehouse and shelf/bin label tokens using server IDs plus current codes; stale or altered labels are rejected.
+- Added warehouse-first location validation, duplicate-code ambiguity protection, inactive-location checks, and cross-warehouse rejection.
+- Added registered label discovery for QR/barcode generation and audit events for warehouse, location, and part scans.
+- Rebuilt the mobile scan workspace as a required `warehouse -> shelf/bin -> part` flow with camera and manual scanner input.
+- Bound part quantity results to the validated location and prevented engineers from probing inventory outside their assigned vehicle.
+
+Verification:
+
+- Location/scan target suite: 7 passed.
+- Backend: full suite passed, 75 tests; migration head remains `20260712_0021` because this batch adds no database tables.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Source hygiene: `git diff --check` passed.
