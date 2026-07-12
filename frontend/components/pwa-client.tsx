@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { syncOfflineQueue } from "@/lib/api";
+import { getOfflineQueue, syncOfflineQueue } from "@/lib/api";
 
 type DeferredPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -25,7 +25,7 @@ export default function PwaClient() {
       setCanInstall(true);
     };
 
-    const updateQueue = () => setQueued(JSON.parse(window.localStorage.getItem("opf_offline_queue") || "[]").length);
+    const updateQueue = () => setQueued(getOfflineQueue().length);
     const onOnline = () => { setOffline(false); void syncOfflineQueue().then(updateQueue); };
     const onOffline = () => setOffline(true);
     setOffline(!navigator.onLine);

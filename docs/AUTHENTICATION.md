@@ -42,6 +42,27 @@ Claim and completion are online-only operations. Completion requires the current
 
 Managers may approve completion or release a claim with a reason, but cannot edit field records. Administrators may correct unlocked field records with their own audit attribution, but cannot request or directly complete a job as if they were the engineer. The immutable completion attribution remains the claiming engineer and device.
 
+## Engineer vehicle-receipt authentication
+
+Vehicle replenishment receipt uses the same registered-device session with an additional password step-up. A successful `receive` action requires all of the following at the same time:
+
+- the authenticated account has the exact engineer role;
+- the replenishment `target_user_id` matches the authenticated user;
+- the Bearer JWT names an active registered device and `X-Device-Token` proves possession of that device secret;
+- the destination van remains assigned to the same engineer;
+- `account_password` verifies against the current account password;
+- the replenishment is still `shipped` at the supplied `expected_version`.
+
+The server records `received_by`, `received_device_id`, and `received_at`, then posts the vehicle `INBOUND` inventory movement in the same transaction. Passwords and raw device secrets are never stored in custody or audit data.
+
+Managers can create and supervise replenishment requests but cannot pick, ship, receive, complete, or cancel them. Warehouse users and administrators can pick, ship, complete, and cancel eligible requests, but cannot receive a delivery assigned to an engineer's van. Another engineer, another registered device, legacy header authentication, or an expired/revoked device cannot sign for the target engineer.
+
+Legacy custody rows marked `requires_reconciliation` reject every normal workflow action. Only an administrator may reconcile one through the dedicated endpoint, using a reason, matching version, and current administrator password. A row with linked inventory movements cannot use the historical reconciliation path. The password is verified and discarded exactly like the engineer receipt password.
+
+Manual replenishment creation requires a client-generated `client_request_id` and business reason. The ID provides organization-scoped retry idempotency; it is not an authentication credential and never replaces Bearer/device authorization.
+
+Notification/manual request creation, picking, shipping, receipt, completion, cancellation, and reconciliation are online-only. The frontend never writes these operations or either password step-up to its offline queue.
+
 ## Legacy identity headers
 
 The application is fail-closed in every runnable environment: RBAC is enabled and `X-User-Id` authentication is disabled even when an older local `.env` still contains pilot values. Tests may opt into an in-memory legacy actor only inside the isolated test fixture. The production frontend contains no legacy identity fallback.

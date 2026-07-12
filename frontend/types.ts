@@ -105,8 +105,57 @@ export interface InventoryNotification {
 }
 
 export interface ReplenishmentRequest {
-  id: number; part_id: number; destination_warehouse_id: number; source_warehouse_id?: number | null;
-  quantity: number; work_order_id?: number | null; requested_by?: number | null; status: string; created_at: string;
+  id: number;
+  organization_id?: number;
+  notification_id?: number | null;
+  client_request_id?: string | null;
+  request_reason?: string | null;
+  part_id: number;
+  part_number?: string | null;
+  part_name?: string | null;
+  destination_warehouse_id: number;
+  destination_warehouse_name?: string | null;
+  source_warehouse_id?: number | null;
+  source_warehouse_name?: string | null;
+  target_user_id?: number | null;
+  target_user_name?: string | null;
+  quantity: number;
+  work_order_id?: number | null;
+  work_order_ticket_number?: string | null;
+  requested_by?: number | null;
+  requested_by_name?: string | null;
+  status: "requested" | "picking" | "shipped" | "received" | "completed" | "cancelled";
+  version: number;
+  requires_reconciliation: boolean;
+  picking_by?: number | null;
+  picking_by_name?: string | null;
+  picking_at?: string | null;
+  shipped_by?: number | null;
+  shipped_by_name?: string | null;
+  shipped_at?: string | null;
+  received_by?: number | null;
+  received_by_name?: string | null;
+  received_at?: string | null;
+  received_device_name?: string | null;
+  completed_by?: number | null;
+  completed_by_name?: string | null;
+  completed_at?: string | null;
+  cancelled_by_name?: string | null;
+  cancelled_by?: number | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  shipment_transaction_id?: number | null;
+  receipt_transaction_id?: number | null;
+  source_available_quantity?: number | null;
+  destination_quantity?: number | null;
+  can_start_picking: boolean;
+  can_ship: boolean;
+  can_receive: boolean;
+  can_complete: boolean;
+  can_cancel: boolean;
+  can_reconcile: boolean;
+  created_at: string;
+  updated_at?: string | null;
 }
 
 export interface LocationStockBalance {

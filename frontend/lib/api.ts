@@ -93,6 +93,8 @@ function workOrderIdForRequest(path: string, init?: RequestInit): number | undef
 function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (method === "GET") return false;
   if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
+  if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
+  if (/^\/inventory\/notifications\/\d+\/create-request(?:\?|$)/.test(path)) return true;
   if (/^\/work-orders\/\d+\/(claim|release|start|pause|complete|request-completion|approve-completion|reject-completion)$/.test(path)) return true;
   return path === "/job-status";
 }
@@ -450,8 +452,43 @@ export const api = {
   listInventoryNotifications: () => request<InventoryNotification[]>("/inventory/notifications"),
   updateInventoryNotification: (id: number, status: string) => request<InventoryNotification>(`/inventory/notifications/${id}?status=${status}`, { method: "PATCH" }),
   createReplenishmentRequest: (id: number, quantity: number, sourceWarehouseId?: number) => request<ReplenishmentRequest>(`/inventory/notifications/${id}/create-request?quantity=${quantity}${sourceWarehouseId ? `&source_warehouse_id=${sourceWarehouseId}` : ""}`, { method: "POST" }),
+  createManualReplenishmentRequest: (payload: {
+    part_id: number;
+    destination_warehouse_id: number;
+    quantity: number;
+    source_warehouse_id?: number;
+    reason: string;
+    client_request_id: string;
+  }) => request<ReplenishmentRequest>("/inventory/replenishment-requests", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
   listReplenishmentRequests: () => request<ReplenishmentRequest[]>("/inventory/replenishment-requests"),
-  updateReplenishmentRequest: (id: number, status: string) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}?status=${status}`, { method: "PATCH" }),
+  actOnReplenishmentRequest: (
+    id: number,
+    payload: {
+      action: "start_picking" | "ship" | "receive" | "complete" | "cancel";
+      expected_version: number;
+      source_warehouse_id?: number;
+      reason?: string;
+      account_password?: string;
+    }
+  ) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}/actions`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  reconcileReplenishmentRequest: (
+    id: number,
+    payload: {
+      expected_version: number;
+      resolution: "reset_requested" | "accept_historical";
+      reason: string;
+      account_password: string;
+    }
+  ) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}/reconcile`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),
@@ -459,6 +496,7 @@ export const api = {
     request<LocationStockBalance[]>(`/inventory/location-balances${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   getVanInventory: (userId: number) =>
     request<StockBalance[]>(`/employees/${userId}/van-inventory?limit=500`),
+  getMyVanInventory: () => request<StockBalance[]>("/inventory/my-van?limit=500"),
   usePartOnWorkOrder: (
     workOrderId: number,
     payload: {

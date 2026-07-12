@@ -64,7 +64,7 @@ def test_job_type_policy_overrides_default_and_blocks_status_bypass(client):
     assert completed.json()["is_locked"] is True
 
 
-def test_policy_requires_photo_checklist_and_part_usage(client):
+def test_policy_requires_photo_checklist_and_part_usage(client, seed_inventory_ledger):
     tech = create_user(client, "evidence-tech")
     warehouse = client.post("/api/warehouses", json={"name": "Evidence Van", "assigned_user_id": tech["id"]}).json()
     part = client.post("/api/parts", json={"part_number": "EVID-1", "name": "Evidence Part"}).json()
@@ -81,9 +81,11 @@ def test_policy_requires_photo_checklist_and_part_usage(client):
     assert incomplete.status_code == 422
     assert "completion_photo" in incomplete.text and "parts_usage" in incomplete.text
 
-    client.post("/api/inventory/transactions", json={
-        "part_id": part["id"], "transaction_type": "inbound", "quantity": 1, "to_warehouse_id": warehouse["id"]
-    })
+    seed_inventory_ledger(
+        part_id=part["id"],
+        quantity=1,
+        to_warehouse_id=warehouse["id"],
+    )
     used = client.post(f"/api/work-orders/{work_order['id']}/use-part", json={
         "work_order_id": work_order["id"], "part_id": part["id"], "warehouse_id": warehouse["id"],
         "user_id": tech["id"], "quantity": 1

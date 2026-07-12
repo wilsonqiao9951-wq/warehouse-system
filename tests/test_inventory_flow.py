@@ -36,7 +36,7 @@ def create_work_order(client, ticket: str, assigned_user_id: int, revenue: float
     return response.json()["id"]
 
 
-def test_work_order_usage_deducts_inventory_and_calculates_profit(client):
+def test_work_order_usage_deducts_inventory_and_calculates_profit(client, seed_inventory_ledger):
     tech_id = create_user(client, "tech-1")
     main_wh = create_warehouse(client, "Main")
     van_wh = create_warehouse(client, "Tech Van", assigned_user_id=tech_id)
@@ -67,7 +67,16 @@ def test_work_order_usage_deducts_inventory_and_calculates_profit(client):
             "unit_cost": 30.0,
         },
     )
-    assert transfer.status_code == 200
+    assert transfer.status_code == 409
+    seed_inventory_ledger(
+        part_id=part_id,
+        transaction_type="transfer",
+        quantity=4,
+        from_warehouse_id=main_wh,
+        to_warehouse_id=van_wh,
+        user_id=tech_id,
+        unit_cost=30.0,
+    )
 
     usage = client.post(
         f"/api/work-orders/{work_order_id}/use-part",
@@ -143,13 +152,13 @@ def test_manual_inventory_adjustment_is_blocked(client):
     assert response.json()["detail"] == "Manual inventory adjustment is not allowed"
 
 
-def test_employee_van_inventory_endpoint(client):
+def test_employee_van_inventory_endpoint(client, seed_inventory_ledger):
     tech_id = create_user(client, "tech-4")
     main_wh = create_warehouse(client, "Main-4")
     van_wh = create_warehouse(client, "Tech4 Van", assigned_user_id=tech_id)
     part_id = create_part(client, "P-004")
 
-    client.post(
+    inbound = client.post(
         "/api/inventory/transactions",
         json={
             "part_id": part_id,
@@ -159,7 +168,8 @@ def test_employee_van_inventory_endpoint(client):
             "unit_cost": 12.0,
         },
     )
-    client.post(
+    assert inbound.status_code == 200
+    blocked_transfer = client.post(
         "/api/inventory/transactions",
         json={
             "part_id": part_id,
@@ -170,6 +180,16 @@ def test_employee_van_inventory_endpoint(client):
             "user_id": tech_id,
             "unit_cost": 12.0,
         },
+    )
+    assert blocked_transfer.status_code == 409
+    seed_inventory_ledger(
+        part_id=part_id,
+        transaction_type="transfer",
+        quantity=3,
+        from_warehouse_id=main_wh,
+        to_warehouse_id=van_wh,
+        user_id=tech_id,
+        unit_cost=12.0,
     )
 
     response = client.get(f"/api/employees/{tech_id}/van-inventory")

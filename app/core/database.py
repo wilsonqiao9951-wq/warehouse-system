@@ -1,15 +1,27 @@
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.core.config import settings
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+connect_args = {"check_same_thread": False, "timeout": 5} if settings.database_url.startswith("sqlite") else {}
 
 engine = create_engine(
     settings.database_url,
     connect_args=connect_args,
     pool_pre_ping=True,
 )
+
+
+def configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.close()
+
+
+if engine.dialect.name == "sqlite":
+    event.listen(engine, "connect", configure_sqlite_connection)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

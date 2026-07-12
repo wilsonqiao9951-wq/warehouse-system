@@ -306,8 +306,8 @@ body.has-bottom-nav .install-btn {
 }
 
 .mobile-bottom-nav .nav-item {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: 68px;
   font-size: 12px;
   padding: 8px 4px;
   white-space: nowrap;
@@ -325,6 +325,200 @@ body.has-bottom-nav .install-btn {
   border-radius: 12px;
   padding: 12px;
   background: #fff;
+}
+
+.warehouse-task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.replenishment-card {
+  min-width: 0;
+}
+
+.section-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status-count,
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.status-pill--requested {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.status-pill--picking {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.status-pill--shipped {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.status-pill--received,
+.status-pill--completed {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.status-pill--cancelled {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.custody-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.custody-route > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.custody-route strong,
+.custody-route span {
+  overflow-wrap: anywhere;
+}
+
+.custody-timeline {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.custody-step {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  opacity: 0.62;
+}
+
+.custody-step--done {
+  opacity: 1;
+}
+
+.custody-step__marker {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.custody-step--done .custody-step__marker {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.replenishment-source-select,
+.receipt-confirmation {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.manual-replenishment-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.manual-replenishment-form > label,
+.reconciliation-panel > label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.manual-replenishment-form__reason {
+  grid-column: 1 / -1;
+}
+
+.reconciliation-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #fcd34d;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+
+.reconciliation-panel p {
+  margin: 0;
+}
+
+.replenishment-source-select > span,
+.receipt-confirmation > label,
+.field-label {
+  display: block;
+  margin: 8px 0 5px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.receipt-confirmation {
+  padding: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.receipt-confirmation p {
+  margin: 0;
+}
+
+button.secondary-button {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  box-shadow: none;
+}
+
+button.secondary-button:hover:not(:disabled) {
+  border-color: #b8c7e6;
+  background: #f8fafc;
+  box-shadow: none;
 }
 
 .job-card--locked {
@@ -528,6 +722,18 @@ body.has-bottom-nav .install-btn {
 
   .two-col {
     grid-template-columns: 1fr;
+  }
+
+  .warehouse-task-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-replenishment-form {
+    grid-template-columns: 1fr;
+  }
+
+  .manual-replenishment-form__reason {
+    grid-column: auto;
   }
 
   .wo-card-list {

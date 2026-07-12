@@ -40,7 +40,7 @@ export default function SyncCenterPage() {
   return (
     <ManagerShell
       title="Sync center"
-      subtitle="Offline operations are isolated to the signed-in account, registered device, and current work-order claim."
+      subtitle="Offline operations are isolated to the signed-in account, registered device, and current work-order claim. Warehouse custody changes always stay online."
       metrics={[
         { label: "Pending", value: queue.length },
         { label: "Connection", value: online ? "Online" : "Offline" },
@@ -52,7 +52,7 @@ export default function SyncCenterPage() {
           <h3 style={{ margin: 0 }}>Pending operations</h3>
           <button type="button" onClick={() => void sync()}>Sync now</button>
         </div>
-        <p className="muted">Claiming, starting, pausing, status changes, and completion always require a live connection. Other queued records are rejected if the job was released or reclaimed.</p>
+        <p className="muted">Claiming, work-order status changes, manual replenishment requests, picking, shipping, engineer receipt, vehicle inventory posting, and historical reconciliation always require a live connection. Other queued records are rejected if the job was released or reclaimed.</p>
         {message && <div className="notice notice-success">{message}</div>}
         {queue.length === 0 ? (
           <div className="empty-state">All eligible operations are synchronized.</div>

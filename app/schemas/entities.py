@@ -304,6 +304,8 @@ class InventoryTransactionCreate(BaseModel):
 class InventoryTransactionRead(InventoryTransactionCreate):
     id: int
     organization_id: int
+    replenishment_request_id: int | None = None
+    movement_stage: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -370,14 +372,57 @@ class InventoryNotificationRead(BaseModel):
 
 class ReplenishmentRequestRead(BaseModel):
     id: int
+    organization_id: int
+    notification_id: int | None = None
+    client_request_id: str | None = None
+    request_reason: str | None = None
     part_id: int
     destination_warehouse_id: int
     source_warehouse_id: int | None = None
     quantity: int
     work_order_id: int | None = None
     requested_by: int | None = None
+    target_user_id: int | None = None
+    version: int = 0
+    requires_reconciliation: bool = False
+    picking_by: int | None = None
+    picking_at: datetime | None = None
+    shipped_by: int | None = None
+    shipped_at: datetime | None = None
+    received_by: int | None = None
+    received_device_id: int | None = None
+    received_at: datetime | None = None
+    completed_by: int | None = None
+    completed_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    shipment_transaction_id: int | None = None
+    receipt_transaction_id: int | None = None
     status: str
+    part_number: str | None = None
+    part_name: str | None = None
+    source_warehouse_name: str | None = None
+    destination_warehouse_name: str | None = None
+    target_user_name: str | None = None
+    requested_by_name: str | None = None
+    picking_by_name: str | None = None
+    shipped_by_name: str | None = None
+    received_by_name: str | None = None
+    received_device_name: str | None = None
+    completed_by_name: str | None = None
+    cancelled_by_name: str | None = None
+    work_order_ticket_number: str | None = None
+    source_available_quantity: int | None = None
+    destination_quantity: int = 0
+    can_start_picking: bool = False
+    can_ship: bool = False
+    can_receive: bool = False
+    can_complete: bool = False
+    can_cancel: bool = False
+    can_reconcile: bool = False
     created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -547,6 +592,34 @@ class QCPictureRead(QCPictureCreate):
 
     class Config:
         from_attributes = True
+
+
+class ReplenishmentRequestAction(BaseModel):
+    action: str = Field(pattern=r"^(start_picking|ship|receive|complete|cancel)$")
+    expected_version: int = Field(ge=0)
+    source_warehouse_id: int | None = Field(default=None, ge=1)
+    reason: str | None = Field(default=None, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
+
+
+class ReplenishmentRequestCreate(BaseModel):
+    part_id: int = Field(ge=1)
+    destination_warehouse_id: int = Field(ge=1)
+    quantity: int = Field(ge=1)
+    source_warehouse_id: int | None = Field(default=None, ge=1)
+    reason: str = Field(min_length=3, max_length=500)
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$",
+    )
+
+
+class ReplenishmentRequestReconcile(BaseModel):
+    expected_version: int = Field(ge=0)
+    resolution: str = Field(pattern=r"^(reset_requested|accept_historical)$")
+    reason: str = Field(min_length=3, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
 
 
 class CustomerCreate(BaseModel):

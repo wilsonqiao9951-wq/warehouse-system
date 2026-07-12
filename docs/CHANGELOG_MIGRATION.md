@@ -200,3 +200,71 @@ New APIs:
 - `GET /api/work-orders?scope=all|mine|available`
 
 Validation completed on SQLite with a full base-to-head upgrade, `0018 -> 0017` downgrade, and `0017 -> 0018` re-upgrade.
+
+---
+
+## 8) Replenishment Custody and Inventory Movements (`20260711_0019`)
+
+Added to `replenishment_requests`:
+
+- source notification and target engineer links;
+- organization-scoped `client_request_id` and `request_reason` for idempotent manual vehicle requests;
+- a monotonically increasing workflow `version`;
+- `requires_reconciliation` for legacy rows without trustworthy custody evidence;
+- picker, shipper, receiver, receiving device, completer, and canceller attribution;
+- server timestamps for every custody transition;
+- cancellation reason;
+- shipment and receipt inventory transaction IDs.
+
+Added to `inventory_transactions`:
+
+- `replenishment_request_id`;
+- `movement_stage` (`ship` or `receive`);
+- a unique request/stage constraint that prevents duplicate movement posting during retries.
+
+The migration also formalizes `warehouses.warehouse_type`, converts existing engineer-owned warehouses to `van`, adds organization/status and organization/target/status indexes, enforces one request per notification and one manual `client_request_id` per organization, and adds quantity/version/status checks plus unique shipment/receipt transaction links.
+
+Legacy rows labelled `picking`, `shipped`, `received`, or `completed` are marked `requires_reconciliation`. The three intermediate labels are reopened as `requested`; `completed` remains completed for an administrator to explicitly accept as historical or leave blocked for further investigation. Normal custody actions are blocked while the flag remains set.
+
+Workflow behavior:
+
+```text
+requested → picking → shipped → received → completed
+```
+
+- `picking` reserves the requested source quantity when available stock is calculated.
+- `shipped` posts a linked `OUTBOUND` transaction from the source warehouse.
+- `received` posts a linked `INBOUND` transaction to the destination vehicle and records the engineer and registered device.
+- `completed` closes the task and resolves its originating low-stock notification.
+- Cancellation is limited to `requested` or `picking`, requires a reason, and resolves the source notification to avoid recreating a cancelled request loop.
+
+New APIs:
+
+- `POST /api/inventory/replenishment-requests` for an idempotent manual assigned-vehicle request with `client_request_id` and reason
+- `GET /api/inventory/replenishment-requests`
+- `POST /api/inventory/replenishment-requests/{id}/actions`
+- `POST /api/inventory/replenishment-requests/{id}/reconcile`
+- `GET /api/inventory/my-van`
+
+The former generic replenishment status PATCH now returns `410`. Action requests send `expected_version`; a stale version or invalid transition returns `409` without changing custody or inventory state.
+
+Reconciliation is administrator-only and requires a matching version, a reason, and current-password verification. `reset_requested` is valid for a reopened requested row; `accept_historical` is valid for a legacy completed row. Rows with linked inventory movements cannot use historical reconciliation. Downgrade from `0019` is also blocked while any linked replenishment movement exists, preventing the migration from discarding ledger-to-custody references.
+
+Runtime inventory safeguards added with this revision:
+
+- SQLite connections enable `PRAGMA foreign_keys=ON` and a five-second busy timeout.
+- SQLite inventory-affecting custody writes acquire `BEGIN IMMEDIATE` before reading available stock or changing state; PostgreSQL uses row locks.
+- An engineer-owned warehouse is treated as a vehicle even if legacy metadata is stale, and new engineer-owned warehouses are normalized to `van`.
+- A vehicle cannot be a replenishment source.
+- Generic inventory transactions reject every vehicle source/destination; opening-inventory preview and commit also reject vehicles.
+- The generic transaction API accepts only `INBOUND`, `OUTBOUND`, `TRANSFER`, and `DAMAGE`. `RETURN` and `WORK_ORDER_USED` require their authenticated business workflows.
+
+Verification:
+
+- Full backend suite: 66 passed.
+- Replenishment custody/security: 14 targeted tests passed.
+- File-backed SQLite contention: 2 targeted tests passed.
+- Fresh base-to-`0019`, empty `0019 → 0018 → 0019`, and legacy compatibility database-to-`0019` migration paths passed.
+- Linked-movement downgrade was rejected before any downgrade DDL executed.
+- Frontend upgraded to Next.js 16.2.10 and ESLint 9; lint and the production build passed for all 26 static routes.
+- npm dependency installation/audit resolved to 0 known vulnerabilities; PostCSS is pinned to the patched 8.5.17 release.

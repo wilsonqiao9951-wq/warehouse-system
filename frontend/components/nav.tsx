@@ -31,7 +31,7 @@ const links = [
 ];
 
 function sortEngineerLinks(items: typeof links) {
-  const order = ["/today", "/my-jobs", "/inventory-scan", "/my-van-inventory", "/profile", "/map", "/part-observation"];
+  const order = ["/today", "/my-jobs", "/my-van-inventory", "/inventory-scan", "/sync-center", "/profile", "/map", "/part-observation"];
   return [...items].sort((a, b) => {
     const ai = order.indexOf(a.href); const bi = order.indexOf(b.href);
     return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);

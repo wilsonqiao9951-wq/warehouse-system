@@ -142,3 +142,45 @@ Verification:
 - Frontend: Next.js production build passed with type/lint validation and 27 static pages.
 - Source hygiene: `git diff --check` passed and no frontend `X-User-Id`/legacy-auth fallback remains.
 - Dependency review: production audit reports the existing Next.js/PostCSS baseline (1 high, 1 moderate); the available automatic fix is a breaking Next.js 14 → 16 upgrade and remains isolated to a separate framework-migration batch.
+
+## 2026-07-11 — Phase 2 replenishment custody and vehicle receipt
+
+Status: implemented and verified.
+
+Delivered:
+
+- Replaced free-form replenishment status changes with the strict `requested → picking → shipped → received → completed` custody workflow.
+- Restricted picking, shipping, completion, and eligible cancellation to warehouse users and administrators. Managers can create and supervise replenishment requests but cannot perform custody transitions.
+- Restricted vehicle receipt to the exact target engineer using their Bearer-authenticated account, active registered device, and current account password.
+- Validated that a van destination remains active and assigned to the same engineer before receipt.
+- Added `expected_version` optimistic concurrency control; stale actions fail with `409` instead of overwriting newer custody state.
+- Reserved picking quantities when calculating available source stock so other inventory writes cannot consume committed pick stock.
+- Posted a linked source-warehouse `OUTBOUND` transaction at shipment and a linked destination-vehicle `INBOUND` transaction at receipt.
+- Added unique request/stage transaction links so retries cannot create duplicate shipment or receipt inventory movements.
+- Limited cancellation to `requested` and `picking`, required a reason, and resolved the originating low-stock notification so a cancelled task does not create a duplicate request loop.
+- Resolved the source low-stock notification only after a received request is completed.
+- Recorded requester, picker, shipper, receiver, receiving device, completer, canceller, timestamps, transaction IDs, and cancellation reason.
+- Added audit events for request, pick, ship, receive, complete, cancel, and historical reconciliation with prior/new state or resolution, prior/new version, warehouses, target engineer, reason, quantity, and inventory transaction attribution.
+- Added role-scoped replenishment reads, server-calculated `can_start_picking`, `can_ship`, `can_receive`, `can_complete`, `can_cancel`, and `can_reconcile` flags, plus the authenticated `GET /api/inventory/my-van` endpoint.
+- Added idempotent manual first-fill requests for assigned vehicles through `POST /api/inventory/replenishment-requests`, requiring a business reason and organization-scoped `client_request_id`.
+- Added administrator-only reconciliation for flagged legacy rows. It requires current password verification, a reason, matching version, a status-compatible `reset_requested` or `accept_historical` resolution, and no linked inventory movements.
+- Added warehouse stage-grouped custody UI and an engineer My Van receipt workflow with password confirmation and immediate vehicle-balance refresh.
+- Marked alert/manual request creation, custody transitions, and reconciliation as online-only; request payloads, password step-ups, and inventory state changes never enter the offline queue.
+- Restricted engineer work-order parts consumption to that engineer's assigned vehicle warehouse.
+- Classified any warehouse owned by an engineer as a vehicle, automatically normalized new engineer-owned warehouses to `van`, and rejected inactive/non-engineer vehicle ownership.
+- Prevented vehicles from serving as replenishment sources and blocked generic inventory transactions and opening-inventory preview/commit from changing vehicle stock.
+- Restricted the generic inventory endpoint to `INBOUND`, `OUTBOUND`, `TRANSFER`, and `DAMAGE`; `RETURN` and `WORK_ORDER_USED` must use their authenticated business workflows.
+- Enabled SQLite foreign-key enforcement and busy timeout on every connection, and serialized inventory-affecting custody writes with `BEGIN IMMEDIATE`; PostgreSQL continues to use row locks.
+- Added Alembic revision `20260711_0019`; legacy `picking`, `shipped`, `received`, and `completed` rows are flagged `requires_reconciliation`, while the three intermediate labels are also reopened as `requested` because they lacked trustworthy inventory movements or custody evidence.
+- Blocked `0019` downgrade whenever linked replenishment inventory movements exist, preventing custody history from being silently orphaned.
+
+Verification:
+
+- Backend: full suite passed, 66 tests.
+- Replenishment custody/security: 14 targeted tests passed.
+- File-backed SQLite concurrency: 2 targeted contention tests passed.
+- Database: fresh base-to-`0019`, empty `0019 → 0018 → 0019`, and legacy compatibility database-to-`0019` paths passed.
+- Downgrade safety: a linked replenishment movement blocks `0019 → 0018` before any DDL is applied.
+- Frontend: Next.js 16.2.10 production build passed with ESLint 9/type validation and all 26 static routes.
+- Dependency security: npm resolved to 0 known vulnerabilities after the Next.js 16 upgrade and the PostCSS security override.
+- Source hygiene: frontend and documentation `git diff --check` passed.

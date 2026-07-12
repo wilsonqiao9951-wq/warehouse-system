@@ -28,13 +28,15 @@ def _mk_wo(client, ticket: str, uid: int, city: str = "NYC", job_type: str = "re
     ).json()["id"]
 
 
-def test_full_technician_job_flow_and_lock(client):
+def test_full_technician_job_flow_and_lock(client, seed_inventory_ledger):
     tech = _mk_user(client, "tech-flow")
     van = _mk_wh(client, "Van-flow", assigned_user_id=tech)
     part = _mk_part(client, "PF-001")
     wo = _mk_wo(client, "WOF-001", tech)
 
-    client.post("/api/inventory/transactions", json={"part_id": part, "transaction_type": "inbound", "quantity": 3, "to_warehouse_id": van, "unit_cost": 20})
+    blocked_inbound = client.post("/api/inventory/transactions", json={"part_id": part, "transaction_type": "inbound", "quantity": 3, "to_warehouse_id": van, "unit_cost": 20})
+    assert blocked_inbound.status_code == 409
+    seed_inventory_ledger(part_id=part, quantity=3, to_warehouse_id=van, unit_cost=20)
     started = client.post(f"/api/work-orders/{wo}/start", json={})
     assert started.status_code == 200
     assert started.json()["status"] == "IN_PROGRESS"
@@ -72,7 +74,7 @@ def test_full_technician_job_flow_and_lock(client):
     assert "pause_job" in actions
 
 
-def test_work_order_filters_low_stock_and_abnormal_reports(client):
+def test_work_order_filters_low_stock_and_abnormal_reports(client, seed_inventory_ledger):
     tech = _mk_user(client, "tech-filter")
     van = _mk_wh(client, "Van-filter", assigned_user_id=tech)
     p1 = _mk_part(client, "PF-100", min_stock=5)
@@ -80,8 +82,8 @@ def test_work_order_filters_low_stock_and_abnormal_reports(client):
     wo1 = _mk_wo(client, "WOF-100", tech, city="Austin", job_type="install")
     wo2 = _mk_wo(client, "WOF-200", tech, city="Dallas", job_type="repair")
 
-    client.post("/api/inventory/transactions", json={"part_id": p1, "transaction_type": "inbound", "quantity": 5, "to_warehouse_id": van, "unit_cost": 10})
-    client.post("/api/inventory/transactions", json={"part_id": p2, "transaction_type": "inbound", "quantity": 5, "to_warehouse_id": van, "unit_cost": 10})
+    seed_inventory_ledger(part_id=p1, quantity=5, to_warehouse_id=van, unit_cost=10)
+    seed_inventory_ledger(part_id=p2, quantity=5, to_warehouse_id=van, unit_cost=10)
     client.post(f"/api/work-orders/{wo1}/use-part", json={"work_order_id": wo1, "part_id": p1, "warehouse_id": van, "user_id": tech, "quantity": 4, "unit_cost": 10})
     client.post(f"/api/work-orders/{wo2}/use-part", json={"work_order_id": wo2, "part_id": p2, "warehouse_id": van, "user_id": tech, "quantity": 1, "unit_cost": 10})
 
@@ -138,7 +140,7 @@ def test_voice_note_upload_and_listing(client):
     assert invalid.status_code == 400
 
 
-def test_customer_equipment_service_context_and_parts_history(client):
+def test_customer_equipment_service_context_and_parts_history(client, seed_inventory_ledger):
     tech = _mk_user(client, "tech-history")
     customer = client.post("/api/customers", json={
         "name": "Northwind Plant", "account_number": "NW-1", "contact_name": "Sam", "phone": "555-0100"
@@ -151,9 +153,7 @@ def test_customer_equipment_service_context_and_parts_history(client):
     }).json()
     van = _mk_wh(client, "Van-history", assigned_user_id=tech)
     part = _mk_part(client, "HIST-001")
-    client.post("/api/inventory/transactions", json={
-        "part_id": part, "transaction_type": "inbound", "quantity": 5, "to_warehouse_id": van
-    })
+    seed_inventory_ledger(part_id=part, quantity=5, to_warehouse_id=van)
 
     previous = client.post("/api/work-orders", json={
         "ticket_number": "HISTORY-OLD", "engineer_id": tech, "customer_id": customer["id"], "equipment_id": equipment["id"],

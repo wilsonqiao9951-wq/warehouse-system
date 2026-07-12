@@ -1,23 +1,78 @@
 from datetime import datetime
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.models import InventoryTransaction, Part, StorageLocation, TransactionType, User, Warehouse, WorkOrder, WorkOrderPart, WorkOrderPartMemory
+from app.models import InventoryTransaction, Part, ReplenishmentRequest, StorageLocation, TransactionType, User, UserRole, Warehouse, WorkOrder, WorkOrderPart, WorkOrderPartMemory
 from app.schemas import InventoryTransactionCreate, LocationStockBalance, StockBalance, WorkOrderPartCreate
+
+
+def warehouse_is_vehicle(db: Session, warehouse: Warehouse | None) -> bool:
+    if not warehouse:
+        return False
+    if (warehouse.warehouse_type or "").lower() == "van":
+        return True
+    owner = db.get(User, warehouse.assigned_user_id) if warehouse.assigned_user_id else None
+    return bool(owner and owner.role == UserRole.ENGINEER)
+
+
+def begin_inventory_write(db: Session) -> None:
+    """Serialize inventory/state writes on SQLite; PostgreSQL uses row locks."""
+    bind = db.get_bind()
+    if bind.dialect.name != "sqlite":
+        return
+    active_lock_transaction = db.info.get("inventory_write_transaction")
+    if active_lock_transaction is not None and active_lock_transaction is db.get_transaction():
+        return
+    if db.new or db.dirty or db.deleted:
+        raise RuntimeError("SQLite inventory lock must be acquired before mutating the session")
+    db.rollback()
+    db.execute(text("BEGIN IMMEDIATE"))
+    db.info["inventory_write_transaction"] = db.get_transaction()
 
 
 def create_transaction(db: Session, payload: InventoryTransactionCreate) -> InventoryTransaction:
     if payload.transaction_type == TransactionType.ADJUSTMENT:
         raise HTTPException(status_code=400, detail="Manual inventory adjustment is not allowed")
+    if payload.transaction_type not in {
+        TransactionType.INBOUND,
+        TransactionType.OUTBOUND,
+        TransactionType.TRANSFER,
+        TransactionType.DAMAGE,
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="This transaction type requires its authenticated business workflow",
+        )
 
+    begin_inventory_write(db)
+    part = db.scalar(select(Part).where(Part.id == payload.part_id).with_for_update())
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
     _validate_transaction_entities(db, payload)
 
-    if payload.transaction_type == TransactionType.INBOUND and not payload.to_warehouse_id:
-        raise HTTPException(status_code=400, detail="Inbound transaction requires to_warehouse_id")
+    for warehouse_id in {payload.from_warehouse_id, payload.to_warehouse_id} - {None}:
+        warehouse = db.get(Warehouse, warehouse_id)
+        if warehouse_is_vehicle(db, warehouse):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Vehicle inventory cannot be changed through the generic transaction endpoint; "
+                    "use authenticated replenishment receipt, work-order usage, or the future return workflow"
+                ),
+            )
 
-    if payload.transaction_type in {TransactionType.OUTBOUND, TransactionType.DAMAGE} and not payload.from_warehouse_id:
-        raise HTTPException(status_code=400, detail="Outbound or damage transaction requires from_warehouse_id")
+    if payload.transaction_type == TransactionType.INBOUND:
+        if not payload.to_warehouse_id:
+            raise HTTPException(status_code=400, detail="Inbound transaction requires to_warehouse_id")
+        if payload.from_warehouse_id or payload.from_location_id:
+            raise HTTPException(status_code=400, detail="Inbound transaction cannot have a source")
+
+    if payload.transaction_type in {TransactionType.OUTBOUND, TransactionType.DAMAGE}:
+        if not payload.from_warehouse_id:
+            raise HTTPException(status_code=400, detail="Outbound or damage transaction requires from_warehouse_id")
+        if payload.to_warehouse_id or payload.to_location_id:
+            raise HTTPException(status_code=400, detail="Outbound or damage transaction cannot have a destination")
 
     if payload.transaction_type == TransactionType.TRANSFER:
         if not payload.from_warehouse_id or not payload.to_warehouse_id:
@@ -28,11 +83,13 @@ def create_transaction(db: Session, payload: InventoryTransactionCreate) -> Inve
             raise HTTPException(status_code=400, detail="Transfer warehouses cannot be the same")
 
     if payload.from_warehouse_id:
-        current = (
-            get_location_stock_quantity(db, payload.part_id, payload.from_location_id)
-            if payload.from_location_id
-            else get_stock_quantity(db, payload.part_id, payload.from_warehouse_id)
-        )
+        warehouse_available = get_available_stock_quantity(db, payload.part_id, payload.from_warehouse_id)
+        current = warehouse_available
+        if payload.from_location_id:
+            current = min(
+                warehouse_available,
+                get_location_stock_quantity(db, payload.part_id, payload.from_location_id),
+            )
         if current < payload.quantity:
             raise HTTPException(status_code=400, detail=f"Insufficient stock. Available: {current}")
 
@@ -45,12 +102,16 @@ def create_transaction(db: Session, payload: InventoryTransactionCreate) -> Inve
 
 
 def use_part_on_work_order(db: Session, payload: WorkOrderPartCreate) -> WorkOrderPart:
+    begin_inventory_write(db)
+    part = db.scalar(select(Part).where(Part.id == payload.part_id).with_for_update())
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
     _validate_work_order_usage_entities(db, payload)
     work_order = db.get(WorkOrder, payload.work_order_id)
     if work_order and work_order.is_locked:
         raise HTTPException(status_code=400, detail="Work order is locked and cannot be edited")
 
-    current = get_stock_quantity(db, payload.part_id, payload.warehouse_id)
+    current = get_available_stock_quantity(db, payload.part_id, payload.warehouse_id)
     if current < payload.quantity:
         raise HTTPException(status_code=400, detail=f"Insufficient stock. Available: {current}")
 
@@ -104,6 +165,28 @@ def get_stock_quantity(db: Session, part_id: int, warehouse_id: int) -> int:
         if tx.from_warehouse_id == warehouse_id:
             quantity -= tx.quantity
     return quantity
+
+
+def get_reserved_replenishment_quantity(
+    db: Session,
+    part_id: int,
+    warehouse_id: int,
+    exclude_request_id: int | None = None,
+) -> int:
+    stmt = select(func.coalesce(func.sum(ReplenishmentRequest.quantity), 0)).where(
+        ReplenishmentRequest.part_id == part_id,
+        ReplenishmentRequest.source_warehouse_id == warehouse_id,
+        ReplenishmentRequest.status == "picking",
+    )
+    if exclude_request_id is not None:
+        stmt = stmt.where(ReplenishmentRequest.id != exclude_request_id)
+    return int(db.scalar(stmt) or 0)
+
+
+def get_available_stock_quantity(db: Session, part_id: int, warehouse_id: int) -> int:
+    return get_stock_quantity(db, part_id, warehouse_id) - get_reserved_replenishment_quantity(
+        db, part_id, warehouse_id
+    )
 
 
 def get_location_stock_quantity(db: Session, part_id: int, location_id: int) -> int:

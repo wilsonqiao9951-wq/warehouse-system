@@ -240,7 +240,9 @@ def require_work_order_execution_scope(db: Session, actor: Actor, work_order_id:
     use the same registered device and claim generation that won the work order.
     """
     require_work_order_scope(db, actor, work_order_id)
-    work_order = db.get(WorkOrder, work_order_id)
+    work_order = db.scalar(
+        select(WorkOrder).where(WorkOrder.id == work_order_id).with_for_update()
+    )
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     if actor.role == UserRole.ADMIN:
@@ -251,7 +253,9 @@ def require_work_order_execution_scope(db: Session, actor: Actor, work_order_id:
 def require_work_order_owner_scope(db: Session, actor: Actor, work_order_id: int) -> WorkOrder:
     """Require the actual claiming engineer for completion attribution."""
     require_work_order_scope(db, actor, work_order_id)
-    work_order = db.get(WorkOrder, work_order_id)
+    work_order = db.scalar(
+        select(WorkOrder).where(WorkOrder.id == work_order_id).with_for_update()
+    )
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     if actor.auth_method == "test" and actor.role == UserRole.ADMIN:

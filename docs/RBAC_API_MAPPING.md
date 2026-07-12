@@ -89,3 +89,72 @@ Claim, release, execution, approval, rejection, and completion actions record th
 - Other engineers can read the owner's parts and progress records but cannot mutate them.
 - Administrators can correct unlocked records with their own audit attribution; managers cannot impersonate the field owner.
 - Releasing a claim invalidates the prior user's device and queued claim generation.
+
+## Replenishment custody access model
+
+The replenishment workflow separates request supervision, physical warehouse custody, and vehicle receipt. Response capability flags drive the UI, but the API independently validates role, current status, workflow version, target vehicle owner, device, and password.
+
+| Operation | Other engineer | Target vehicle engineer | Manager | Admin | Warehouse |
+| --- | --- | --- | --- | --- | --- |
+| View replenishment queue | Assigned requests only | Assigned requests only | Allow | Allow | Allow |
+| Create request from an inventory alert | Deny | Deny | Allow | Allow | Allow |
+| Start picking / assign source | Deny | Deny | Deny | Allow | Allow |
+| Ship from source warehouse | Deny | Deny | Deny | Allow | Allow |
+| Receive into an assigned vehicle | Deny | Allow with bound device and current password | Deny | Deny | Deny |
+| Complete a received request | Deny | Deny | Deny | Allow | Allow |
+| Cancel a requested/picking request | Deny | Deny | Deny | Allow with reason | Allow with reason |
+| Reconcile a flagged historical request | Deny | Deny | Deny | Allow with reason and current password | Deny |
+
+Managers may create requests, inspect progress, and supervise the queue, but cannot impersonate warehouse custody actors or the receiving engineer. Administrators and warehouse users perform picking, shipping, completion, and eligible cancellation. A vehicle delivery can be received only by `target_user_id`, while the destination van is still assigned to that same active engineer.
+
+Requests may originate from a low-stock notification or from `POST /api/inventory/replenishment-requests`. The manual endpoint is limited to an active assigned vehicle destination and requires a business reason plus an organization-scoped `client_request_id`. Repeating the same ID and payload returns the existing request; reusing the ID for different data returns `409`.
+
+`GET /api/inventory/replenishment-requests` returns all organization requests to managers/admins/warehouse users and only target-assigned requests to engineers. Each row includes:
+
+- custody actor names and server timestamps;
+- receiving device name;
+- shipment/receipt inventory transaction IDs;
+- source available and destination physical quantities;
+- `requires_reconciliation` and `can_reconcile`;
+- `can_start_picking`, `can_ship`, `can_receive`, `can_complete`, and `can_cancel`.
+
+`POST /api/inventory/replenishment-requests/{id}/actions` accepts one of `start_picking`, `ship`, `receive`, `complete`, or `cancel`. Every request includes `expected_version`; a stale version returns `409`. The server rejects skipped, reversed, or otherwise invalid transitions.
+
+All normal action capabilities are false while `requires_reconciliation` is set. Only an exact administrator can call `POST /api/inventory/replenishment-requests/{id}/reconcile`, and the call requires a matching version, a reason, and current-password verification. `reset_requested` is valid only for a reopened requested row; `accept_historical` is valid only for a legacy completed row. Any linked inventory movement blocks this historical reconciliation path.
+
+For a vehicle `receive` action the server requires:
+
+1. exact `ENGINEER` role;
+2. `target_user_id == actor.user_id`;
+3. Bearer authentication and an active registered device with its matching secret;
+4. the destination van still assigned to the same engineer;
+5. the engineer's current password in `account_password`;
+6. current status `shipped` and matching `expected_version`.
+
+The receipt password is discarded after verification and never written to the replenishment record, inventory transaction, or audit log. Warehouse users, managers, administrators, other engineers, legacy identity headers, and another registered device cannot sign for a target engineer's vehicle delivery.
+
+## Replenishment inventory and audit rules
+
+- `requested → picking` reserves source quantity through the available-stock calculation.
+- `picking → shipped` creates one linked source `OUTBOUND` transaction.
+- `shipped → received` creates one linked destination `INBOUND` transaction and records the engineer/device.
+- `received → completed` closes the custody task and resolves its originating alert without moving stock again.
+- Cancellation is allowed only before shipment (`requested` or `picking`) and requires a reason.
+- Cancellation resolves its originating notification; it does not reopen the alert and create a duplicate request loop.
+- Unique request/stage and transaction-link constraints prevent retries from posting duplicate shipment or receipt movements.
+
+The audit actions are `replenishment_requested`, `replenishment_start_picking`, `replenishment_ship`, `replenishment_receive`, `replenishment_complete`, `replenishment_cancel`, and `replenishment_reconciled`. Transition audit metadata includes previous/new state or reconciliation resolution, reason where required, previous/new version, part, quantity, source/destination warehouses, target engineer, and the applicable inventory transaction ID. Normal authentication audit context also supplies the actor, role, authentication method, device record, and server timestamp.
+
+All notification/manual request creation, custody mutations, and reconciliation are online-only in the mobile client. They are never stored in or replayed from the offline queue.
+
+## Vehicle inventory boundary
+
+An explicit `warehouse_type=van` or assignment to an engineer classifies a warehouse as a vehicle. Creation automatically normalizes an engineer-owned warehouse to `van`, and a van must belong to an active engineer.
+
+- Vehicles cannot be selected as replenishment sources.
+- The generic inventory transaction endpoint cannot move stock from or into a vehicle.
+- Opening-inventory preview and commit reject vehicle warehouses.
+- Engineers can consume work-order parts only from their own assigned vehicle.
+- `RETURN` and `WORK_ORDER_USED` cannot be submitted through the generic transaction endpoint; they require the authenticated return and work-order usage workflows.
+
+SQLite enables foreign-key enforcement on every connection and uses `BEGIN IMMEDIATE` to serialize inventory-affecting custody writes before stock is read. PostgreSQL uses row locks. These database controls support, but do not replace, the API role and capability checks above.

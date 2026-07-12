@@ -11,6 +11,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -88,6 +89,9 @@ from app.schemas import (
     WorkOrderPartRecommendation,
     InventoryNotificationRead,
     ReplenishmentRequestRead,
+    ReplenishmentRequestAction,
+    ReplenishmentRequestCreate,
+    ReplenishmentRequestReconcile,
     OrganizationCreate,
     OrganizationRead,
     OrganizationUpdate,
@@ -115,11 +119,14 @@ from app.services.inventory import (
     create_transaction,
     get_employee_van_inventory,
     get_stock_quantity,
+    get_available_stock_quantity,
     get_stock_balances,
     get_location_stock_balances,
     get_location_stock_quantity,
     get_work_order_parts_cost,
     use_part_on_work_order,
+    warehouse_is_vehicle,
+    begin_inventory_write,
 )
 
 router = APIRouter()
@@ -653,6 +660,16 @@ def create_warehouse(payload: WarehouseCreate, db: Session = Depends(get_db), ac
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     _require_tenant_user(db, payload.assigned_user_id, "assigned_user_id")
     values = payload.model_dump()
+    values["warehouse_type"] = (payload.warehouse_type or "main").strip().lower()
+    owner = db.get(User, payload.assigned_user_id) if payload.assigned_user_id else None
+    if owner and owner.role == UserRole.ENGINEER and values["warehouse_type"] == "main":
+        values["warehouse_type"] = "van"
+    if values["warehouse_type"] not in {"main", "van"}:
+        raise HTTPException(status_code=422, detail="warehouse_type must be main or van")
+    if values["warehouse_type"] == "van" and (
+        not owner or not owner.is_active or owner.role != UserRole.ENGINEER
+    ):
+        raise HTTPException(status_code=422, detail="A van warehouse must be assigned to an active engineer")
     values["code"] = (payload.code or payload.name).strip().upper().replace(" ", "-")
     item = Warehouse(**values)
     db.add(item)
@@ -1506,17 +1523,18 @@ def add_inventory_transaction(
     payload: InventoryTransactionCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
-    tx = create_transaction(db, payload)
-    if str(payload.transaction_type).lower().endswith("transfer"):
-        _audit(
-            db,
-            actor,
-            "inventory_transfer",
-            "inventory_transaction",
-            tx.id,
-            {"part_id": payload.part_id, "qty": payload.quantity, "from": payload.from_warehouse_id, "to": payload.to_warehouse_id},
-        )
-        db.commit()
+    effective_payload = payload.model_copy(update={"user_id": actor.user_id}) if actor.user_id else payload
+    tx = create_transaction(db, effective_payload)
+    _audit(
+        db,
+        actor,
+        f"inventory_{payload.transaction_type.value}",
+        "inventory_transaction",
+        tx.id,
+        {"part_id": payload.part_id, "qty": payload.quantity, "from": payload.from_warehouse_id, "to": payload.to_warehouse_id},
+    )
+    db.commit()
+    db.refresh(tx)
     return tx
 
 
@@ -1617,6 +1635,17 @@ def employee_van_inventory(
     return rows[skip : skip + limit]
 
 
+@router.get("/inventory/my-van", response_model=list[StockBalance])
+def my_van_inventory(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.role != UserRole.ENGINEER or actor.user_id is None:
+        raise HTTPException(status_code=403, detail="Engineer access required")
+    return get_employee_van_inventory(db, actor.user_id)[:limit]
+
+
 @router.post(
     "/work-order-parts",
     response_model=WorkOrderPartRead,
@@ -1628,6 +1657,7 @@ def add_work_order_part(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
+    begin_inventory_write(db)
     require_work_order_execution_scope(db, actor, payload.work_order_id)
     return use_part_for_work_order(payload.work_order_id, payload, db, actor)
 
@@ -1643,11 +1673,20 @@ def use_part_for_work_order(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
+    begin_inventory_write(db)
     work_order = require_work_order_execution_scope(db, actor, work_order_id)
     if not work_order or work_order.is_locked or work_order.status == "PENDING_APPROVAL":
         raise HTTPException(status_code=409, detail="Work order cannot accept parts in its current state")
     if payload.work_order_id != work_order_id:
         raise HTTPException(status_code=400, detail="Path work order ID must match payload work_order_id")
+    if actor.role == UserRole.ENGINEER:
+        source_warehouse = db.get(Warehouse, payload.warehouse_id)
+        if (
+            not source_warehouse
+            or not warehouse_is_vehicle(db, source_warehouse)
+            or source_warehouse.assigned_user_id != actor.user_id
+        ):
+            raise HTTPException(status_code=403, detail="Engineers can only use parts from their own assigned van")
     effective_payload = payload.model_copy(update={"user_id": actor.user_id}) if actor.user_id else payload
     usage = use_part_on_work_order(db, effective_payload)
     part = db.get(Part, payload.part_id)
@@ -1688,54 +1727,614 @@ def update_inventory_notification(
     notification = db.get(InventoryNotification, notification_id)
     if not notification:
         raise HTTPException(status_code=404, detail="Inventory notification not found")
+    previous_status = notification.status
     notification.status = status
+    _audit(
+        db,
+        actor,
+        "inventory_notification_status_changed",
+        "inventory_notification",
+        notification.id,
+        {"from_status": previous_status, "to_status": status},
+    )
     db.commit()
     db.refresh(notification)
     return notification
+
+
+def _replenishment_read_for_actor(
+    db: Session,
+    actor: Actor,
+    item: ReplenishmentRequest,
+) -> ReplenishmentRequestRead:
+    payload = ReplenishmentRequestRead.model_validate(item).model_dump()
+    part = db.get(Part, item.part_id)
+    source = db.get(Warehouse, item.source_warehouse_id) if item.source_warehouse_id else None
+    destination = db.get(Warehouse, item.destination_warehouse_id)
+    target = db.get(User, item.target_user_id) if item.target_user_id else None
+    received_device = db.get(UserDevice, item.received_device_id) if item.received_device_id else None
+    work_order = db.get(WorkOrder, item.work_order_id) if item.work_order_id else None
+
+    def user_name(user_id: int | None) -> str | None:
+        user = db.get(User, user_id) if user_id else None
+        return user.name if user else None
+
+    warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    can_receive = False
+    if item.status == "shipped":
+        if item.target_user_id is not None:
+            can_receive = bool(
+                actor.role == UserRole.ENGINEER
+                and actor.user_id == item.target_user_id
+                and actor.device_verified
+            )
+        else:
+            can_receive = warehouse_operator
+    payload.update(
+        part_number=part.part_number if part else None,
+        part_name=part.name if part else None,
+        source_warehouse_name=source.name if source else None,
+        destination_warehouse_name=destination.name if destination else None,
+        target_user_name=target.name if target else None,
+        requested_by_name=user_name(item.requested_by),
+        picking_by_name=user_name(item.picking_by),
+        shipped_by_name=user_name(item.shipped_by),
+        received_by_name=user_name(item.received_by),
+        received_device_name=received_device.device_name if received_device else None,
+        completed_by_name=user_name(item.completed_by),
+        cancelled_by_name=user_name(item.cancelled_by),
+        work_order_ticket_number=work_order.ticket_number if work_order else None,
+        source_available_quantity=(
+            get_available_stock_quantity(db, item.part_id, item.source_warehouse_id)
+            if item.source_warehouse_id
+            else None
+        ),
+        destination_quantity=(
+            get_stock_quantity(db, item.part_id, item.destination_warehouse_id)
+            if destination
+            else 0
+        ),
+        can_start_picking=warehouse_operator and not item.requires_reconciliation and item.status == "requested",
+        can_ship=warehouse_operator and not item.requires_reconciliation and item.status == "picking",
+        can_receive=can_receive and not item.requires_reconciliation,
+        can_complete=warehouse_operator and not item.requires_reconciliation and item.status == "received",
+        can_cancel=warehouse_operator and not item.requires_reconciliation and item.status in {"requested", "picking"},
+        can_reconcile=actor.role == UserRole.ADMIN and item.requires_reconciliation,
+    )
+    return ReplenishmentRequestRead(**payload)
+
+
+def _validate_replenishment_destination(
+    db: Session,
+    destination: Warehouse,
+) -> int | None:
+    if not destination.is_active:
+        raise HTTPException(status_code=409, detail="Destination warehouse is inactive")
+    if not warehouse_is_vehicle(db, destination):
+        return None
+    target = db.get(User, destination.assigned_user_id) if destination.assigned_user_id else None
+    if not target or not target.is_active or target.role != UserRole.ENGINEER:
+        raise HTTPException(status_code=422, detail="A van destination must be assigned to an active engineer")
+    return target.id
+
+
+def _validate_replenishment_source(
+    db: Session,
+    source: Warehouse,
+    destination: Warehouse,
+) -> None:
+    if not source.is_active or source.id == destination.id:
+        raise HTTPException(status_code=400, detail="Source warehouse must be active and different from destination")
+    if warehouse_is_vehicle(db, source):
+        raise HTTPException(
+            status_code=409,
+            detail="A vehicle cannot be used as a replenishment source; use the authenticated return workflow",
+        )
 
 
 @router.post("/inventory/notifications/{notification_id}/create-request", response_model=ReplenishmentRequestRead)
 def create_replenishment_request(
     notification_id: int,
     quantity: int = Query(default=1, ge=1),
-    source_warehouse_id: int | None = Query(default=None),
-    db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor),
+    source_warehouse_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     notification = db.get(InventoryNotification, notification_id)
     if not notification:
         raise HTTPException(status_code=404, detail="Inventory notification not found")
-    request = ReplenishmentRequest(
-        part_id=notification.part_id, destination_warehouse_id=notification.warehouse_id,
-        source_warehouse_id=source_warehouse_id, quantity=quantity,
-        work_order_id=notification.work_order_id, requested_by=actor.user_id,
+    existing = db.scalar(
+        select(ReplenishmentRequest).where(ReplenishmentRequest.notification_id == notification_id)
+    )
+    if existing:
+        return _replenishment_read_for_actor(db, actor, existing)
+    destination = db.get(Warehouse, notification.warehouse_id)
+    if not destination:
+        raise HTTPException(status_code=404, detail="Destination warehouse not found")
+    target_user_id = _validate_replenishment_destination(db, destination)
+    source = db.get(Warehouse, source_warehouse_id) if source_warehouse_id else None
+    if source_warehouse_id and not source:
+        raise HTTPException(status_code=404, detail="Source warehouse not found")
+    if source:
+        _validate_replenishment_source(db, source, destination)
+    item = ReplenishmentRequest(
+        notification_id=notification.id,
+        part_id=notification.part_id,
+        destination_warehouse_id=notification.warehouse_id,
+        source_warehouse_id=source.id if source else None,
+        target_user_id=target_user_id,
+        quantity=quantity,
+        work_order_id=notification.work_order_id,
+        requested_by=actor.user_id,
     )
     notification.status = "acknowledged"
-    db.add(request); db.commit(); db.refresh(request)
-    return request
+    try:
+        db.add(item)
+        db.flush()
+        _audit(
+            db,
+            actor,
+            "replenishment_requested",
+            "replenishment_request",
+            item.id,
+            {
+                "notification_id": notification.id,
+                "part_id": item.part_id,
+                "quantity": item.quantity,
+                "source_warehouse_id": item.source_warehouse_id,
+                "destination_warehouse_id": item.destination_warehouse_id,
+                "target_user_id": item.target_user_id,
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.scalar(
+            select(ReplenishmentRequest).where(ReplenishmentRequest.notification_id == notification_id)
+        )
+        if existing:
+            return _replenishment_read_for_actor(db, actor, existing)
+        raise HTTPException(status_code=409, detail="Replenishment request could not be created") from exc
+    db.refresh(item)
+    return _replenishment_read_for_actor(db, actor, item)
+
+
+@router.post("/inventory/replenishment-requests", response_model=ReplenishmentRequestRead)
+def create_manual_replenishment_request(
+    payload: ReplenishmentRequestCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    client_request_id = payload.client_request_id.strip()
+    request_reason = payload.reason.strip()
+    if len(request_reason) < 3:
+        raise HTTPException(status_code=422, detail="Request reason must be at least 3 non-whitespace characters")
+
+    def matches_existing(candidate: ReplenishmentRequest) -> bool:
+        return (
+            candidate.part_id == payload.part_id
+            and candidate.destination_warehouse_id == payload.destination_warehouse_id
+            and candidate.source_warehouse_id == payload.source_warehouse_id
+            and candidate.quantity == payload.quantity
+            and (candidate.request_reason or "") == request_reason
+        )
+
+    existing = db.scalar(
+        select(ReplenishmentRequest).where(
+            ReplenishmentRequest.client_request_id == client_request_id,
+        )
+    )
+    if existing:
+        if not matches_existing(existing):
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another request")
+        return _replenishment_read_for_actor(db, actor, existing)
+
+    part = db.get(Part, payload.part_id)
+    destination = db.get(Warehouse, payload.destination_warehouse_id)
+    source = db.get(Warehouse, payload.source_warehouse_id) if payload.source_warehouse_id else None
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    if not destination:
+        raise HTTPException(status_code=404, detail="Destination warehouse not found")
+    target_user_id = _validate_replenishment_destination(db, destination)
+    if target_user_id is None:
+        raise HTTPException(status_code=422, detail="Manual replenishment destination must be an assigned vehicle")
+    if payload.source_warehouse_id and not source:
+        raise HTTPException(status_code=404, detail="Source warehouse not found")
+    if source:
+        _validate_replenishment_source(db, source, destination)
+
+    item = ReplenishmentRequest(
+        client_request_id=client_request_id,
+        request_reason=request_reason,
+        part_id=part.id,
+        destination_warehouse_id=destination.id,
+        source_warehouse_id=source.id if source else None,
+        target_user_id=target_user_id,
+        quantity=payload.quantity,
+        requested_by=actor.user_id,
+    )
+    try:
+        db.add(item)
+        db.flush()
+        _audit(
+            db,
+            actor,
+            "replenishment_requested",
+            "replenishment_request",
+            item.id,
+            {
+                "origin": "manual",
+                "client_request_id": client_request_id,
+                "reason": item.request_reason,
+                "part_id": item.part_id,
+                "quantity": item.quantity,
+                "source_warehouse_id": item.source_warehouse_id,
+                "destination_warehouse_id": item.destination_warehouse_id,
+                "target_user_id": item.target_user_id,
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.scalar(
+            select(ReplenishmentRequest).where(
+                ReplenishmentRequest.client_request_id == client_request_id,
+            )
+        )
+        if existing:
+            if matches_existing(existing):
+                return _replenishment_read_for_actor(db, actor, existing)
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another request")
+        raise HTTPException(status_code=409, detail="Replenishment request could not be created") from exc
+    db.refresh(item)
+    return _replenishment_read_for_actor(db, actor, item)
 
 
 @router.get("/inventory/replenishment-requests", response_model=list[ReplenishmentRequestRead])
-def list_replenishment_requests(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
-    return db.scalars(select(ReplenishmentRequest).order_by(ReplenishmentRequest.id.desc()).limit(100)).all()
-
-
-@router.patch("/inventory/replenishment-requests/{request_id}", response_model=ReplenishmentRequestRead)
-def update_replenishment_request(
-    request_id: int,
-    status: str = Query(..., pattern="^(requested|picking|shipped|received|completed|cancelled)$"),
-    db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor),
+def list_replenishment_requests(
+    status: str | None = Query(default=None, pattern="^(requested|picking|shipped|received|completed|cancelled)$"),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
-    request = db.get(ReplenishmentRequest, request_id)
-    if not request:
+    stmt = select(ReplenishmentRequest).order_by(ReplenishmentRequest.id.desc())
+    if actor.role == UserRole.ENGINEER:
+        stmt = stmt.where(ReplenishmentRequest.target_user_id == actor.user_id)
+    if status:
+        stmt = stmt.where(ReplenishmentRequest.status == status)
+    rows = db.scalars(stmt.limit(limit)).all()
+    return [_replenishment_read_for_actor(db, actor, item) for item in rows]
+
+
+@router.post(
+    "/inventory/replenishment-requests/{request_id}/reconcile",
+    response_model=ReplenishmentRequestRead,
+)
+def reconcile_replenishment_request(
+    request_id: int,
+    payload: ReplenishmentRequestReconcile,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    begin_inventory_write(db)
+    item = db.scalar(
+        select(ReplenishmentRequest)
+        .where(
+            ReplenishmentRequest.id == request_id,
+            ReplenishmentRequest.organization_id == actor.organization_id,
+        )
+        .with_for_update()
+    )
+    if not item:
         raise HTTPException(status_code=404, detail="Replenishment request not found")
-    if actor.role == UserRole.ENGINEER and status not in {"received"}:
-        raise HTTPException(status_code=403, detail="Engineers can only confirm receipt")
-    request.status = status
-    db.commit(); db.refresh(request)
-    return request
+    if not item.requires_reconciliation:
+        return _replenishment_read_for_actor(db, actor, item)
+    if item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Replenishment request changed; refresh before reconciling")
+    reason = payload.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(status_code=422, detail="Reconciliation reason must be at least 3 characters")
+    _require_account_reauthentication(db, actor, payload.account_password)
+    linked_movements = db.scalars(
+        select(InventoryTransaction).where(InventoryTransaction.replenishment_request_id == item.id)
+    ).all()
+    if linked_movements:
+        raise HTTPException(
+            status_code=409,
+            detail="Linked inventory movements require a dedicated stock correction, not historical reconciliation",
+        )
+    if payload.resolution == "reset_requested":
+        if item.status != "requested":
+            raise HTTPException(status_code=409, detail="Only a reopened requested record can use reset_requested")
+        if item.notification_id:
+            notification = db.get(InventoryNotification, item.notification_id)
+            if notification:
+                notification.status = "open"
+    elif item.status != "completed":
+        raise HTTPException(status_code=409, detail="accept_historical is only valid for a legacy completed record")
+    elif item.notification_id:
+        notification = db.get(InventoryNotification, item.notification_id)
+        if notification:
+            notification.status = "resolved"
+
+    previous_version = item.version
+    item.requires_reconciliation = False
+    item.version += 1
+    _audit(
+        db,
+        actor,
+        "replenishment_reconciled",
+        "replenishment_request",
+        item.id,
+        {
+            "resolution": payload.resolution,
+            "reason": reason,
+            "previous_version": previous_version,
+            "new_version": item.version,
+            "status": item.status,
+        },
+    )
+    db.commit()
+    db.refresh(item)
+    return _replenishment_read_for_actor(db, actor, item)
+
+
+@router.post("/inventory/replenishment-requests/{request_id}/actions", response_model=ReplenishmentRequestRead)
+def act_on_replenishment_request(
+    request_id: int,
+    payload: ReplenishmentRequestAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    begin_inventory_write(db)
+    item = db.scalar(
+        select(ReplenishmentRequest)
+        .where(
+            ReplenishmentRequest.id == request_id,
+            ReplenishmentRequest.organization_id == actor.organization_id,
+        )
+        .with_for_update()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Replenishment request not found")
+    if item.requires_reconciliation:
+        raise HTTPException(
+            status_code=409,
+            detail="Historical replenishment requires administrator reconciliation before workflow actions",
+        )
+    target_status = {
+        "start_picking": "picking",
+        "ship": "shipped",
+        "receive": "received",
+        "complete": "completed",
+        "cancel": "cancelled",
+    }[payload.action]
+    warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    if payload.action in {"start_picking", "ship", "complete", "cancel"} and not warehouse_operator:
+        raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+    if payload.action == "receive":
+        if item.target_user_id is not None:
+            if actor.role != UserRole.ENGINEER or actor.user_id != item.target_user_id:
+                raise HTTPException(status_code=403, detail="Only the destination engineer can receive this shipment")
+            require_bound_device(actor)
+            if item.status == "received" and item.received_device_id != actor.device_record_id:
+                raise HTTPException(status_code=403, detail="Shipment was received on another registered device")
+        elif not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+    if item.status == target_status:
+        return _replenishment_read_for_actor(db, actor, item)
+    if item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Replenishment request changed; refresh before continuing")
+
+    previous_status = item.status
+    transaction_id: int | None = None
+    now = datetime.utcnow()
+    if payload.action == "start_picking":
+        if not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        if item.status != "requested":
+            raise HTTPException(status_code=409, detail="Only requested replenishments can start picking")
+        if (
+            item.source_warehouse_id is not None
+            and payload.source_warehouse_id is not None
+            and payload.source_warehouse_id != item.source_warehouse_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The assigned source warehouse cannot be replaced during picking; cancel and recreate the request",
+            )
+        source_id = item.source_warehouse_id or payload.source_warehouse_id
+        source = db.get(Warehouse, source_id) if source_id else None
+        destination = db.get(Warehouse, item.destination_warehouse_id)
+        if not source:
+            raise HTTPException(status_code=422, detail="Select a source warehouse before picking")
+        if not destination:
+            raise HTTPException(status_code=404, detail="Destination warehouse not found")
+        _validate_replenishment_source(db, source, destination)
+        db.scalar(select(Part).where(Part.id == item.part_id).with_for_update())
+        if get_available_stock_quantity(db, item.part_id, source.id) < item.quantity:
+            raise HTTPException(status_code=409, detail="Insufficient unreserved source stock")
+        current_target = _validate_replenishment_destination(db, destination)
+        if item.target_user_id not in {None, current_target}:
+            raise HTTPException(status_code=409, detail="Destination van ownership changed; cancel and recreate the request")
+        item.source_warehouse_id = source.id
+        item.target_user_id = current_target
+        item.picking_by = actor.user_id
+        item.picking_at = now
+
+    elif payload.action == "ship":
+        if not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        if item.status != "picking" or not item.source_warehouse_id:
+            raise HTTPException(status_code=409, detail="Only a picking request with a source can be shipped")
+        source = db.get(Warehouse, item.source_warehouse_id)
+        destination = db.get(Warehouse, item.destination_warehouse_id)
+        if not source or not source.is_active:
+            raise HTTPException(status_code=409, detail="Source warehouse is no longer active")
+        if not destination:
+            raise HTTPException(status_code=404, detail="Destination warehouse not found")
+        _validate_replenishment_source(db, source, destination)
+        current_target = _validate_replenishment_destination(db, destination)
+        if current_target != item.target_user_id:
+            raise HTTPException(status_code=409, detail="Destination custody changed; cancel and recreate the request")
+        part = db.scalar(select(Part).where(Part.id == item.part_id).with_for_update())
+        if not part:
+            raise HTTPException(status_code=404, detail="Part not found")
+        if get_stock_quantity(db, item.part_id, item.source_warehouse_id) < item.quantity:
+            raise HTTPException(status_code=409, detail="Source stock is no longer sufficient")
+        transaction = InventoryTransaction(
+            part_id=item.part_id,
+            transaction_type=TransactionType.OUTBOUND,
+            quantity=item.quantity,
+            from_warehouse_id=item.source_warehouse_id,
+            work_order_id=item.work_order_id,
+            replenishment_request_id=item.id,
+            movement_stage="ship",
+            user_id=actor.user_id,
+            unit_cost=part.default_cost,
+            notes=f"Replenishment #{item.id} shipped",
+        )
+        db.add(transaction)
+        db.flush()
+        transaction_id = transaction.id
+        item.shipment_transaction_id = transaction.id
+        item.shipped_by = actor.user_id
+        item.shipped_at = now
+
+    elif payload.action == "receive":
+        if item.status != "shipped":
+            raise HTTPException(status_code=409, detail="Only shipped replenishments can be received")
+        destination = db.get(Warehouse, item.destination_warehouse_id)
+        if not destination:
+            raise HTTPException(status_code=404, detail="Destination warehouse not found")
+        current_target = _validate_replenishment_destination(db, destination)
+        if current_target != item.target_user_id:
+            raise HTTPException(status_code=409, detail="Destination custody changed after shipment; warehouse reconciliation is required")
+        if item.target_user_id is not None:
+            if actor.role != UserRole.ENGINEER or actor.user_id != item.target_user_id:
+                raise HTTPException(status_code=403, detail="Only the destination engineer can receive this shipment")
+            require_bound_device(actor)
+            if destination.assigned_user_id != actor.user_id:
+                raise HTTPException(status_code=409, detail="Destination van is no longer assigned to this engineer")
+            _require_account_reauthentication(db, actor, payload.account_password)
+        elif not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        shipment_transaction = (
+            db.get(InventoryTransaction, item.shipment_transaction_id)
+            if item.shipment_transaction_id
+            else None
+        )
+        if (
+            not shipment_transaction
+            or shipment_transaction.replenishment_request_id != item.id
+            or shipment_transaction.movement_stage != "ship"
+            or shipment_transaction.transaction_type != TransactionType.OUTBOUND
+            or shipment_transaction.part_id != item.part_id
+            or shipment_transaction.quantity != item.quantity
+            or shipment_transaction.from_warehouse_id != item.source_warehouse_id
+        ):
+            raise HTTPException(status_code=409, detail="Shipment ledger is incomplete; warehouse reconciliation is required")
+        part = db.scalar(select(Part).where(Part.id == item.part_id).with_for_update())
+        if not part:
+            raise HTTPException(status_code=404, detail="Part not found")
+        transaction = InventoryTransaction(
+            part_id=item.part_id,
+            transaction_type=TransactionType.INBOUND,
+            quantity=item.quantity,
+            to_warehouse_id=item.destination_warehouse_id,
+            work_order_id=item.work_order_id,
+            replenishment_request_id=item.id,
+            movement_stage="receive",
+            user_id=actor.user_id,
+            unit_cost=shipment_transaction.unit_cost,
+            notes=f"Replenishment #{item.id} received",
+        )
+        db.add(transaction)
+        db.flush()
+        transaction_id = transaction.id
+        item.receipt_transaction_id = transaction.id
+        item.received_by = actor.user_id
+        item.received_device_id = actor.device_record_id
+        item.received_at = now
+
+    elif payload.action == "complete":
+        if not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        if item.status != "received" or item.receipt_transaction_id is None:
+            raise HTTPException(status_code=409, detail="Only a received shipment can be completed")
+        receipt_transaction = db.get(InventoryTransaction, item.receipt_transaction_id)
+        if (
+            not receipt_transaction
+            or receipt_transaction.replenishment_request_id != item.id
+            or receipt_transaction.movement_stage != "receive"
+            or receipt_transaction.transaction_type != TransactionType.INBOUND
+            or receipt_transaction.part_id != item.part_id
+            or receipt_transaction.quantity != item.quantity
+            or receipt_transaction.to_warehouse_id != item.destination_warehouse_id
+        ):
+            raise HTTPException(status_code=409, detail="Receipt ledger is incomplete; warehouse reconciliation is required")
+        item.completed_by = actor.user_id
+        item.completed_at = now
+        if item.notification_id:
+            notification = db.get(InventoryNotification, item.notification_id)
+            if notification:
+                notification.status = "resolved"
+
+    else:
+        if not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        if item.status not in {"requested", "picking"}:
+            raise HTTPException(status_code=409, detail="Only requested or picking replenishments can be cancelled")
+        if not payload.reason or len(payload.reason.strip()) < 3:
+            raise HTTPException(status_code=422, detail="Cancellation reason must be at least 3 characters")
+        item.cancelled_by = actor.user_id
+        item.cancelled_at = now
+        item.cancellation_reason = payload.reason.strip()
+        if item.notification_id:
+            notification = db.get(InventoryNotification, item.notification_id)
+            if notification:
+                notification.status = "resolved"
+
+    item.status = target_status
+    item.version += 1
+    db.add(item)
+    _audit(
+        db,
+        actor,
+        f"replenishment_{payload.action}",
+        "replenishment_request",
+        item.id,
+        {
+            "from_status": previous_status,
+            "to_status": target_status,
+            "previous_version": payload.expected_version,
+            "new_version": item.version,
+            "part_id": item.part_id,
+            "quantity": item.quantity,
+            "source_warehouse_id": item.source_warehouse_id,
+            "destination_warehouse_id": item.destination_warehouse_id,
+            "target_user_id": item.target_user_id,
+            "inventory_transaction_id": transaction_id,
+        },
+    )
+    db.commit()
+    db.refresh(item)
+    return _replenishment_read_for_actor(db, actor, item)
+
+
+@router.patch(
+    "/inventory/replenishment-requests/{request_id}",
+    response_model=ReplenishmentRequestRead,
+    deprecated=True,
+)
+def update_replenishment_request(request_id: int):
+    raise HTTPException(status_code=410, detail="Use the authenticated replenishment action endpoint")
 
 
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])
@@ -2235,6 +2834,10 @@ async def preview_opening_inventory_import(
             row_errors.append("part_number does not exist in this organization")
         if not warehouse:
             row_errors.append("warehouse does not exist in this organization")
+        elif warehouse_is_vehicle(db, warehouse):
+            row_errors.append(
+                "opening inventory cannot post to a vehicle; use replenishment and engineer receipt"
+            )
         pair = (part_number, warehouse_name.lower())
         if part_number and warehouse_name and pair in seen_pairs:
             row_errors.append("duplicate part and warehouse in file")
@@ -2298,6 +2901,7 @@ def commit_opening_inventory_import(
     actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    begin_inventory_write(db)
     batch = db.get(ImportBatch, batch_id)
     if not batch or batch.import_type != "opening_inventory":
         raise HTTPException(status_code=404, detail="Import batch not found")
@@ -2306,7 +2910,20 @@ def commit_opening_inventory_import(
     if batch.status != "ready":
         raise HTTPException(status_code=409, detail="Import batch has validation errors")
     rows = json.loads(batch.payload_json or "[]")
+    part_ids = sorted({row["part_id"] for row in rows})
+    if part_ids:
+        locked_parts = db.scalars(
+            select(Part).where(Part.id.in_(part_ids)).order_by(Part.id).with_for_update()
+        ).all()
+        if len(locked_parts) != len(part_ids):
+            raise HTTPException(status_code=409, detail="An opening inventory part no longer exists")
     for row in rows:
+        warehouse = db.get(Warehouse, row["warehouse_id"])
+        if not warehouse or warehouse_is_vehicle(db, warehouse):
+            raise HTTPException(
+                status_code=409,
+                detail="Opening inventory can only be committed to non-vehicle warehouses",
+            )
         db.add(
             InventoryTransaction(
                 part_id=row["part_id"],
@@ -2323,6 +2940,14 @@ def commit_opening_inventory_import(
     batch.updated_count = 0
     batch.committed_at = datetime.utcnow()
     db.add(batch)
+    _audit(
+        db,
+        actor,
+        "opening_inventory_committed",
+        "import_batch",
+        batch.id,
+        {"rows": len(rows), "warehouse_ids": sorted({row["warehouse_id"] for row in rows})},
+    )
     db.commit()
     db.refresh(batch)
     return _import_batch_read(batch)
