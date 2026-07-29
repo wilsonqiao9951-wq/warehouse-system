@@ -14,6 +14,7 @@ const links = [
   { href: "/inventory-scan", label: "Scan & Check", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/warehouse-tasks", label: "Warehouse Tasks", roles: ["warehouse", "manager", "admin"] },
   { href: "/inventory-counts", label: "Inventory Counts", roles: ["warehouse", "manager", "admin"] },
+  { href: "/knowledge-base", label: "Service Knowledge", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/part-observation", label: "Photo Memory", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/employees", label: "Employees", roles: ["manager", "admin"] },
   { href: "/reports", label: "Reports", roles: ["manager", "admin"] },
@@ -32,7 +33,7 @@ const links = [
 ];
 
 function sortEngineerLinks(items: typeof links) {
-  const order = ["/today", "/my-jobs", "/my-van-inventory", "/inventory-scan", "/sync-center", "/profile", "/map", "/part-observation"];
+  const order = ["/today", "/my-jobs", "/my-van-inventory", "/knowledge-base", "/inventory-scan", "/sync-center", "/profile", "/map", "/part-observation"];
   return [...items].sort((a, b) => {
     const ai = order.indexOf(a.href); const bi = order.indexOf(b.href);
     return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);

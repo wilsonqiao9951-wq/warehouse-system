@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook, load_workbook
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -41,6 +41,8 @@ from app.models import (
     VehicleReturnRequest,
     ImportBatch,
     JobStatus,
+    MachineKnowledgeEntry,
+    MachineKnowledgeProfile,
     Organization,
     Part,
     PartMachineAssociation,
@@ -86,6 +88,15 @@ from app.schemas import (
     InventoryLocationScanRequest,
     InventoryLocationScanRead,
     InventoryLocationLabelRead,
+    MachineKnowledgeEntryAction,
+    MachineKnowledgeEntryCreate,
+    MachineKnowledgeEntryRead,
+    MachineKnowledgeEntryUpdate,
+    MachineKnowledgeEvidenceRead,
+    MachineKnowledgePartRead,
+    MachineKnowledgeProfileCreate,
+    MachineKnowledgeProfileRead,
+    MachineKnowledgeProfileUpdate,
     WorkOrderFlowAction,
     InventoryTransactionRead,
     ImportBatchRead,
@@ -738,6 +749,592 @@ def list_storage_locations(
             raise HTTPException(status_code=404, detail="Warehouse not found")
         query = query.where(StorageLocation.warehouse_id == warehouse_id)
     return db.scalars(query).all()
+
+
+def _knowledge_model_key(value: str) -> str:
+    key = value.strip().casefold()
+    if not key:
+        raise HTTPException(status_code=422, detail="Machine model is required")
+    return key
+
+
+def _knowledge_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return value.strip() or None
+
+
+def _knowledge_media_url(value: str | None) -> str | None:
+    cleaned = _knowledge_optional_text(value)
+    if cleaned and not cleaned.lower().startswith(("https://", "http://", "/uploads/")):
+        raise HTTPException(
+            status_code=422,
+            detail="Knowledge media URL must use http(s) or an uploaded /uploads/ path",
+        )
+    return cleaned
+
+
+def _knowledge_part_read(
+    part: Part,
+    association: PartMachineAssociation | None = None,
+) -> MachineKnowledgePartRead:
+    return MachineKnowledgePartRead(
+        id=part.id,
+        part_number=part.part_number,
+        name=part.name,
+        image_url=part.image_url,
+        recognition_source=association.recognition_source if association else None,
+        confidence=association.confidence if association else None,
+        confirmed_count=association.confirmed_count if association else None,
+    )
+
+
+def _knowledge_entry_read(
+    db: Session,
+    actor: Actor,
+    entry: MachineKnowledgeEntry,
+) -> MachineKnowledgeEntryRead:
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    related_part = db.get(Part, entry.related_part_id) if entry.related_part_id else None
+    return MachineKnowledgeEntryRead(
+        id=entry.id,
+        organization_id=entry.organization_id,
+        profile_id=entry.profile_id,
+        entry_type=entry.entry_type,
+        title=entry.title,
+        content=entry.content,
+        fault_code=entry.fault_code,
+        related_part=_knowledge_part_read(related_part) if related_part else None,
+        source_work_order_id=entry.source_work_order_id,
+        media_url=entry.media_url,
+        sort_order=entry.sort_order,
+        status=entry.status,
+        version=entry.version,
+        created_by=entry.created_by,
+        updated_by=entry.updated_by,
+        published_by=entry.published_by,
+        published_at=entry.published_at,
+        archived_by=entry.archived_by,
+        archived_at=entry.archived_at,
+        can_edit=curator and entry.status == "draft",
+        can_publish=actor.role == UserRole.ADMIN and entry.status == "draft",
+        can_archive=actor.role == UserRole.ADMIN and entry.status in {"draft", "published"},
+        can_reopen=actor.role == UserRole.ADMIN and entry.status == "archived",
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
+    )
+
+
+def _machine_knowledge_profile_read(
+    db: Session,
+    actor: Actor,
+    profile: MachineKnowledgeProfile,
+) -> MachineKnowledgeProfileRead:
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    entries_stmt = select(MachineKnowledgeEntry).where(
+        MachineKnowledgeEntry.profile_id == profile.id
+    )
+    if not curator:
+        entries_stmt = entries_stmt.where(MachineKnowledgeEntry.status == "published")
+    entries = db.scalars(
+        entries_stmt.order_by(
+            MachineKnowledgeEntry.entry_type,
+            MachineKnowledgeEntry.sort_order,
+            MachineKnowledgeEntry.id,
+        )
+    ).all()
+
+    associations = db.execute(
+        select(PartMachineAssociation, Part)
+        .join(Part, Part.id == PartMachineAssociation.part_id)
+        .where(
+            func.lower(func.trim(PartMachineAssociation.machine_model))
+            == profile.model_key
+        )
+        .order_by(
+            PartMachineAssociation.confidence.desc(),
+            PartMachineAssociation.confirmed_count.desc(),
+            Part.part_number,
+        )
+    ).all()
+
+    evidence = db.execute(
+        select(
+            func.count(WorkOrder.id),
+            func.count(WorkOrder.first_time_fix),
+            func.coalesce(
+                func.sum(case((WorkOrder.first_time_fix.is_(True), 1), else_=0)),
+                0,
+            ),
+            func.avg(WorkOrder.repair_duration_minutes),
+            func.max(WorkOrder.completed_at),
+        ).where(
+            WorkOrder.is_locked.is_(True),
+            WorkOrder.completed_at.is_not(None),
+            func.lower(func.trim(WorkOrder.machine_type)) == profile.model_key,
+        )
+    ).one()
+    completed_count = int(evidence[0] or 0)
+    labeled_count = int(evidence[1] or 0)
+    success_count = int(evidence[2] or 0)
+
+    return MachineKnowledgeProfileRead(
+        id=profile.id,
+        organization_id=profile.organization_id,
+        manufacturer=profile.manufacturer,
+        model=profile.model,
+        equipment_type=profile.equipment_type,
+        summary=profile.summary,
+        version=profile.version,
+        is_active=profile.is_active,
+        created_by=profile.created_by,
+        updated_by=profile.updated_by,
+        can_edit=curator,
+        can_add_entry=curator and profile.is_active,
+        entries=[_knowledge_entry_read(db, actor, entry) for entry in entries],
+        related_parts=[
+            _knowledge_part_read(part, association)
+            for association, part in associations
+        ],
+        evidence=MachineKnowledgeEvidenceRead(
+            completed_work_orders=completed_count,
+            labeled_outcomes=labeled_count,
+            first_time_fix_rate=(
+                success_count / labeled_count if labeled_count else None
+            ),
+            average_repair_minutes=(
+                float(evidence[3]) if evidence[3] is not None else None
+            ),
+            latest_completed_at=evidence[4],
+        ),
+        created_at=profile.created_at,
+        updated_at=profile.updated_at,
+    )
+
+
+def _validate_machine_knowledge_links(
+    db: Session,
+    profile: MachineKnowledgeProfile,
+    *,
+    related_part_id: int | None,
+    source_work_order_id: int | None,
+) -> None:
+    if related_part_id is not None and not db.get(Part, related_part_id):
+        raise HTTPException(
+            status_code=400,
+            detail="related_part_id is not available in this organization",
+        )
+    if source_work_order_id is None:
+        return
+    work_order = db.get(WorkOrder, source_work_order_id)
+    if not work_order:
+        raise HTTPException(
+            status_code=400,
+            detail="source_work_order_id is not available in this organization",
+        )
+    if not work_order.is_locked or not work_order.completed_at:
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge evidence must reference a completed work order",
+        )
+    if _knowledge_model_key(work_order.machine_type or "") != profile.model_key:
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge evidence work order must use the same machine model",
+        )
+
+
+@router.get(
+    "/machine-knowledge",
+    response_model=list[MachineKnowledgeProfileRead],
+)
+def list_machine_knowledge(
+    q: str | None = Query(default=None, max_length=255),
+    model: str | None = Query(default=None, max_length=255),
+    include_inactive: bool = False,
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    if include_inactive and not curator:
+        raise HTTPException(status_code=403, detail="Inactive knowledge is curator-only")
+    stmt = select(MachineKnowledgeProfile)
+    if not include_inactive:
+        stmt = stmt.where(MachineKnowledgeProfile.is_active.is_(True))
+    if not curator:
+        stmt = stmt.where(
+            MachineKnowledgeProfile.entries.any(
+                MachineKnowledgeEntry.status == "published"
+            )
+        )
+    if model:
+        stmt = stmt.where(
+            MachineKnowledgeProfile.model_key == _knowledge_model_key(model)
+        )
+    if q and q.strip():
+        like = f"%{q.strip().casefold()}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(MachineKnowledgeProfile.model).like(like),
+                func.lower(func.coalesce(MachineKnowledgeProfile.manufacturer, "")).like(like),
+                func.lower(func.coalesce(MachineKnowledgeProfile.equipment_type, "")).like(like),
+                func.lower(func.coalesce(MachineKnowledgeProfile.summary, "")).like(like),
+            )
+        )
+    profiles = db.scalars(
+        stmt.order_by(
+            MachineKnowledgeProfile.manufacturer,
+            MachineKnowledgeProfile.model,
+            MachineKnowledgeProfile.id,
+        ).limit(limit)
+    ).all()
+    return [
+        _machine_knowledge_profile_read(db, actor, profile)
+        for profile in profiles
+    ]
+
+
+@router.get(
+    "/machine-knowledge/{profile_id}",
+    response_model=MachineKnowledgeProfileRead,
+)
+def get_machine_knowledge(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    profile = db.get(MachineKnowledgeProfile, profile_id)
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    if not profile or (not curator and not profile.is_active):
+        raise HTTPException(status_code=404, detail="Machine knowledge profile not found")
+    if not curator and not db.scalar(
+        select(MachineKnowledgeEntry.id).where(
+            MachineKnowledgeEntry.profile_id == profile.id,
+            MachineKnowledgeEntry.status == "published",
+        )
+    ):
+        raise HTTPException(status_code=404, detail="Machine knowledge profile not found")
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.post(
+    "/machine-knowledge",
+    response_model=MachineKnowledgeProfileRead,
+)
+def create_machine_knowledge(
+    payload: MachineKnowledgeProfileCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = MachineKnowledgeProfile(
+        model=payload.model.strip(),
+        model_key=_knowledge_model_key(payload.model),
+        manufacturer=_knowledge_optional_text(payload.manufacturer),
+        equipment_type=_knowledge_optional_text(payload.equipment_type),
+        summary=_knowledge_optional_text(payload.summary),
+        created_by=actor.user_id,
+        updated_by=actor.user_id,
+    )
+    db.add(profile)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A knowledge profile already exists for this machine model",
+        )
+    _audit(
+        db,
+        actor,
+        "create_machine_knowledge_profile",
+        "machine_knowledge_profile",
+        profile.id,
+        {"model": profile.model},
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.patch(
+    "/machine-knowledge/{profile_id}",
+    response_model=MachineKnowledgeProfileRead,
+)
+def update_machine_knowledge(
+    profile_id: int,
+    payload: MachineKnowledgeProfileUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = db.scalar(
+        select(MachineKnowledgeProfile)
+        .where(MachineKnowledgeProfile.id == profile_id)
+        .with_for_update()
+    )
+    if not profile:
+        raise HTTPException(status_code=404, detail="Machine knowledge profile not found")
+    if profile.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Machine knowledge profile changed; refresh before editing",
+        )
+    changes = payload.model_dump(exclude={"expected_version"}, exclude_unset=True)
+    if "model" in changes:
+        changes["model"] = changes["model"].strip()
+        changes["model_key"] = _knowledge_model_key(changes["model"])
+    for field in {"manufacturer", "equipment_type", "summary"} & changes.keys():
+        changes[field] = _knowledge_optional_text(changes[field])
+    for field, value in changes.items():
+        setattr(profile, field, value)
+    profile.updated_by = actor.user_id
+    profile.version += 1
+    db.add(profile)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A knowledge profile already exists for this machine model",
+        )
+    _audit(
+        db,
+        actor,
+        "update_machine_knowledge_profile",
+        "machine_knowledge_profile",
+        profile.id,
+        {"fields": sorted(changes), "version": profile.version},
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.post(
+    "/machine-knowledge/{profile_id}/entries",
+    response_model=MachineKnowledgeProfileRead,
+)
+def create_machine_knowledge_entry(
+    profile_id: int,
+    payload: MachineKnowledgeEntryCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = db.get(MachineKnowledgeProfile, profile_id)
+    if not profile or not profile.is_active:
+        raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
+    _validate_machine_knowledge_links(
+        db,
+        profile,
+        related_part_id=payload.related_part_id,
+        source_work_order_id=payload.source_work_order_id,
+    )
+    media_url = _knowledge_media_url(payload.media_url)
+    if payload.entry_type in {"photo", "video"} and not media_url:
+        raise HTTPException(
+            status_code=422,
+            detail="Photo and video knowledge entries require a media URL",
+        )
+    entry = MachineKnowledgeEntry(
+        profile_id=profile.id,
+        entry_type=payload.entry_type,
+        title=payload.title.strip(),
+        content=payload.content.strip(),
+        fault_code=_knowledge_optional_text(payload.fault_code),
+        related_part_id=payload.related_part_id,
+        source_work_order_id=payload.source_work_order_id,
+        media_url=media_url,
+        sort_order=payload.sort_order,
+        created_by=actor.user_id,
+        updated_by=actor.user_id,
+    )
+    db.add(entry)
+    db.flush()
+    _audit(
+        db,
+        actor,
+        "create_machine_knowledge_entry",
+        "machine_knowledge_entry",
+        entry.id,
+        {
+            "profile_id": profile.id,
+            "entry_type": entry.entry_type,
+            "source_work_order_id": entry.source_work_order_id,
+        },
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.patch(
+    "/machine-knowledge/entries/{entry_id}",
+    response_model=MachineKnowledgeProfileRead,
+)
+def update_machine_knowledge_entry(
+    entry_id: int,
+    payload: MachineKnowledgeEntryUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    entry = db.scalar(
+        select(MachineKnowledgeEntry)
+        .where(MachineKnowledgeEntry.id == entry_id)
+        .with_for_update()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Machine knowledge entry not found")
+    if entry.status != "draft":
+        raise HTTPException(
+            status_code=409,
+            detail="Published or archived knowledge is immutable; archive and create a new draft",
+        )
+    if entry.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Machine knowledge entry changed; refresh before editing",
+        )
+    profile = db.get(MachineKnowledgeProfile, entry.profile_id)
+    if not profile or not profile.is_active:
+        raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
+    changes = payload.model_dump(exclude={"expected_version"}, exclude_unset=True)
+    related_part_id = changes.get("related_part_id", entry.related_part_id)
+    source_work_order_id = changes.get(
+        "source_work_order_id",
+        entry.source_work_order_id,
+    )
+    _validate_machine_knowledge_links(
+        db,
+        profile,
+        related_part_id=related_part_id,
+        source_work_order_id=source_work_order_id,
+    )
+    for field in {"title", "content", "fault_code"} & changes.keys():
+        changes[field] = _knowledge_optional_text(changes[field])
+    if changes.get("title") is None and "title" in changes:
+        raise HTTPException(status_code=422, detail="Knowledge title is required")
+    if changes.get("content") is None and "content" in changes:
+        raise HTTPException(status_code=422, detail="Knowledge content is required")
+    if "media_url" in changes:
+        changes["media_url"] = _knowledge_media_url(changes["media_url"])
+    entry_type = changes.get("entry_type", entry.entry_type)
+    media_url = changes.get("media_url", entry.media_url)
+    if entry_type in {"photo", "video"} and not media_url:
+        raise HTTPException(
+            status_code=422,
+            detail="Photo and video knowledge entries require a media URL",
+        )
+    for field, value in changes.items():
+        setattr(entry, field, value)
+    entry.updated_by = actor.user_id
+    entry.version += 1
+    db.add(entry)
+    _audit(
+        db,
+        actor,
+        "update_machine_knowledge_entry",
+        "machine_knowledge_entry",
+        entry.id,
+        {"fields": sorted(changes), "version": entry.version},
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.post(
+    "/machine-knowledge/entries/{entry_id}/actions",
+    response_model=MachineKnowledgeProfileRead,
+)
+def act_on_machine_knowledge_entry(
+    entry_id: int,
+    payload: MachineKnowledgeEntryAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    entry = db.scalar(
+        select(MachineKnowledgeEntry)
+        .where(MachineKnowledgeEntry.id == entry_id)
+        .with_for_update()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Machine knowledge entry not found")
+    if entry.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Machine knowledge entry changed; refresh before acting",
+        )
+    profile = db.get(MachineKnowledgeProfile, entry.profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Machine knowledge profile not found")
+    now = datetime.utcnow()
+    previous_status = entry.status
+    if payload.action == "publish":
+        if entry.status != "draft" or not profile.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail="Only draft knowledge on an active profile can be published",
+            )
+        entry.status = "published"
+        entry.published_by = actor.user_id
+        entry.published_at = now
+        entry.archived_by = None
+        entry.archived_at = None
+    elif payload.action == "archive":
+        if entry.status not in {"draft", "published"}:
+            raise HTTPException(status_code=409, detail="Knowledge entry is already archived")
+        entry.status = "archived"
+        entry.archived_by = actor.user_id
+        entry.archived_at = now
+    elif payload.action == "reopen":
+        if entry.status != "archived" or not profile.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail="Only archived knowledge on an active profile can be reopened",
+            )
+        entry.status = "draft"
+        entry.archived_by = None
+        entry.archived_at = None
+    entry.updated_by = actor.user_id
+    entry.version += 1
+    db.add(entry)
+    _audit(
+        db,
+        actor,
+        f"{payload.action}_machine_knowledge_entry",
+        "machine_knowledge_entry",
+        entry.id,
+        {
+            "profile_id": profile.id,
+            "previous_status": previous_status,
+            "new_status": entry.status,
+            "version": entry.version,
+        },
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
 
 
 @router.post("/parts", response_model=PartRead)

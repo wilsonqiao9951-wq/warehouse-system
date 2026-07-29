@@ -13,6 +13,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Account- and registered-device-bound field execution
 - Password re-verification and exact engineer/device completion attribution
 - Structured work-order learning data for faults, outcomes, first-time fix, rework, and server-measured duration
+- Governed machine service knowledge with published faults, repair steps, tools, cautions, media, and verified field evidence
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
 - Manager/administrator replenishment approval with rejection evidence before warehouse picking
 - Reserved picking stock with separate shipment OUTBOUND and receipt INBOUND inventory movements
@@ -60,7 +61,7 @@ npm install
 npm run dev
 ```
 
-The frontend uses Next.js 16.2.10 and requires Node.js 20.9 or newer.
+The frontend uses Next.js 16.2.12 and requires Node.js 20.9 or newer.
 
 Default frontend URL:
 
@@ -89,6 +90,7 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 - `GET /api/work-orders/{id}/part-recommendations` ranks tenant-scoped completed-job evidence by machine, job type, fault, error code, symptoms, outcome success, repair time, and current stock location. See [`docs/PART_RECOMMENDATION_RANKING.md`](docs/PART_RECOMMENDATION_RANKING.md).
 - `POST /api/parts/recognition/candidates` stores a validated part photo and creates review-only candidates from label, machine, photo-memory, and completed-job signals.
 - `POST /api/parts/recognition/candidates/{id}/actions` enforces employee confirmation, administrator confirmation, actual-usage verification, and trusted promotion without changing inventory. See [`docs/VISUAL_RECOGNITION_WORKFLOW.md`](docs/VISUAL_RECOGNITION_WORKFLOW.md).
+- `GET /api/machine-knowledge` gives every operational role tenant-scoped published machine guidance; managers curate drafts and administrators publish/archive entries through the governed endpoints documented in [`docs/MACHINE_KNOWLEDGE_BASE.md`](docs/MACHINE_KNOWLEDGE_BASE.md).
 - `POST /api/work-order-parts` is still available for backward compatibility but marked deprecated.
 - `GET /api/inventory/replenishment-requests` returns the role-scoped replenishment queue and server-calculated action capabilities.
 - `POST /api/inventory/replenishment-requests` creates a manual vehicle request with a required business reason and client-generated idempotency key.
@@ -149,7 +151,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260728_0024` (controlled visual part candidates).
+- Current schema head: `20260728_0025` (governed machine service knowledge).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

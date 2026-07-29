@@ -309,4 +309,15 @@ Verification: full backend suite 70 passed, vehicle custody target suite 18 pass
 - Adds the strict `ai_candidate -> employee_confirmed -> admin_confirmed -> usage_verified -> trusted` lifecycle plus reason-required rejection.
 - Records every actor and timestamp, uses optimistic versions, and requires a real linked work-order part usage before trust promotion.
 - Trusted promotion updates verified machine/part knowledge only; the recognition workflow never writes inventory transactions.
+
+## 20260728_0025 - Governed machine service knowledge
+
+- Adds tenant-scoped machine profiles with normalized per-organization model uniqueness and optimistic versions.
+- Adds typed fault, repair-step, tool, caution, common-error, photo, video, and service-note entries.
+- Keeps new knowledge in `draft` until an administrator publishes it; published guidance is immutable and can only be archived or reopened as a new draft workflow.
+- Links optional tenant-validated parts and completed same-model work orders without exposing cost or supplier data to field readers.
+- Aggregates completed-job count, first-time-fix rate, average repair duration, latest completion, and confirmed machine/part associations.
+- Records profile, draft, publish, archive, and reopen actions in the organization audit log.
+
+Verification: target workflow tests 3 passed, full backend suite 86 passed, fresh base-to-`0025` plus `0025 -> 0024 -> 0025` passed on SQLite, the Next.js 16.2.12 production build generated all 28 static routes, and the production dependency audit reported 0 vulnerabilities.
 - Work-order-linked evidence is restricted to the claiming engineer's registered device and claim generation or an administrator.

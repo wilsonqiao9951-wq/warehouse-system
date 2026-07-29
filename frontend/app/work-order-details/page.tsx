@@ -458,6 +458,17 @@ export default function WorkOrderDetailsPage() {
                 {serviceContext?.equipment?.serial_number && <div className="muted">Serial {serviceContext.equipment.serial_number}</div>}
               </div>
             </div>
+            {(serviceContext?.equipment?.model || serviceContext?.fallback_equipment_model) && (
+              <Link
+                className="nav-item"
+                style={{ marginTop: 10 }}
+                href={`/knowledge-base?model=${encodeURIComponent(
+                  serviceContext?.equipment?.model || serviceContext?.fallback_equipment_model || "",
+                )}`}
+              >
+                Open machine service knowledge
+              </Link>
+            )}
           </div>
 
           <div className="card">

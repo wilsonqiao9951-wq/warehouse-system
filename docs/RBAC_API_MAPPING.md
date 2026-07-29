@@ -211,3 +211,16 @@ Location labels are validated against both their database ID and current printed
 | Reject with reason | Deny | Deny | Deny | Allow | Deny |
 
 Recognition actions never mutate inventory. A candidate can reach trusted knowledge only after server-recorded use of the same part on the linked work order.
+
+## Machine service knowledge
+
+| Operation | Engineer | Manager | Admin | Warehouse |
+|---|---:|---:|---:|---:|
+| Search/read published active profiles | Allow | Allow | Allow | Allow |
+| View drafts, archived entries, inactive profiles | Deny | Allow | Allow | Deny |
+| Create/update machine profiles | Deny | Allow | Allow | Deny |
+| Create/update draft entries | Deny | Allow | Allow | Deny |
+| Publish, archive, or reopen entries | Deny | Deny | Allow | Deny |
+| Modify published content in place | Deny | Deny | Deny | Deny |
+
+All reads and writes are tenant-scoped. Optional source work orders must already be completed and locked and must match the profile model. Engineer and warehouse responses use a redacted part summary that excludes cost, supplier, and other commercial fields. Frontend capability flags mirror these rules but do not replace API enforcement.

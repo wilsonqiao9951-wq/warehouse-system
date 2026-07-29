@@ -354,6 +354,84 @@ export interface PartRecognitionObservation {
   candidates: PartRecognitionCandidate[];
 }
 
+export type MachineKnowledgeEntryType =
+  | "fault"
+  | "repair_step"
+  | "tool"
+  | "caution"
+  | "common_error"
+  | "photo"
+  | "video"
+  | "note";
+
+export type MachineKnowledgeStatus = "draft" | "published" | "archived";
+
+export interface MachineKnowledgePart {
+  id: number;
+  part_number: string;
+  name: string;
+  image_url?: string | null;
+  recognition_source?: string | null;
+  confidence?: number | null;
+  confirmed_count?: number | null;
+}
+
+export interface MachineKnowledgeEvidence {
+  completed_work_orders: number;
+  labeled_outcomes: number;
+  first_time_fix_rate?: number | null;
+  average_repair_minutes?: number | null;
+  latest_completed_at?: string | null;
+}
+
+export interface MachineKnowledgeEntry {
+  id: number;
+  organization_id: number;
+  profile_id: number;
+  entry_type: MachineKnowledgeEntryType;
+  title: string;
+  content: string;
+  fault_code?: string | null;
+  related_part?: MachineKnowledgePart | null;
+  source_work_order_id?: number | null;
+  media_url?: string | null;
+  sort_order: number;
+  status: MachineKnowledgeStatus;
+  version: number;
+  created_by?: number | null;
+  updated_by?: number | null;
+  published_by?: number | null;
+  published_at?: string | null;
+  archived_by?: number | null;
+  archived_at?: string | null;
+  can_edit: boolean;
+  can_publish: boolean;
+  can_archive: boolean;
+  can_reopen: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MachineKnowledgeProfile {
+  id: number;
+  organization_id: number;
+  manufacturer?: string | null;
+  model: string;
+  equipment_type?: string | null;
+  summary?: string | null;
+  version: number;
+  is_active: boolean;
+  created_by?: number | null;
+  updated_by?: number | null;
+  can_edit: boolean;
+  can_add_entry: boolean;
+  entries: MachineKnowledgeEntry[];
+  related_parts: MachineKnowledgePart[];
+  evidence: MachineKnowledgeEvidence;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkOrder {
   id: number;
   customer_id?: number | null;

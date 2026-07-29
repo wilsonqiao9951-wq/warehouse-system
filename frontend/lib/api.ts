@@ -3,6 +3,9 @@ import {
   JobStatus,
   LowStockAlert,
   LocationStockBalance,
+  MachineKnowledgeEntry,
+  MachineKnowledgeEntryType,
+  MachineKnowledgeProfile,
   Organization,
   PilotChecklist,
   Part,
@@ -480,6 +483,81 @@ export const api = {
       })
     }
   ),
+  listMachineKnowledge: (params?: {
+    q?: string;
+    model?: string;
+    includeInactive?: boolean;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.q) query.set("q", params.q);
+    if (params?.model) query.set("model", params.model);
+    if (params?.includeInactive) query.set("include_inactive", "true");
+    query.set("limit", "100");
+    return request<MachineKnowledgeProfile[]>(`/machine-knowledge?${query.toString()}`);
+  },
+  getMachineKnowledge: (profileId: number) =>
+    request<MachineKnowledgeProfile>(`/machine-knowledge/${profileId}`),
+  createMachineKnowledge: (payload: {
+    model: string;
+    manufacturer?: string;
+    equipment_type?: string;
+    summary?: string;
+  }) => request<MachineKnowledgeProfile>("/machine-knowledge", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  updateMachineKnowledge: (
+    profile: Pick<MachineKnowledgeProfile, "id" | "version">,
+    payload: {
+      model?: string;
+      manufacturer?: string | null;
+      equipment_type?: string | null;
+      summary?: string | null;
+      is_active?: boolean;
+    }
+  ) => request<MachineKnowledgeProfile>(`/machine-knowledge/${profile.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ expected_version: profile.version, ...payload })
+  }),
+  createMachineKnowledgeEntry: (
+    profileId: number,
+    payload: {
+      entry_type: MachineKnowledgeEntryType;
+      title: string;
+      content: string;
+      fault_code?: string;
+      related_part_id?: number;
+      source_work_order_id?: number;
+      media_url?: string;
+      sort_order?: number;
+    }
+  ) => request<MachineKnowledgeProfile>(`/machine-knowledge/${profileId}/entries`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  updateMachineKnowledgeEntry: (
+    entry: Pick<MachineKnowledgeEntry, "id" | "version">,
+    payload: {
+      entry_type?: MachineKnowledgeEntryType;
+      title?: string;
+      content?: string;
+      fault_code?: string | null;
+      related_part_id?: number | null;
+      source_work_order_id?: number | null;
+      media_url?: string | null;
+      sort_order?: number;
+    }
+  ) => request<MachineKnowledgeProfile>(`/machine-knowledge/entries/${entry.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ expected_version: entry.version, ...payload })
+  }),
+  actOnMachineKnowledgeEntry: (
+    entry: Pick<MachineKnowledgeEntry, "id" | "version">,
+    action: "publish" | "archive" | "reopen"
+  ) => request<MachineKnowledgeProfile>(`/machine-knowledge/entries/${entry.id}/actions`, {
+    method: "POST",
+    body: JSON.stringify({ action, expected_version: entry.version })
+  }),
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=100"),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),

@@ -937,6 +937,128 @@ class EquipmentRead(EquipmentCreate):
         from_attributes = True
 
 
+MachineKnowledgeEntryType = Literal[
+    "fault",
+    "repair_step",
+    "tool",
+    "caution",
+    "common_error",
+    "photo",
+    "video",
+    "note",
+]
+
+
+class MachineKnowledgeProfileCreate(BaseModel):
+    model: str = Field(min_length=1, max_length=255)
+    manufacturer: str | None = Field(default=None, max_length=160)
+    equipment_type: str | None = Field(default=None, max_length=160)
+    summary: str | None = Field(default=None, max_length=5000)
+
+
+class MachineKnowledgeProfileUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    model: str | None = Field(default=None, min_length=1, max_length=255)
+    manufacturer: str | None = Field(default=None, max_length=160)
+    equipment_type: str | None = Field(default=None, max_length=160)
+    summary: str | None = Field(default=None, max_length=5000)
+    is_active: bool | None = None
+
+
+class MachineKnowledgeEntryCreate(BaseModel):
+    entry_type: MachineKnowledgeEntryType
+    title: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=1, max_length=20000)
+    fault_code: str | None = Field(default=None, max_length=120)
+    related_part_id: int | None = Field(default=None, ge=1)
+    source_work_order_id: int | None = Field(default=None, ge=1)
+    media_url: str | None = Field(default=None, max_length=1000)
+    sort_order: int = Field(default=0, ge=0, le=10000)
+
+
+class MachineKnowledgeEntryUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    entry_type: MachineKnowledgeEntryType | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    content: str | None = Field(default=None, min_length=1, max_length=20000)
+    fault_code: str | None = Field(default=None, max_length=120)
+    related_part_id: int | None = Field(default=None, ge=1)
+    source_work_order_id: int | None = Field(default=None, ge=1)
+    media_url: str | None = Field(default=None, max_length=1000)
+    sort_order: int | None = Field(default=None, ge=0, le=10000)
+
+
+class MachineKnowledgeEntryAction(BaseModel):
+    action: Literal["publish", "archive", "reopen"]
+    expected_version: int = Field(ge=0)
+
+
+class MachineKnowledgePartRead(BaseModel):
+    id: int
+    part_number: str
+    name: str
+    image_url: str | None = None
+    recognition_source: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    confirmed_count: int | None = Field(default=None, ge=0)
+
+
+class MachineKnowledgeEvidenceRead(BaseModel):
+    completed_work_orders: int = Field(ge=0)
+    labeled_outcomes: int = Field(ge=0)
+    first_time_fix_rate: float | None = Field(default=None, ge=0, le=1)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    latest_completed_at: datetime | None = None
+
+
+class MachineKnowledgeEntryRead(BaseModel):
+    id: int
+    organization_id: int
+    profile_id: int
+    entry_type: MachineKnowledgeEntryType
+    title: str
+    content: str
+    fault_code: str | None = None
+    related_part: MachineKnowledgePartRead | None = None
+    source_work_order_id: int | None = None
+    media_url: str | None = None
+    sort_order: int
+    status: Literal["draft", "published", "archived"]
+    version: int = Field(ge=0)
+    created_by: int | None = None
+    updated_by: int | None = None
+    published_by: int | None = None
+    published_at: datetime | None = None
+    archived_by: int | None = None
+    archived_at: datetime | None = None
+    can_edit: bool = False
+    can_publish: bool = False
+    can_archive: bool = False
+    can_reopen: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class MachineKnowledgeProfileRead(BaseModel):
+    id: int
+    organization_id: int
+    manufacturer: str | None = None
+    model: str
+    equipment_type: str | None = None
+    summary: str | None = None
+    version: int = Field(ge=0)
+    is_active: bool
+    created_by: int | None = None
+    updated_by: int | None = None
+    can_edit: bool = False
+    can_add_entry: bool = False
+    entries: list[MachineKnowledgeEntryRead] = Field(default_factory=list)
+    related_parts: list[MachineKnowledgePartRead] = Field(default_factory=list)
+    evidence: MachineKnowledgeEvidenceRead
+    created_at: datetime
+    updated_at: datetime
+
+
 class ServiceHistoryPart(BaseModel):
     part_number: str
     name: str

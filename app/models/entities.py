@@ -300,6 +300,113 @@ class Equipment(Base):
     organization = relationship("Organization")
 
 
+class MachineKnowledgeProfile(Base):
+    __tablename__ = "machine_knowledge_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "model_key",
+            name="uq_machine_knowledge_org_model",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_machine_knowledge_profile_version_non_negative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    manufacturer: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    model: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    model_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    equipment_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    entries = relationship(
+        "MachineKnowledgeEntry",
+        back_populates="profile",
+        cascade="all, delete-orphan",
+    )
+
+
+class MachineKnowledgeEntry(Base):
+    __tablename__ = "machine_knowledge_entries"
+    __table_args__ = (
+        CheckConstraint(
+            "entry_type IN ('fault', 'repair_step', 'tool', 'caution', "
+            "'common_error', 'photo', 'video', 'note')",
+            name="ck_machine_knowledge_entry_type",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'published', 'archived')",
+            name="ck_machine_knowledge_entry_status",
+        ),
+        CheckConstraint(
+            "sort_order >= 0",
+            name="ck_machine_knowledge_entry_sort_non_negative",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_machine_knowledge_entry_version_non_negative",
+        ),
+        Index(
+            "ix_machine_knowledge_entry_profile_status",
+            "profile_id",
+            "status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    profile_id: Mapped[int] = mapped_column(
+        ForeignKey("machine_knowledge_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    entry_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    fault_code: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    related_part_id: Mapped[int | None] = mapped_column(
+        ForeignKey("parts.id"), nullable=True, index=True
+    )
+    source_work_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_orders.id"), nullable=True, index=True
+    )
+    media_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="draft", nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    published_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    archived_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    profile = relationship("MachineKnowledgeProfile", back_populates="entries")
+    related_part = relationship("Part")
+    source_work_order = relationship("WorkOrder")
+
+
 class CompletionPolicy(Base):
     __tablename__ = "completion_policies"
     __table_args__ = (UniqueConstraint("organization_id", "job_type_key", name="uq_completion_policy_org_job_type"),)

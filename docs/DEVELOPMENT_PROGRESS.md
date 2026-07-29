@@ -331,3 +331,29 @@ Verification:
 - Frontend ESLint, TypeScript, and Next.js production build passed for all 27 static routes.
 - Backend: full suite passed, 83 tests.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-28 - Phase 5 governed machine service knowledge
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added unique tenant-scoped machine profiles with manufacturer, model, equipment type, summary, active state, and optimistic versioning.
+- Added structured common-fault, repair-step, tool, caution, common-error, photo, video, and service-note entries.
+- Added a governed `draft -> published -> archived` lifecycle; only administrators publish, archive, or reopen knowledge.
+- Made published guidance immutable so a curator cannot silently replace instructions already used by field engineers.
+- Allowed managers and administrators to link tenant parts and completed same-model work orders as evidence.
+- Added completed-work-order count, labeled first-time-fix rate, average repair duration, latest completion, and confirmed machine-part summaries.
+- Kept commercial part fields such as cost and supplier out of engineer and warehouse knowledge responses.
+- Added tenant filtering, role enforcement, optimistic concurrency, safe media URL validation, and audit events.
+- Added a responsive knowledge workspace, all-role navigation, manager draft editor, administrator review actions, and direct work-order-to-machine-knowledge links.
+- Added Alembic revision `20260728_0025` and the machine knowledge governance contract.
+
+Verification:
+
+- Machine knowledge publishing, evidence, immutable-content, version, media validation, and tenant-isolation target suite: 3 passed.
+- Backend: full suite passed, 86 tests.
+- Database: fresh base-to-`0025` and empty `0025 -> 0024 -> 0025` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 28 static routes.
+- Dependency security: upgraded Next.js to 16.2.12 and overrode PostCSS 8.5.24 plus Sharp 0.35.3; the production npm audit reports 0 vulnerabilities. Remaining npm audit findings are development-only ESLint/minimatch advisories whose automatic fix requires a separate breaking ESLint 10 migration.
+- Source hygiene: `git diff --check` passed.
