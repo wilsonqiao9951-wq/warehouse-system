@@ -178,6 +178,70 @@ class PartMachineAssociationRead(BaseModel):
         from_attributes = True
 
 
+class PartRecognitionCandidateRead(BaseModel):
+    id: int
+    organization_id: int
+    observation_id: int
+    part_id: int
+    part: PartRead
+    rank: int = Field(gt=0)
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+    status: Literal[
+        "ai_candidate",
+        "employee_confirmed",
+        "admin_confirmed",
+        "usage_verified",
+        "trusted",
+        "rejected",
+    ]
+    version: int = Field(ge=0)
+    employee_confirmed_by: int | None = None
+    employee_confirmed_at: datetime | None = None
+    admin_confirmed_by: int | None = None
+    admin_confirmed_at: datetime | None = None
+    usage_verified_by: int | None = None
+    usage_verified_at: datetime | None = None
+    trusted_at: datetime | None = None
+    rejected_by: int | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
+    can_employee_confirm: bool = False
+    can_admin_confirm: bool = False
+    can_verify_usage: bool = False
+    can_promote_trusted: bool = False
+    can_reject: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class PartRecognitionObservationRead(BaseModel):
+    id: int
+    organization_id: int
+    work_order_id: int | None = None
+    machine_model: str | None = None
+    label_text: str | None = None
+    image_url: str
+    notes: str | None = None
+    created_by: int | None = None
+    created_at: datetime
+    updated_at: datetime
+    candidates: list[PartRecognitionCandidateRead] = Field(default_factory=list)
+
+
+class PartRecognitionCandidateAction(BaseModel):
+    action: Literal[
+        "employee_confirm",
+        "admin_confirm",
+        "verify_usage",
+        "promote_trusted",
+        "reject",
+    ]
+    expected_version: int = Field(ge=0)
+    work_order_id: int | None = Field(default=None, ge=1)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class ImportBatchRead(BaseModel):
     id: int
     organization_id: int

@@ -44,6 +44,8 @@ from app.models import (
     Organization,
     Part,
     PartMachineAssociation,
+    PartRecognitionCandidate,
+    PartRecognitionObservation,
     QCPicture,
     ReturnEquipment,
     StorageLocation,
@@ -96,6 +98,9 @@ from app.schemas import (
     PartCreate,
     PartRead,
     PartMachineAssociationRead,
+    PartRecognitionCandidateAction,
+    PartRecognitionCandidateRead,
+    PartRecognitionObservationRead,
     WorkOrderPartRecommendation,
     InventoryNotificationRead,
     ReplenishmentRequestRead,
@@ -142,6 +147,7 @@ from app.services.inventory import (
     begin_inventory_write,
 )
 from app.services.recommendations import build_part_recommendations
+from app.services.visual_recognition import generate_visual_part_candidates
 
 router = APIRouter()
 
@@ -797,6 +803,446 @@ async def record_part_observation(
 def part_recognition_suggestions(machine_model: str, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
     return db.scalars(select(PartMachineAssociation).where(PartMachineAssociation.machine_model.ilike(f"%{machine_model.strip()}%")).order_by(PartMachineAssociation.confirmed_count.desc())).all()
+
+
+_PART_RECOGNITION_STATUSES = {
+    "ai_candidate",
+    "employee_confirmed",
+    "admin_confirmed",
+    "usage_verified",
+    "trusted",
+    "rejected",
+}
+
+
+def _part_recognition_observation_read(
+    db: Session,
+    actor: Actor,
+    observation: PartRecognitionObservation,
+) -> PartRecognitionObservationRead:
+    work_order = db.get(WorkOrder, observation.work_order_id) if observation.work_order_id else None
+    linked_employee_access = (
+        observation.work_order_id is None
+        or actor.role == UserRole.ADMIN
+        or (
+            actor.role == UserRole.ENGINEER
+            and work_order is not None
+            and work_order.claimed_by_id == actor.user_id
+        )
+    )
+    rows = db.scalars(
+        select(PartRecognitionCandidate)
+        .where(PartRecognitionCandidate.observation_id == observation.id)
+        .order_by(PartRecognitionCandidate.rank, PartRecognitionCandidate.id)
+    ).all()
+    selected_candidate_id = next(
+        (
+            row.id
+            for row in rows
+            if row.status
+            in {
+                "employee_confirmed",
+                "admin_confirmed",
+                "usage_verified",
+                "trusted",
+            }
+        ),
+        None,
+    )
+    candidates: list[PartRecognitionCandidateRead] = []
+    for row in rows:
+        part = db.get(Part, row.part_id)
+        if not part:
+            continue
+        candidates.append(
+            PartRecognitionCandidateRead(
+                id=row.id,
+                organization_id=row.organization_id,
+                observation_id=row.observation_id,
+                part_id=row.part_id,
+                part=PartRead.model_validate(part),
+                rank=row.rank,
+                confidence=row.confidence,
+                reason=row.reason,
+                status=row.status,
+                version=row.version,
+                employee_confirmed_by=row.employee_confirmed_by,
+                employee_confirmed_at=row.employee_confirmed_at,
+                admin_confirmed_by=row.admin_confirmed_by,
+                admin_confirmed_at=row.admin_confirmed_at,
+                usage_verified_by=row.usage_verified_by,
+                usage_verified_at=row.usage_verified_at,
+                trusted_at=row.trusted_at,
+                rejected_by=row.rejected_by,
+                rejected_at=row.rejected_at,
+                rejection_reason=row.rejection_reason,
+                can_employee_confirm=(
+                    row.status == "ai_candidate"
+                    and selected_candidate_id is None
+                    and linked_employee_access
+                    and actor.role
+                    in {
+                        UserRole.ADMIN,
+                        UserRole.MANAGER,
+                        UserRole.WAREHOUSE,
+                        UserRole.ENGINEER,
+                    }
+                ),
+                can_admin_confirm=(
+                    row.status == "employee_confirmed" and actor.role == UserRole.ADMIN
+                ),
+                can_verify_usage=(
+                    row.status == "admin_confirmed" and actor.role == UserRole.ADMIN
+                ),
+                can_promote_trusted=(
+                    row.status == "usage_verified" and actor.role == UserRole.ADMIN
+                ),
+                can_reject=(
+                    row.status not in {"trusted", "rejected"} and actor.role == UserRole.ADMIN
+                ),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+        )
+    return PartRecognitionObservationRead(
+        id=observation.id,
+        organization_id=observation.organization_id,
+        work_order_id=observation.work_order_id,
+        machine_model=observation.machine_model,
+        label_text=observation.label_text,
+        image_url=observation.image_url,
+        notes=observation.notes,
+        created_by=observation.created_by,
+        created_at=observation.created_at,
+        updated_at=observation.updated_at,
+        candidates=candidates,
+    )
+
+
+@router.post(
+    "/parts/recognition/candidates",
+    response_model=PartRecognitionObservationRead,
+)
+async def create_part_recognition_candidates(
+    file: UploadFile = File(...),
+    machine_model: str | None = Form(default=None, max_length=255),
+    label_text: str | None = Form(default=None, max_length=4000),
+    work_order_id: int | None = Form(default=None, ge=1),
+    notes: str | None = Form(default=None, max_length=4000),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    work_order = None
+    if work_order_id is not None:
+        if actor.role == UserRole.ENGINEER:
+            work_order = require_work_order_execution_scope(db, actor, work_order_id)
+        elif actor.role == UserRole.ADMIN:
+            require_work_order_scope(db, actor, work_order_id)
+            work_order = db.get(WorkOrder, work_order_id)
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the claiming engineer or an administrator can attach recognition evidence to a work order",
+            )
+    machine_value = (machine_model or (work_order.machine_type if work_order else None) or "").strip() or None
+    label_value = (label_text or "").strip() or None
+    notes_value = (notes or "").strip() or None
+    if not machine_value and not label_value and work_order is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a machine model, visible label text, or work-order context",
+        )
+
+    data = await file.read(settings.max_image_upload_bytes + 1)
+    if len(data) > settings.max_image_upload_bytes:
+        raise HTTPException(status_code=413, detail="Image exceeds the configured upload limit")
+    extension = _image_extension(data)
+    if not extension:
+        raise HTTPException(status_code=400, detail="Unsupported or invalid image file")
+    target_dir = Path("uploads/part-recognition")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid4().hex}{extension}"
+    (target_dir / filename).write_bytes(data)
+    image_url = f"/uploads/part-recognition/{filename}"
+
+    observation = PartRecognitionObservation(
+        work_order_id=work_order_id,
+        machine_model=machine_value,
+        label_text=label_value,
+        image_url=image_url,
+        notes=notes_value,
+        created_by=actor.user_id,
+    )
+    db.add(observation)
+    db.flush()
+    suggestions = generate_visual_part_candidates(
+        db,
+        machine_model=machine_value,
+        label_text=label_value,
+        work_order=work_order,
+    )
+    for rank, suggestion in enumerate(suggestions, start=1):
+        db.add(
+            PartRecognitionCandidate(
+                observation_id=observation.id,
+                part_id=suggestion.part.id,
+                rank=rank,
+                confidence=suggestion.confidence,
+                reason=suggestion.reason,
+            )
+        )
+    _audit(
+        db,
+        actor,
+        "create_part_recognition_candidates",
+        "part_recognition_observation",
+        observation.id,
+        {
+            "work_order_id": work_order_id,
+            "machine_model": machine_value,
+            "candidate_count": len(suggestions),
+        },
+    )
+    db.commit()
+    db.refresh(observation)
+    return _part_recognition_observation_read(db, actor, observation)
+
+
+@router.get(
+    "/parts/recognition/candidates",
+    response_model=list[PartRecognitionObservationRead],
+)
+def list_part_recognition_candidates(
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    if status is not None and status not in _PART_RECOGNITION_STATUSES:
+        raise HTTPException(status_code=422, detail="Unknown recognition candidate status")
+    query = select(PartRecognitionObservation).order_by(
+        PartRecognitionObservation.id.desc()
+    )
+    if status is not None:
+        matching_observations = select(PartRecognitionCandidate.observation_id).where(
+            PartRecognitionCandidate.status == status
+        )
+        query = query.where(PartRecognitionObservation.id.in_(matching_observations))
+    observations = db.scalars(query.limit(limit)).all()
+    return [
+        _part_recognition_observation_read(db, actor, observation)
+        for observation in observations
+    ]
+
+
+@router.post(
+    "/parts/recognition/candidates/{candidate_id}/actions",
+    response_model=PartRecognitionObservationRead,
+)
+def act_on_part_recognition_candidate(
+    candidate_id: int,
+    payload: PartRecognitionCandidateAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    candidate = db.scalar(
+        select(PartRecognitionCandidate)
+        .where(PartRecognitionCandidate.id == candidate_id)
+        .with_for_update()
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Recognition candidate not found")
+    observation = db.get(PartRecognitionObservation, candidate.observation_id)
+    if not observation:
+        raise HTTPException(status_code=404, detail="Recognition observation not found")
+    if candidate.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Recognition candidate changed; refresh before continuing",
+        )
+    if payload.work_order_id is not None and payload.work_order_id != observation.work_order_id:
+        raise HTTPException(status_code=409, detail="Recognition work-order context does not match")
+
+    previous_status = candidate.status
+    now = datetime.utcnow()
+    if payload.action == "employee_confirm":
+        require_roles(
+            actor,
+            UserRole.ADMIN,
+            UserRole.MANAGER,
+            UserRole.WAREHOUSE,
+            UserRole.ENGINEER,
+        )
+        if candidate.status != "ai_candidate":
+            raise HTTPException(status_code=409, detail="Only an AI candidate can be employee-confirmed")
+        if observation.work_order_id is not None:
+            if actor.role == UserRole.ENGINEER:
+                if payload.work_order_id is None:
+                    raise HTTPException(status_code=422, detail="work_order_id is required")
+                require_work_order_execution_scope(db, actor, observation.work_order_id)
+            elif actor.role != UserRole.ADMIN:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the claiming engineer or an administrator can confirm this work-order candidate",
+                )
+        selected = db.scalar(
+            select(PartRecognitionCandidate).where(
+                PartRecognitionCandidate.observation_id == observation.id,
+                PartRecognitionCandidate.id != candidate.id,
+                PartRecognitionCandidate.status.in_(
+                    {
+                        "employee_confirmed",
+                        "admin_confirmed",
+                        "usage_verified",
+                        "trusted",
+                    }
+                ),
+            )
+        )
+        if selected:
+            raise HTTPException(
+                status_code=409,
+                detail="Another candidate is already selected for this observation",
+            )
+        candidate.status = "employee_confirmed"
+        candidate.employee_confirmed_by = actor.user_id
+        candidate.employee_confirmed_at = now
+
+    elif payload.action == "admin_confirm":
+        require_roles(actor, UserRole.ADMIN)
+        if candidate.status != "employee_confirmed":
+            raise HTTPException(
+                status_code=409,
+                detail="Administrator confirmation requires employee confirmation first",
+            )
+        if (
+            actor.user_id is not None
+            and candidate.employee_confirmed_by == actor.user_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Administrator confirmation must use a different account from employee confirmation",
+            )
+        candidate.status = "admin_confirmed"
+        candidate.admin_confirmed_by = actor.user_id
+        candidate.admin_confirmed_at = now
+
+    elif payload.action == "verify_usage":
+        require_roles(actor, UserRole.ADMIN)
+        if candidate.status != "admin_confirmed":
+            raise HTTPException(
+                status_code=409,
+                detail="Usage verification requires administrator confirmation first",
+            )
+        if observation.work_order_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Usage verification requires a linked work order",
+            )
+        usage = db.scalar(
+            select(WorkOrderPart).where(
+                WorkOrderPart.work_order_id == observation.work_order_id,
+                WorkOrderPart.part_id == candidate.part_id,
+            )
+        )
+        if not usage:
+            raise HTTPException(
+                status_code=409,
+                detail="The linked work order has not recorded use of this part",
+            )
+        candidate.status = "usage_verified"
+        candidate.usage_verified_by = actor.user_id
+        candidate.usage_verified_at = now
+
+    elif payload.action == "promote_trusted":
+        require_roles(actor, UserRole.ADMIN)
+        if candidate.status != "usage_verified":
+            raise HTTPException(
+                status_code=409,
+                detail="Trusted knowledge requires verified work-order usage",
+            )
+        if not observation.machine_model:
+            raise HTTPException(
+                status_code=409,
+                detail="A machine model is required before promotion to trusted knowledge",
+            )
+        association = db.scalar(
+            select(PartMachineAssociation).where(
+                func.lower(PartMachineAssociation.machine_model)
+                == observation.machine_model.casefold(),
+                PartMachineAssociation.part_id == candidate.part_id,
+            )
+        )
+        if association:
+            association.confirmed_count += 1
+            association.last_confirmed_at = now
+            association.photo_url = observation.image_url
+            association.recognition_source = "verified_visual"
+            association.confidence = max(association.confidence, 0.99)
+        else:
+            db.add(
+                PartMachineAssociation(
+                    machine_model=observation.machine_model,
+                    part_id=candidate.part_id,
+                    photo_url=observation.image_url,
+                    recognition_source="verified_visual",
+                    confidence=0.99,
+                    confirmed_count=1,
+                    last_confirmed_at=now,
+                )
+            )
+        candidate.status = "trusted"
+        candidate.trusted_at = now
+
+    else:
+        require_roles(actor, UserRole.ADMIN)
+        if candidate.status in {"trusted", "rejected"}:
+            raise HTTPException(status_code=409, detail="This candidate can no longer be rejected")
+        reason = (payload.reason or "").strip()
+        if len(reason) < 3:
+            raise HTTPException(
+                status_code=422,
+                detail="Rejection reason must be at least 3 characters",
+            )
+        candidate.status = "rejected"
+        candidate.rejected_by = actor.user_id
+        candidate.rejected_at = now
+        candidate.rejection_reason = reason
+
+    candidate.version += 1
+    _audit(
+        db,
+        actor,
+        f"part_recognition_{payload.action}",
+        "part_recognition_candidate",
+        candidate.id,
+        {
+            "observation_id": observation.id,
+            "part_id": candidate.part_id,
+            "work_order_id": observation.work_order_id,
+            "from_status": previous_status,
+            "to_status": candidate.status,
+            "previous_version": payload.expected_version,
+            "new_version": candidate.version,
+        },
+    )
+    db.commit()
+    db.refresh(observation)
+    return _part_recognition_observation_read(db, actor, observation)
 
 
 @router.get("/parts", response_model=list[PartRead])

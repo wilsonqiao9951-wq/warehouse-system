@@ -6,6 +6,8 @@ import {
   Organization,
   PilotChecklist,
   Part,
+  PartRecognitionCandidate,
+  PartRecognitionObservation,
   QCPicture,
   ReturnEquipment,
   StockBalance,
@@ -439,6 +441,45 @@ export const api = {
     return users.filter((u) => u.role === "engineer");
   },
   listParts: () => request<Part[]>("/parts?limit=100"),
+  createPartRecognitionCandidates: (payload: {
+    file: File;
+    machineModel?: string;
+    labelText?: string;
+    workOrderId?: number;
+    notes?: string;
+  }) => {
+    const form = new FormData();
+    form.append("file", payload.file);
+    if (payload.machineModel) form.append("machine_model", payload.machineModel);
+    if (payload.labelText) form.append("label_text", payload.labelText);
+    if (payload.workOrderId) form.append("work_order_id", String(payload.workOrderId));
+    if (payload.notes) form.append("notes", payload.notes);
+    return request<PartRecognitionObservation>("/parts/recognition/candidates", {
+      method: "POST",
+      body: form
+    });
+  },
+  listPartRecognitionCandidates: (status?: string) =>
+    request<PartRecognitionObservation[]>(
+      `/parts/recognition/candidates${status ? `?status=${encodeURIComponent(status)}` : ""}`
+    ),
+  actOnPartRecognitionCandidate: (
+    candidate: Pick<PartRecognitionCandidate, "id" | "version">,
+    action: "employee_confirm" | "admin_confirm" | "verify_usage" | "promote_trusted" | "reject",
+    workOrderId?: number | null,
+    reason?: string
+  ) => request<PartRecognitionObservation>(
+    `/parts/recognition/candidates/${candidate.id}/actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action,
+        expected_version: candidate.version,
+        work_order_id: workOrderId || undefined,
+        reason
+      })
+    }
+  ),
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=100"),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),

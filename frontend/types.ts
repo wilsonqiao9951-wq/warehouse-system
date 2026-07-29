@@ -302,6 +302,58 @@ export interface Part {
   min_stock?: number;
 }
 
+export type PartRecognitionStatus =
+  | "ai_candidate"
+  | "employee_confirmed"
+  | "admin_confirmed"
+  | "usage_verified"
+  | "trusted"
+  | "rejected";
+
+export interface PartRecognitionCandidate {
+  id: number;
+  organization_id: number;
+  observation_id: number;
+  part_id: number;
+  part: Part;
+  rank: number;
+  confidence: number;
+  reason: string;
+  status: PartRecognitionStatus;
+  version: number;
+  employee_confirmed_by?: number | null;
+  employee_confirmed_at?: string | null;
+  admin_confirmed_by?: number | null;
+  admin_confirmed_at?: string | null;
+  usage_verified_by?: number | null;
+  usage_verified_at?: string | null;
+  trusted_at?: string | null;
+  rejected_by?: number | null;
+  rejected_at?: string | null;
+  rejection_reason?: string | null;
+  can_employee_confirm: boolean;
+  can_admin_confirm: boolean;
+  can_verify_usage: boolean;
+  can_promote_trusted: boolean;
+  can_reject: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PartRecognitionObservation {
+  id: number;
+  organization_id: number;
+  work_order_id?: number | null;
+  machine_model?: string | null;
+  label_text?: string | null;
+  image_url: string;
+  notes?: string | null;
+  created_by?: number | null;
+  created_at: string;
+  updated_at: string;
+  candidates: PartRecognitionCandidate[];
+}
+
 export interface WorkOrder {
   id: number;
   customer_id?: number | null;

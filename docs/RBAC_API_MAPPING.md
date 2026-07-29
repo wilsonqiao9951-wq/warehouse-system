@@ -197,3 +197,17 @@ Vehicle warehouses are excluded. Every mutation requires the matching optimistic
 | `POST /inventory/scan` | Allow | Allow | Allow | Own vehicle only |
 
 Location labels are validated against both their database ID and current printed code. A location scan can require an expected warehouse, preventing a same-code shelf in another warehouse from becoming the active context.
+
+## Controlled visual recognition
+
+| Operation | Claim owner engineer | Other engineer | Manager | Admin | Warehouse |
+|---|---:|---:|---:|---:|---:|
+| Create standalone observation | Allow | Allow | Allow | Allow | Allow |
+| Create/confirm work-order-linked observation | Allow, bound device + claim version | Deny | Deny | Allow | Deny |
+| View organization recognition queue | Allow | Allow | Allow | Allow | Allow |
+| Administrator-confirm candidate | Deny | Deny | Deny | Allow | Deny |
+| Verify actual work-order usage | Deny | Deny | Deny | Allow | Deny |
+| Promote to trusted knowledge | Deny | Deny | Deny | Allow | Deny |
+| Reject with reason | Deny | Deny | Deny | Allow | Deny |
+
+Recognition actions never mutate inventory. A candidate can reach trusted knowledge only after server-recorded use of the same part on the linked work order.

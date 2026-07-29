@@ -87,6 +87,8 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 
 - `POST /api/work-orders/{id}/use-part` is the recommended endpoint for work-order part usage.
 - `GET /api/work-orders/{id}/part-recommendations` ranks tenant-scoped completed-job evidence by machine, job type, fault, error code, symptoms, outcome success, repair time, and current stock location. See [`docs/PART_RECOMMENDATION_RANKING.md`](docs/PART_RECOMMENDATION_RANKING.md).
+- `POST /api/parts/recognition/candidates` stores a validated part photo and creates review-only candidates from label, machine, photo-memory, and completed-job signals.
+- `POST /api/parts/recognition/candidates/{id}/actions` enforces employee confirmation, administrator confirmation, actual-usage verification, and trusted promotion without changing inventory. See [`docs/VISUAL_RECOGNITION_WORKFLOW.md`](docs/VISUAL_RECOGNITION_WORKFLOW.md).
 - `POST /api/work-order-parts` is still available for backward compatibility but marked deprecated.
 - `GET /api/inventory/replenishment-requests` returns the role-scoped replenishment queue and server-calculated action capabilities.
 - `POST /api/inventory/replenishment-requests` creates a manual vehicle request with a required business reason and client-generated idempotency key.
@@ -147,7 +149,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260712_0023` (work-order learning data).
+- Current schema head: `20260728_0024` (controlled visual part candidates).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

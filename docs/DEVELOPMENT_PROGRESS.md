@@ -307,3 +307,27 @@ Verification:
 - Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
 - Database: no migration required; schema head remains `20260712_0023`.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-28 - Phase 4 controlled visual part candidates
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added tenant-scoped visual observations and ranked candidate records.
+- Generated candidates from visible label text, machine compatibility, confirmed photo memory, and completed-job recommendations while clearly separating these signals from future OCR/CV providers.
+- Enforced AI candidate, employee confirmation, administrator confirmation, actual work-order usage verification, and trusted-knowledge states.
+- Added reason-required rejection, optimistic versions, actor/timestamp evidence, audit events, independent employee/admin accounts, and one-selected-candidate protection.
+- Restricted work-order-linked evidence to the claiming engineer's registered device and claim generation or an administrator.
+- Ensured recognition review never creates or changes inventory transactions.
+- Promoted only fully verified results into high-confidence machine/part knowledge.
+- Rebuilt the mobile photo-memory page as a candidate capture and review queue with server-driven actions.
+- Added Alembic revision `20260728_0024` and the controlled visual recognition API contract.
+
+Verification:
+
+- Visual candidate workflow, state, inventory-isolation, tenant-isolation, and work-order ownership target suite: 4 passed.
+- Fresh base-to-`0024` and empty `0024 -> 0023 -> 0024` passed on SQLite.
+- Frontend ESLint, TypeScript, and Next.js production build passed for all 27 static routes.
+- Backend: full suite passed, 83 tests.
+- Source hygiene: `git diff --check` passed.

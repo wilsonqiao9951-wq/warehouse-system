@@ -302,3 +302,11 @@ Verification: full backend suite 70 passed, vehicle custody target suite 18 pass
 - Adds indexed fault type, error code, and final outcome plus environment information, first-time-fix, rework, and repair duration.
 - Duration is non-negative and server-calculated from field start through the engineer's completion submission, so manager approval delay does not inflate it.
 - Learning evidence is returned in work-order and equipment service-history APIs and is frozen with the existing completion evidence.
+
+## 20260728_0024 - Controlled visual part candidates
+
+- Adds tenant-scoped photo observations and ranked part candidates.
+- Adds the strict `ai_candidate -> employee_confirmed -> admin_confirmed -> usage_verified -> trusted` lifecycle plus reason-required rejection.
+- Records every actor and timestamp, uses optimistic versions, and requires a real linked work-order part usage before trust promotion.
+- Trusted promotion updates verified machine/part knowledge only; the recognition workflow never writes inventory transactions.
+- Work-order-linked evidence is restricted to the claiming engineer's registered device and claim generation or an administrator.

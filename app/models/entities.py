@@ -144,6 +144,97 @@ class PartMachineAssociation(Base):
     part = relationship("Part")
 
 
+class PartRecognitionObservation(Base):
+    __tablename__ = "part_recognition_observations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), default=1, nullable=False, index=True
+    )
+    work_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_orders.id"), nullable=True, index=True
+    )
+    machine_model: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    label_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    work_order = relationship("WorkOrder")
+    creator = relationship("User")
+    candidates = relationship(
+        "PartRecognitionCandidate",
+        back_populates="observation",
+        cascade="all, delete-orphan",
+    )
+
+
+class PartRecognitionCandidate(Base):
+    __tablename__ = "part_recognition_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "observation_id",
+            "part_id",
+            name="uq_part_recognition_observation_part",
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1",
+            name="ck_part_recognition_confidence",
+        ),
+        CheckConstraint("rank > 0", name="ck_part_recognition_rank_positive"),
+        CheckConstraint(
+            "status IN ('ai_candidate', 'employee_confirmed', 'admin_confirmed', "
+            "'usage_verified', 'trusted', 'rejected')",
+            name="ck_part_recognition_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), default=1, nullable=False, index=True
+    )
+    observation_id: Mapped[int] = mapped_column(
+        ForeignKey("part_recognition_observations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False, index=True)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(30), default="ai_candidate", nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    employee_confirmed_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    employee_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    admin_confirmed_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    admin_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    usage_verified_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    usage_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    trusted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    observation = relationship("PartRecognitionObservation", back_populates="candidates")
+    part = relationship("Part")
+
+
 class Customer(Base):
     __tablename__ = "customers"
     __table_args__ = (UniqueConstraint("organization_id", "account_number", name="uq_customers_org_account"),)
