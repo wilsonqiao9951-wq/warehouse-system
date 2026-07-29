@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from hashlib import sha256
+from ipaddress import ip_address
 import json
 import secrets
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -68,6 +70,11 @@ _PROTECTED_WORK_ORDER_STATUSES = {
     "pending_approval",
     "approval_rejected",
 }
+SUPPORTED_WEBHOOK_EVENTS = {
+    "work_order.status_changed",
+    "work_order.completed",
+    "work_order.part_used",
+}
 
 
 def generate_api_key() -> tuple[str, str, str]:
@@ -111,12 +118,71 @@ def validate_field_mapping(mapping: dict[str, str]) -> dict[str, str]:
     return normalized
 
 
+def validate_webhook_url(value: str | None) -> str | None:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return None
+    parsed = urlsplit(cleaned)
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.fragment
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Webhook URL must be an HTTPS URL without credentials or fragments",
+        )
+    hostname = parsed.hostname.casefold().rstrip(".")
+    if hostname == "localhost" or hostname.endswith(".localhost") or hostname.endswith(".local"):
+        raise HTTPException(
+            status_code=422,
+            detail="Webhook URL cannot target a local host",
+        )
+    try:
+        address = ip_address(hostname)
+    except ValueError:
+        address = None
+    if address and (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        or address.is_unspecified
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Webhook URL cannot target a private or reserved network",
+        )
+    return cleaned
+
+
+def validate_subscribed_events(events: list[str]) -> list[str]:
+    unknown = sorted(set(events) - SUPPORTED_WEBHOOK_EVENTS)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported webhook events: {', '.join(unknown)}",
+        )
+    return sorted(set(events))
+
+
 def integration_mapping(integration: ExternalIntegration) -> dict[str, str]:
     try:
         raw = json.loads(integration.field_mapping_json or "{}")
     except json.JSONDecodeError:
         raw = {}
     return validate_field_mapping(raw if isinstance(raw, dict) else {})
+
+
+def integration_subscribed_events(integration: ExternalIntegration) -> list[str]:
+    try:
+        raw = json.loads(integration.subscribed_events_json or "[]")
+    except json.JSONDecodeError:
+        raw = []
+    return validate_subscribed_events(raw if isinstance(raw, list) else [])
 
 
 def integration_read(integration: ExternalIntegration) -> ExternalIntegrationRead:
@@ -128,6 +194,8 @@ def integration_read(integration: ExternalIntegration) -> ExternalIntegrationRea
         key_prefix=integration.key_prefix,
         masked_api_key=f"opf_{integration.key_prefix}_...",
         field_mapping=integration_mapping(integration),
+        webhook_url=integration.webhook_url,
+        subscribed_events=integration_subscribed_events(integration),
         is_active=integration.is_active,
         version=integration.version,
         last_used_at=integration.last_used_at,
@@ -154,7 +222,10 @@ def sync_log_read(log: ExternalSyncLog) -> ExternalSyncLogRead:
         attempt_count=log.attempt_count,
         work_order_id=log.work_order_id,
         changed_fields=changed_fields if isinstance(changed_fields, list) else [],
+        response_status_code=log.response_status_code,
         error_message=log.error_message,
+        next_retry_at=log.next_retry_at,
+        last_attempt_at=log.last_attempt_at,
         processed_at=log.processed_at,
         created_at=log.created_at,
         updated_at=log.updated_at,

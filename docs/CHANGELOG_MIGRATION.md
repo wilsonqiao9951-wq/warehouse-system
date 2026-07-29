@@ -354,3 +354,15 @@ Verification: service-intelligence target suite 3 passed, full backend suite 92 
 - Adds the idempotent AppSheet/REST inbound work-order endpoint and blocks external updates after claim or evidence freeze.
 
 Verification: external integration target suite 4 passed, full backend suite 96 passed, fresh base-to-`0027` plus `0027 -> 0026 -> 0027` passed on SQLite, and the Next.js 16.2.12 production build generated all 29 static routes.
+
+## 20260729_0028 - External delivery runtime
+
+- Adds HTTPS Webhook destinations and subscribed work-order events to tenant integrations.
+- Extends synchronization logs with a durable outbound payload, pending state, response status, next retry, and last-attempt evidence.
+- Queues status, completion, and part-usage callbacks in the same transaction as the authoritative business change.
+- Signs exact callback bytes with HMAC-SHA256 derived from the integration API key hash.
+- Adds concurrency-safe delivery claiming, no-redirect requests, five-attempt exponential retry, terminal failure, and administrator requeue.
+- Adds external inventory, linked work-order status, and explainable part-recommendation read APIs without cost or supplier disclosure.
+- Rejects non-HTTPS and local/private/reserved Webhook targets.
+
+Verification: external delivery target suite 5 passed, full backend suite 101 passed, fresh base-to-`0028` plus `0028 -> 0027 -> 0028` passed on SQLite, and the Next.js 16.2.12 production build generated all 29 static routes.

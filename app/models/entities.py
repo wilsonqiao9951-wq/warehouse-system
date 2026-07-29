@@ -571,6 +571,10 @@ class ExternalIntegration(Base):
     key_prefix: Mapped[str] = mapped_column(String(24), nullable=False)
     api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     field_mapping_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    webhook_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    subscribed_events_json: Mapped[str] = mapped_column(
+        Text, default="[]", nullable=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -648,18 +652,24 @@ class ExternalSyncLog(Base):
             name="ck_external_sync_direction",
         ),
         CheckConstraint(
-            "status IN ('processing', 'processed', 'failed')",
+            "status IN ('pending', 'processing', 'processed', 'failed')",
             name="ck_external_sync_status",
         ),
         CheckConstraint(
-            "attempt_count > 0",
-            name="ck_external_sync_attempt_positive",
+            "attempt_count >= 0",
+            name="ck_external_sync_attempt_non_negative",
         ),
         Index(
             "ix_external_sync_org_integration_created",
             "organization_id",
             "integration_id",
             "created_at",
+        ),
+        Index(
+            "ix_external_sync_due_delivery",
+            "direction",
+            "status",
+            "next_retry_at",
         ),
     )
 
@@ -685,8 +695,12 @@ class ExternalSyncLog(Base):
         ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True, index=True
     )
     changed_fields_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

@@ -160,6 +160,7 @@ from app.services.inventory import (
     warehouse_is_vehicle,
     begin_inventory_write,
 )
+from app.services.integration_delivery import enqueue_work_order_event
 from app.services.recommendations import build_part_recommendations
 from app.services.service_intelligence import build_service_intelligence
 from app.services.visual_recognition import generate_visual_part_candidates
@@ -2626,10 +2627,26 @@ def update_work_order(
     if customer and equipment and equipment.customer_id not in {None, customer.id}:
         raise HTTPException(status_code=400, detail="Equipment does not belong to the selected customer")
 
+    previous_status = item.status
     for key, value in updates.items():
         setattr(item, key, value)
 
     db.add(item)
+    if item.status != previous_status:
+        status_event = JobStatus(
+            work_order_id=work_order_id,
+            status=item.status,
+            timestamp=datetime.utcnow(),
+        )
+        db.add(status_event)
+        db.flush()
+        enqueue_work_order_event(
+            db,
+            item,
+            "work_order.status_changed",
+            f"work-order:{work_order_id}:job-status:{status_event.id}",
+            {"status": item.status},
+        )
     _audit(db, actor, "update_work_order", "work_order", work_order_id, {"changed_fields": sorted(updates)})
     db.commit()
     db.refresh(item)
@@ -2651,7 +2668,16 @@ def start_work_order(
     item.status = "IN_PROGRESS"
     item.started_at = item.started_at or datetime.utcnow()
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="IN_PROGRESS", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="IN_PROGRESS", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        f"work-order:{work_order_id}:job-status:{status_event.id}",
+        {"status": item.status},
+    )
     _audit(db, actor, "start_job", "work_order", work_order_id)
     db.commit()
     db.refresh(item)
@@ -2678,7 +2704,16 @@ def complete_work_order(
         item.completion_requested_by = actor.user_id
         item.completion_requested_at = datetime.utcnow()
         db.add(item)
-        db.add(JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow()))
+        status_event = JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow())
+        db.add(status_event)
+        db.flush()
+        enqueue_work_order_event(
+            db,
+            item,
+            "work_order.status_changed",
+            f"work-order:{work_order_id}:job-status:{status_event.id}",
+            {"status": item.status},
+        )
         _audit(db, actor, "request_completion", "work_order", work_order_id, {"policy": policy})
         db.commit()
         db.refresh(item)
@@ -2808,7 +2843,31 @@ def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrde
     item.completed_at = finished_at
     item.is_locked = True
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="COMPLETED", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="COMPLETED", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    status_event_key = f"work-order:{work_order_id}:job-status:{status_event.id}"
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        status_event_key,
+        {"status": item.status},
+    )
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.completed",
+        f"{status_event_key}:completed",
+        {
+            "completed_by_id": completed_by_id,
+            "completed_device_id": completed_device_id,
+            "final_outcome": item.final_outcome,
+            "first_time_fix": item.first_time_fix,
+            "is_rework": item.is_rework,
+            "repair_duration_minutes": item.repair_duration_minutes,
+        },
+    )
     _audit(
         db,
         actor,
@@ -2936,7 +2995,16 @@ def request_work_order_completion(
     item.completion_requested_by = actor.user_id
     item.completion_requested_at = datetime.utcnow()
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        f"work-order:{work_order_id}:job-status:{status_event.id}",
+        {"status": item.status},
+    )
     _audit(db, actor, "request_completion", "work_order", work_order_id)
     db.commit()
     db.refresh(item)
@@ -2975,7 +3043,16 @@ def reject_work_order_completion(
     item.status = "APPROVAL_REJECTED"
     item.repair_duration_minutes = None
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="APPROVAL_REJECTED", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="APPROVAL_REJECTED", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        f"work-order:{work_order_id}:job-status:{status_event.id}",
+        {"status": item.status},
+    )
     _audit(db, actor, "reject_completion", "work_order", work_order_id, {"notes": payload.notes})
     db.commit()
     db.refresh(item)
@@ -3039,7 +3116,16 @@ def pause_work_order(
     item.status = "PAUSED"
     item.paused_at = datetime.utcnow()
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="PAUSED", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="PAUSED", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        f"work-order:{work_order_id}:job-status:{status_event.id}",
+        {"status": item.status},
+    )
     _audit(db, actor, "pause_job", "work_order", work_order_id, {"notes": payload.notes})
     db.commit()
     db.refresh(item)
@@ -3338,6 +3424,22 @@ def use_part_for_work_order(
                 part_id=part.id, warehouse_id=payload.warehouse_id, work_order_id=work_order_id,
                 message=f"{part.part_number} 使用后库存为 {warehouse_quantity}，已达到补货阈值 {threshold}。",
             ))
+    source_warehouse = db.get(Warehouse, payload.warehouse_id)
+    enqueue_work_order_event(
+        db,
+        work_order,
+        "work_order.part_used",
+        f"work-order-part:{usage.id}:created",
+        {
+            "usage_id": usage.id,
+            "part_number": part.part_number if part else None,
+            "part_name": part.name if part else None,
+            "quantity": usage.quantity,
+            "unit": part.unit if part else None,
+            "warehouse_code": source_warehouse.code if source_warehouse else None,
+            "used_by_id": usage.user_id,
+        },
+    )
     _audit(db, actor, "use_part", "work_order_part", usage.id, {"work_order_id": work_order_id, "part_id": payload.part_id, "qty": payload.quantity})
     db.commit()
     return usage

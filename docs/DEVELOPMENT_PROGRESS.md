@@ -441,3 +441,31 @@ Verification:
 - Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 29 static routes.
 - Production dependency audit: 0 vulnerabilities.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-29 - Phase 6 external delivery runtime
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added API-key-authenticated external inventory, linked work-order status, and explainable recommendation queries.
+- Kept external responses service-safe by excluding cost, supplier, signature, credential, and device-secret fields.
+- Added administrator-configured HTTPS callback URL and subscriptions for work-order status, completion, and part-usage events.
+- Rejected credential-bearing, non-HTTPS, loopback, link-local, private, reserved, and local callback targets; production delivery also checks resolved addresses and never follows redirects.
+- Queued callbacks in the same database transaction as the authoritative status or part-usage change, so external downtime cannot roll back a field action.
+- Added canonical event payloads, stable idempotency keys, HMAC-SHA256 signatures, delivery headers, response evidence, and safe bounded errors.
+- Added concurrency-safe event claiming plus automatic 1-minute, 5-minute, 30-minute, 2-hour, and 6-hour retry scheduling.
+- Added terminal failure after five attempts and administrator requeue from the integration workspace.
+- Added an application-lifecycle delivery worker with configurable enablement and polling interval.
+- Extended the integration workspace with callback configuration, event subscriptions, direction/event visibility, and retry controls.
+- Preserved organization isolation for inventory, linked work orders, recommendations, event queue records, and delivery administration.
+- Added Alembic revision `20260729_0028`.
+
+Verification:
+
+- External read, safe-response, event queue, signature, retry, unsafe-target, and tenant-isolation target suite: 5 passed.
+- Backend: full suite passed, 101 tests.
+- Database: fresh base-to-`0028` and empty `0028 -> 0027 -> 0028` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 29 static routes.
+- Production dependency audit: 0 vulnerabilities; Python dependency consistency check passed.
+- Source hygiene: `git diff --check` passed.

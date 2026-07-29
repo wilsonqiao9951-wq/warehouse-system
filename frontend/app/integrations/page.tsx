@@ -7,7 +7,8 @@ import {
   ExternalIntegration,
   ExternalIntegrationProvider,
   ExternalIntegrationSecret,
-  ExternalSyncLog
+  ExternalSyncLog,
+  ExternalWebhookEvent
 } from "@/types";
 
 const defaultMapping = {
@@ -24,6 +25,11 @@ const providers: Array<{ value: ExternalIntegrationProvider; label: string }> = 
   { value: "crm", label: "CRM" },
   { value: "erp", label: "ERP" },
   { value: "wms", label: "WMS" }
+];
+const webhookEvents: Array<{ value: ExternalWebhookEvent; label: string }> = [
+  { value: "work_order.status_changed", label: "Work-order status changes" },
+  { value: "work_order.completed", label: "Work-order completion" },
+  { value: "work_order.part_used", label: "Part usage" }
 ];
 
 function parseMapping(value: string): Record<string, string> {
@@ -50,11 +56,15 @@ export default function IntegrationsPage() {
   const [form, setForm] = useState({
     name: "AppSheet field service",
     provider: "appsheet" as ExternalIntegrationProvider,
-    mapping: JSON.stringify(defaultMapping, null, 2)
+    mapping: JSON.stringify(defaultMapping, null, 2),
+    webhook_url: "",
+    subscribed_events: [] as ExternalWebhookEvent[]
   });
   const [editor, setEditor] = useState({
     name: "",
     mapping: "{}",
+    webhook_url: "",
+    subscribed_events: [] as ExternalWebhookEvent[],
     is_active: true
   });
 
@@ -87,6 +97,8 @@ export default function IntegrationsPage() {
     setEditor({
       name: selected.name,
       mapping: JSON.stringify(selected.field_mapping, null, 2),
+      webhook_url: selected.webhook_url || "",
+      subscribed_events: selected.subscribed_events,
       is_active: selected.is_active
     });
     api.listIntegrationSyncLogs(selected.id)
@@ -100,7 +112,9 @@ export default function IntegrationsPage() {
       const result = await api.createIntegration({
         name: form.name.trim(),
         provider: form.provider,
-        field_mapping: parseMapping(form.mapping)
+        field_mapping: parseMapping(form.mapping),
+        webhook_url: form.webhook_url.trim() || null,
+        subscribed_events: form.subscribed_events
       });
       setRevealed(result);
       setNotice("Integration created. Copy the API key now; it will not be shown again.");
@@ -118,6 +132,8 @@ export default function IntegrationsPage() {
         expected_version: selected.version,
         name: editor.name.trim(),
         field_mapping: parseMapping(editor.mapping),
+        webhook_url: editor.webhook_url.trim() || null,
+        subscribed_events: editor.subscribed_events,
         is_active: editor.is_active
       });
       setNotice("Integration settings saved.");
@@ -138,6 +154,35 @@ export default function IntegrationsPage() {
       await refresh(result.integration.id);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to rotate API key.");
+    }
+  };
+
+  const toggleEvent = (
+    target: "form" | "editor",
+    eventName: ExternalWebhookEvent,
+    checked: boolean
+  ) => {
+    const update = (events: ExternalWebhookEvent[]) => (
+      checked
+        ? [...new Set([...events, eventName])]
+        : events.filter((item) => item !== eventName)
+    );
+    if (target === "form") {
+      setForm((previous) => ({ ...previous, subscribed_events: update(previous.subscribed_events) }));
+    } else {
+      setEditor((previous) => ({ ...previous, subscribed_events: update(previous.subscribed_events) }));
+    }
+  };
+
+  const retryDelivery = async (log: ExternalSyncLog) => {
+    if (!selected) return;
+    try {
+      await api.retryIntegrationDelivery(selected.id, log.id);
+      setNotice("Delivery queued for an immediate retry.");
+      setLogs(await api.listIntegrationSyncLogs(selected.id));
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to retry delivery.");
     }
   };
 
@@ -190,6 +235,19 @@ export default function IntegrationsPage() {
               Field mapping (OpenPartsFlow field → external column)
               <textarea value={form.mapping} onChange={(event) => setForm((previous) => ({ ...previous, mapping: event.target.value }))} rows={8} spellCheck={false} />
             </label>
+            <label>
+              Outbound webhook URL (HTTPS)
+              <input value={form.webhook_url} onChange={(event) => setForm((previous) => ({ ...previous, webhook_url: event.target.value }))} placeholder="https://example.com/openpartsflow/events" />
+            </label>
+            <fieldset>
+              <legend>Outbound events</legend>
+              {webhookEvents.map((item) => (
+                <label key={item.value} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <input type="checkbox" checked={form.subscribed_events.includes(item.value)} onChange={(event) => toggleEvent("form", item.value, event.target.checked)} style={{ width: 20, minHeight: 20 }} />
+                  {item.label}
+                </label>
+              ))}
+            </fieldset>
             <button type="submit">Create and reveal API key</button>
           </form>
         </section>
@@ -248,6 +306,19 @@ export default function IntegrationsPage() {
                   Field mapping
                   <textarea value={editor.mapping} onChange={(event) => setEditor((previous) => ({ ...previous, mapping: event.target.value }))} rows={9} spellCheck={false} />
                 </label>
+                <label>
+                  Outbound webhook URL (HTTPS)
+                  <input value={editor.webhook_url} onChange={(event) => setEditor((previous) => ({ ...previous, webhook_url: event.target.value }))} placeholder="https://example.com/openpartsflow/events" />
+                </label>
+                <fieldset>
+                  <legend>Outbound events</legend>
+                  {webhookEvents.map((item) => (
+                    <label key={item.value} style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                      <input type="checkbox" checked={editor.subscribed_events.includes(item.value)} onChange={(event) => toggleEvent("editor", item.value, event.target.checked)} style={{ width: 20, minHeight: 20 }} />
+                      {item.label}
+                    </label>
+                  ))}
+                </fieldset>
                 <label style={{ display: "flex", gap: 10, alignItems: "center", margin: "12px 0" }}>
                   <input type="checkbox" checked={editor.is_active} onChange={(event) => setEditor((previous) => ({ ...previous, is_active: event.target.checked }))} style={{ width: 20, minHeight: 20 }} />
                   API key active
@@ -270,17 +341,23 @@ export default function IntegrationsPage() {
               <div className="table-wrap">
                 <table>
                   <thead>
-                    <tr><th>Time</th><th>External ID</th><th>Status</th><th>Attempts</th><th>Work order</th><th>Changed fields / error</th></tr>
+                    <tr><th>Time</th><th>Direction / event</th><th>External ID</th><th>Status</th><th>Attempts</th><th>Work order</th><th>Changed fields / error</th><th>Action</th></tr>
                   </thead>
                   <tbody>
                     {logs.map((log) => (
                       <tr key={log.id}>
                         <td>{new Date(log.created_at).toLocaleString()}</td>
+                        <td>{log.direction} / {log.event_type}</td>
                         <td>{log.external_id}</td>
                         <td>{log.status}</td>
                         <td>{log.attempt_count}</td>
                         <td>{log.work_order_id || "—"}</td>
                         <td>{log.error_message || log.changed_fields.join(", ") || "No changes"}</td>
+                        <td>
+                          {isAdmin && log.direction === "outbound" && log.status !== "processed" ? (
+                            <button type="button" onClick={() => void retryDelivery(log)}>Retry</button>
+                          ) : "—"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

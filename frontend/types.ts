@@ -38,6 +38,11 @@ export type ExternalIntegrationProvider =
   | "erp"
   | "wms";
 
+export type ExternalWebhookEvent =
+  | "work_order.status_changed"
+  | "work_order.completed"
+  | "work_order.part_used";
+
 export interface ExternalIntegration {
   id: number;
   organization_id: number;
@@ -46,6 +51,8 @@ export interface ExternalIntegration {
   key_prefix: string;
   masked_api_key: string;
   field_mapping: Record<string, string>;
+  webhook_url?: string | null;
+  subscribed_events: ExternalWebhookEvent[];
   is_active: boolean;
   version: number;
   last_used_at?: string | null;
@@ -67,11 +74,14 @@ export interface ExternalSyncLog {
   event_type: string;
   external_id: string;
   idempotency_key: string;
-  status: "processing" | "processed" | "failed";
+  status: "pending" | "processing" | "processed" | "failed";
   attempt_count: number;
   work_order_id?: number | null;
   changed_fields: string[];
+  response_status_code?: number | null;
   error_message?: string | null;
+  next_retry_at?: string | null;
+  last_attempt_at?: string | null;
   processed_at?: string | null;
   created_at: string;
   updated_at: string;

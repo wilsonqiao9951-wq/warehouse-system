@@ -106,11 +106,19 @@ ExternalIntegrationProvider = Literal[
     "wms",
 ]
 
+ExternalWebhookEvent = Literal[
+    "work_order.status_changed",
+    "work_order.completed",
+    "work_order.part_used",
+]
+
 
 class ExternalIntegrationCreate(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     provider: ExternalIntegrationProvider = "appsheet"
     field_mapping: dict[str, str] = Field(default_factory=dict)
+    webhook_url: str | None = Field(default=None, max_length=1000)
+    subscribed_events: list[ExternalWebhookEvent] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -125,6 +133,8 @@ class ExternalIntegrationUpdate(BaseModel):
     expected_version: int = Field(ge=0)
     name: str | None = Field(default=None, min_length=2, max_length=160)
     field_mapping: dict[str, str] | None = None
+    webhook_url: str | None = Field(default=None, max_length=1000)
+    subscribed_events: list[ExternalWebhookEvent] | None = None
     is_active: bool | None = None
 
     @field_validator("name")
@@ -150,6 +160,8 @@ class ExternalIntegrationRead(BaseModel):
     key_prefix: str
     masked_api_key: str
     field_mapping: dict[str, str] = Field(default_factory=dict)
+    webhook_url: str | None = None
+    subscribed_events: list[ExternalWebhookEvent] = Field(default_factory=list)
     is_active: bool
     version: int = Field(ge=0)
     last_used_at: datetime | None = None
@@ -171,11 +183,14 @@ class ExternalSyncLogRead(BaseModel):
     event_type: str
     external_id: str
     idempotency_key: str
-    status: Literal["processing", "processed", "failed"]
-    attempt_count: int = Field(ge=1)
+    status: Literal["pending", "processing", "processed", "failed"]
+    attempt_count: int = Field(ge=0)
     work_order_id: int | None = None
     changed_fields: list[str] = Field(default_factory=list)
+    response_status_code: int | None = None
     error_message: str | None = None
+    next_retry_at: datetime | None = None
+    last_attempt_at: datetime | None = None
     processed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -212,6 +227,44 @@ class ExternalWorkOrderUpsertRead(BaseModel):
     result: Literal["created", "updated"]
     changed_fields: list[str] = Field(default_factory=list)
     replayed: bool = False
+
+
+class ExternalInventoryBalanceRead(BaseModel):
+    part_number: str
+    part_name: str
+    warehouse_code: str
+    warehouse_name: str
+    quantity: int
+    available_quantity: int
+    unit: str
+    is_low_stock: bool
+
+
+class ExternalWorkOrderRead(BaseModel):
+    external_id: str
+    work_order_id: int
+    ticket_number: str
+    status: str
+    assigned_engineer_id: int | None = None
+    claimed: bool
+    started_at: datetime | None = None
+    paused_at: datetime | None = None
+    completed_at: datetime | None = None
+    final_outcome: str | None = None
+    updated_at: datetime
+
+
+class ExternalPartRecommendationRead(BaseModel):
+    part_number: str
+    part_name: str
+    recommended_quantity: int
+    historical_usage_count: int
+    success_rate: float | None = None
+    average_repair_minutes: float | None = None
+    available_quantity: int
+    inventory_location: str | None = None
+    confidence: float
+    reason: str
 
 
 class WarehouseCreate(BaseModel):

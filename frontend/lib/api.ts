@@ -397,6 +397,8 @@ export const api = {
     name: string;
     provider: ExternalIntegrationProvider;
     field_mapping: Record<string, string>;
+    webhook_url?: string | null;
+    subscribed_events?: ExternalIntegration["subscribed_events"];
   }) => request<ExternalIntegrationSecret>("/integrations", {
     method: "POST",
     body: JSON.stringify(payload)
@@ -407,6 +409,8 @@ export const api = {
       expected_version: number;
       name?: string;
       field_mapping?: Record<string, string>;
+      webhook_url?: string | null;
+      subscribed_events?: ExternalIntegration["subscribed_events"];
       is_active?: boolean;
     }
   ) => request<ExternalIntegration>(`/integrations/${integrationId}`, {
@@ -420,6 +424,11 @@ export const api = {
     }),
   listIntegrationSyncLogs: (integrationId: number) =>
     request<ExternalSyncLog[]>(`/integrations/${integrationId}/sync-logs?limit=100`),
+  retryIntegrationDelivery: (integrationId: number, logId: number) =>
+    request<ExternalSyncLog>(`/integrations/${integrationId}/sync-logs/${logId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({})
+    }),
   previewPartsImport: (file: File) => {
     const form = new FormData();
     form.append("file", file);

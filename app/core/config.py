@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     max_audio_upload_bytes: int = 15 * 1024 * 1024
     max_knowledge_media_upload_bytes: int = 50 * 1024 * 1024
     max_import_upload_bytes: int = 5 * 1024 * 1024
+    integration_delivery_enabled: bool = True
+    integration_delivery_poll_seconds: int = 30
     # Comma-separated browser origins for CORS (e.g. Cloudflare Tunnel https://xxx.trycloudflare.com)
     cors_extra_origins: str = ""
 

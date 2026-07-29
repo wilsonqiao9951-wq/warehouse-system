@@ -28,6 +28,7 @@ Management endpoints:
 - `PATCH /api/integrations/{integration_id}`
 - `POST /api/integrations/{integration_id}/rotate-key`
 - `GET /api/integrations/{integration_id}/sync-logs`
+- `POST /api/integrations/{integration_id}/sync-logs/{log_id}/retry`
 
 ## Work-order Webhook
 
@@ -113,10 +114,54 @@ The combination of integration and `X-Idempotency-Key` is unique.
 
 Every event records direction, type, external ID, idempotency key, request hash, status, attempt count, linked work order, changed fields, safe error text, and timestamps. API secrets are never stored in sync logs.
 
+## External read APIs
+
+The same tenant-scoped `X-API-Key` may query:
+
+- `GET /api/external/v1/inventory`
+- `GET /api/external/v1/work-orders/{external_id}`
+- `GET /api/external/v1/work-orders/{external_id}/recommendations`
+
+Inventory accepts optional exact `part_number` and `warehouse_code` filters plus a bounded `limit`. Responses contain operational quantities and locations, but never supplier or cost fields. Work-order lookup is restricted to the external IDs linked to the calling integration. Recommendation responses expose the recommended quantity, historical evidence, current availability, reason, and confidence without financial data.
+
+## Signed outbound Webhooks
+
+An administrator may configure one HTTPS callback URL and subscribe to:
+
+- `work_order.status_changed`
+- `work_order.completed`
+- `work_order.part_used`
+
+Private, loopback, link-local, reserved, credential-bearing, fragment-bearing, non-HTTPS, and local host targets are rejected. Redirects are not followed during delivery.
+
+Every business event is committed to the delivery queue in the same transaction as the work-order status or part usage. External downtime therefore does not roll back or delay the engineer's field action.
+
+Outbound requests include:
+
+```text
+Content-Type: application/json
+X-OpenPartsFlow-Event: work_order.completed
+X-OpenPartsFlow-Delivery: <sync log id>
+X-OpenPartsFlow-Timestamp: <Unix seconds>
+X-OpenPartsFlow-Signature: sha256=<hex HMAC>
+Idempotency-Key: <stable business event key>
+```
+
+To verify a signature:
+
+1. SHA-256 hash the raw OpenPartsFlow API key and use the 32 resulting bytes as the HMAC key.
+2. Concatenate the timestamp, a literal period, and the exact request body bytes.
+3. Calculate HMAC-SHA256 and compare its hex digest to `X-OpenPartsFlow-Signature` with a constant-time comparison.
+4. Reject stale timestamps and remember the delivery or idempotency key.
+
+API key rotation also rotates the signing key. Update the external receiver before generating new events.
+
+Successful HTTP `2xx` responses mark a delivery processed. Network failures and non-`2xx` responses retry after 1 minute, 5 minutes, 30 minutes, 2 hours, and 6 hours. Five failed attempts move the event to `failed`; an administrator can requeue it from the integration workspace. The application worker polls due deliveries every `INTEGRATION_DELIVERY_POLL_SECONDS` while `INTEGRATION_DELIVERY_ENABLED=true`.
+
 ## Tenant isolation
 
 API key authentication establishes the organization before reading links, logs, or work orders. Integrations, source links, sync logs, work orders, and audit entries all use the existing database tenant filter. The same external row ID may be used independently by different organizations.
 
 ## Current boundary
 
-This foundation covers inbound work-order create/update. Outbound status/parts callbacks, inventory/recommendation read APIs, delivery retry scheduling, and signed Webhook destinations remain subsequent Phase 6 batches.
+This batch covers inbound work-order create/update, external inventory/status/recommendation reads, and outbound work-order lifecycle callbacks. Field mapping remains intake-only; external systems cannot mutate engineer ownership, authenticated device claims, completion evidence, part usage, or inventory through these APIs.
