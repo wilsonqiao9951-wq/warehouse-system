@@ -103,7 +103,63 @@ export default function MyJobsPage() {
               </Link>
               <button type="button" onClick={() => void showRecommendations(job.id)}>Parts assist</button>
             </div>
-            {selected === job.id && <div className="notice notice-success" style={{ marginTop: 10 }}><strong>AI parts assist · departure checklist</strong>{recommendations.length === 0 ? <div>No learned recommendation yet. Capture the parts used to train this model.</div> : <div style={{ display: "grid", gap: 8, marginTop: 8 }}>{recommendations.slice(0, 5).map((rec) => { const available = vanStock.filter((row) => row.part_id === rec.part.id).reduce((sum, row) => sum + row.quantity, 0); const shortage = Math.max(0, rec.recommended_quantity - available); return <label key={rec.part.id} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}><input type="checkbox" checked={Boolean(checked[rec.part.id])} onChange={(e) => setChecked((prev) => ({ ...prev, [rec.part.id]: e.target.checked }))} style={{ width: 20, minHeight: 20, marginTop: 2 }} /><span><b>{rec.part.part_number}</b> · carry {rec.recommended_quantity} · van stock {available} {shortage > 0 ? <span className="danger">· request {shortage} from warehouse</span> : <span style={{ color: "#15803d" }}>· ready</span>}<br /><span className="muted">{rec.reason}</span></span></label>; })}</div>}</div>}
+            {selected === job.id && (
+              <div className="notice notice-success" style={{ marginTop: 10 }}>
+                <strong>AI parts assist · ranked departure checklist</strong>
+                {recommendations.length === 0 ? (
+                  <div>No completed similar-job evidence yet. Completed repairs will train this list.</div>
+                ) : (
+                  <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                    {recommendations.slice(0, 5).map((rec) => {
+                      const vanAvailable = vanStock
+                        .filter((row) => row.part_id === rec.part.id)
+                        .reduce((sum, row) => sum + row.quantity, 0);
+                      const shortage = Math.max(0, rec.recommended_quantity - vanAvailable);
+                      return (
+                        <label
+                          key={rec.part.id}
+                          style={{ display: "flex", gap: 8, alignItems: "flex-start" }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(checked[rec.part.id])}
+                            onChange={(event) => setChecked((previous) => ({
+                              ...previous,
+                              [rec.part.id]: event.target.checked,
+                            }))}
+                            style={{ width: 20, minHeight: 20, marginTop: 2 }}
+                          />
+                          <span>
+                            <b>{rec.part.part_number}</b> · carry {rec.recommended_quantity} · confidence{" "}
+                            {Math.round(rec.confidence * 100)}%
+                            <br />
+                            <span className="muted">
+                              Used on {rec.usage_count} similar jobs · success{" "}
+                              {rec.success_rate == null ? "not labeled" : `${Math.round(rec.success_rate * 100)}%`}
+                              {rec.average_repair_minutes == null
+                                ? ""
+                                : ` · avg repair ${Math.round(rec.average_repair_minutes)} min`}
+                            </span>
+                            <br />
+                            <span className="muted">
+                              Van stock {vanAvailable} · all available {rec.available_quantity}
+                              {rec.inventory_location ? ` · ${rec.inventory_location}` : ""}
+                            </span>{" "}
+                            {shortage > 0 ? (
+                              <span className="danger">· request {shortage} from warehouse</span>
+                            ) : (
+                              <span style={{ color: "#15803d" }}>· ready</span>
+                            )}
+                            <br />
+                            <span className="muted">{rec.reason}</span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

@@ -1,6 +1,7 @@
 from datetime import date, datetime
 import base64
 import binascii
+from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
@@ -213,6 +214,9 @@ class WorkOrderCreate(BaseModel):
     contact_phone: str | None = None
     machine_type: str | None = None
     problem_description: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
     assigned_user_id: int | None = None
     engineer_id: int | None = None
     assistant_id: int | None = None
@@ -244,6 +248,12 @@ class WorkOrderUpdate(BaseModel):
     contact_phone: str | None = None
     machine_type: str | None = None
     problem_description: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
+    final_outcome: str | None = Field(default=None, max_length=120)
+    first_time_fix: bool | None = None
+    is_rework: bool | None = None
     assigned_user_id: int | None = None
     engineer_id: int | None = None
     assistant_id: int | None = None
@@ -259,6 +269,10 @@ class WorkOrderRead(WorkOrderCreate):
     completed_at: datetime | None = None
     paused_at: datetime | None = None
     repair_result: str | None = None
+    final_outcome: str | None = None
+    first_time_fix: bool | None = None
+    is_rework: bool = False
+    repair_duration_minutes: int | None = None
     checklist_json: str | None = None
     customer_signature_name: str | None = None
     customer_signature_data: str | None = None
@@ -304,6 +318,10 @@ class InventoryTransactionCreate(BaseModel):
 class InventoryTransactionRead(InventoryTransactionCreate):
     id: int
     organization_id: int
+    replenishment_request_id: int | None = None
+    vehicle_return_request_id: int | None = None
+    inventory_count_line_id: int | None = None
+    movement_stage: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -351,6 +369,13 @@ class WorkOrderPartRecommendation(BaseModel):
     recommended_quantity: int
     usage_count: int
     total_quantity: int
+    success_rate: float | None = Field(default=None, ge=0, le=1)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    available_quantity: int = Field(ge=0)
+    inventory_location: str | None = None
+    inventory_warehouse_id: int | None = None
+    inventory_location_id: int | None = None
+    confidence: float = Field(ge=0, le=1)
     reason: str
 
 
@@ -370,14 +395,67 @@ class InventoryNotificationRead(BaseModel):
 
 class ReplenishmentRequestRead(BaseModel):
     id: int
+    organization_id: int
+    notification_id: int | None = None
+    client_request_id: str | None = None
+    request_reason: str | None = None
     part_id: int
     destination_warehouse_id: int
     source_warehouse_id: int | None = None
     quantity: int
     work_order_id: int | None = None
     requested_by: int | None = None
+    target_user_id: int | None = None
+    version: int = 0
+    requires_reconciliation: bool = False
+    approval_status: str = "pending"
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    rejected_by: int | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
+    picking_by: int | None = None
+    picking_at: datetime | None = None
+    shipped_by: int | None = None
+    shipped_at: datetime | None = None
+    received_by: int | None = None
+    received_device_id: int | None = None
+    received_at: datetime | None = None
+    completed_by: int | None = None
+    completed_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    shipment_transaction_id: int | None = None
+    receipt_transaction_id: int | None = None
     status: str
+    part_number: str | None = None
+    part_name: str | None = None
+    source_warehouse_name: str | None = None
+    destination_warehouse_name: str | None = None
+    target_user_name: str | None = None
+    requested_by_name: str | None = None
+    approved_by_name: str | None = None
+    rejected_by_name: str | None = None
+    picking_by_name: str | None = None
+    shipped_by_name: str | None = None
+    received_by_name: str | None = None
+    received_device_name: str | None = None
+    completed_by_name: str | None = None
+    cancelled_by_name: str | None = None
+    work_order_ticket_number: str | None = None
+    source_available_quantity: int | None = None
+    destination_quantity: int = 0
+    can_start_picking: bool = False
+    can_approve: bool = False
+    can_reject: bool = False
+    can_ship: bool = False
+    can_receive: bool = False
+    can_complete: bool = False
+    can_cancel: bool = False
+    can_reconcile: bool = False
     created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -402,6 +480,34 @@ class InventoryScanRead(BaseModel):
     current_quantity: int | None = None
     projected_quantity: int | None = None
     feedback: str
+
+
+class InventoryLocationScanRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    expected_warehouse_id: int | None = None
+
+
+class InventoryLocationScanRead(BaseModel):
+    scan_type: Literal["warehouse", "location"]
+    label_token: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name: str
+    location_id: int | None = None
+    location_code: str | None = None
+    location_name: str | None = None
+    zone: str | None = None
+
+
+class InventoryLocationLabelRead(BaseModel):
+    label_token: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name: str
+    location_id: int | None = None
+    location_code: str | None = None
+    location_name: str | None = None
+    zone: str | None = None
 
 
 class StockBalance(BaseModel):
@@ -429,6 +535,12 @@ class WorkOrderFlowAction(BaseModel):
     notes: str | None = None
     account_password: str | None = Field(default=None, max_length=128)
     repair_result: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
+    final_outcome: str | None = Field(default=None, max_length=120)
+    first_time_fix: bool | None = None
+    is_rework: bool | None = None
     checklist_json: str | None = None
     customer_signature_name: str | None = None
     customer_signature_data: str | None = None
@@ -549,6 +661,171 @@ class QCPictureRead(QCPictureCreate):
         from_attributes = True
 
 
+class ReplenishmentRequestAction(BaseModel):
+    action: str = Field(pattern=r"^(approve|reject|start_picking|ship|receive|complete|cancel)$")
+    expected_version: int = Field(ge=0)
+    source_warehouse_id: int | None = Field(default=None, ge=1)
+    reason: str | None = Field(default=None, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
+
+
+class ReplenishmentRequestCreate(BaseModel):
+    part_id: int = Field(ge=1)
+    destination_warehouse_id: int = Field(ge=1)
+    quantity: int = Field(ge=1)
+    source_warehouse_id: int | None = Field(default=None, ge=1)
+    reason: str = Field(min_length=3, max_length=500)
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$",
+    )
+
+
+class ReplenishmentRequestReconcile(BaseModel):
+    expected_version: int = Field(ge=0)
+    resolution: str = Field(pattern=r"^(reset_requested|accept_historical)$")
+    reason: str = Field(min_length=3, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
+
+
+class VehicleReturnRequestCreate(BaseModel):
+    part_id: int = Field(ge=1)
+    source_warehouse_id: int = Field(ge=1)
+    destination_warehouse_id: int = Field(ge=1)
+    quantity: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=500)
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$",
+    )
+
+
+class VehicleReturnRequestAction(BaseModel):
+    action: str = Field(pattern=r"^(approve|ship|receive|cancel)$")
+    expected_version: int = Field(ge=0)
+    reason: str | None = Field(default=None, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
+
+
+class VehicleReturnRequestRead(BaseModel):
+    id: int
+    organization_id: int
+    client_request_id: str
+    part_id: int
+    source_warehouse_id: int
+    destination_warehouse_id: int
+    engineer_id: int
+    quantity: int
+    reason: str
+    version: int
+    status: str
+    requested_by: int
+    requested_device_id: int
+    requested_at: datetime
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    shipped_by: int | None = None
+    shipped_device_id: int | None = None
+    shipped_at: datetime | None = None
+    received_by: int | None = None
+    received_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    shipment_transaction_id: int | None = None
+    receipt_transaction_id: int | None = None
+    part_number: str | None = None
+    part_name: str | None = None
+    source_warehouse_name: str | None = None
+    destination_warehouse_name: str | None = None
+    engineer_name: str | None = None
+    requested_by_name: str | None = None
+    requested_device_name: str | None = None
+    approved_by_name: str | None = None
+    shipped_by_name: str | None = None
+    shipped_device_name: str | None = None
+    received_by_name: str | None = None
+    cancelled_by_name: str | None = None
+    source_quantity: int = 0
+    destination_quantity: int = 0
+    can_approve: bool = False
+    can_ship: bool = False
+    can_receive: bool = False
+    can_cancel: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class InventoryCountCreate(BaseModel):
+    client_request_id: str = Field(min_length=8, max_length=100)
+    warehouse_id: int
+    location_id: int | None = None
+    title: str = Field(min_length=3, max_length=160)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class InventoryCountLineUpsert(BaseModel):
+    part_id: int
+    counted_quantity: int = Field(ge=0)
+    notes: str | None = Field(default=None, max_length=1000)
+    expected_version: int = Field(ge=0)
+
+
+class InventoryCountAction(BaseModel):
+    action: Literal["submit", "approve", "cancel"]
+    expected_version: int = Field(ge=0)
+    reason: str | None = Field(default=None, max_length=2000)
+    password: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class InventoryCountLineRead(BaseModel):
+    id: int
+    part_id: int
+    part_number: str | None = None
+    part_name: str | None = None
+    counted_quantity: int
+    submitted_book_quantity: int | None = None
+    approved_book_quantity: int | None = None
+    variance_quantity: int | None = None
+    counted_by: int
+    counted_at: datetime
+    adjustment_transaction_id: int | None = None
+    notes: str | None = None
+
+
+class InventoryCountRead(BaseModel):
+    id: int
+    client_request_id: str
+    warehouse_id: int
+    warehouse_name: str | None = None
+    location_id: int | None = None
+    location_code: str | None = None
+    title: str
+    notes: str | None = None
+    status: str
+    version: int
+    created_by: int
+    submitted_by: int | None = None
+    submitted_at: datetime | None = None
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    lines: list[InventoryCountLineRead] = Field(default_factory=list)
+    can_edit: bool = False
+    can_submit: bool = False
+    can_approve: bool = False
+    can_cancel: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
 class CustomerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     account_number: str | None = Field(default=None, max_length=120)
@@ -609,6 +886,13 @@ class ServiceHistoryItem(BaseModel):
     job_type: str | None = None
     problem_description: str | None = None
     repair_result: str | None = None
+    fault_type: str | None = None
+    error_code: str | None = None
+    environment_info: str | None = None
+    final_outcome: str | None = None
+    first_time_fix: bool | None = None
+    is_rework: bool = False
+    repair_duration_minutes: int | None = None
     status: str
     completed_at: datetime | None = None
     engineer_id: int | None = None

@@ -42,6 +42,33 @@ Claim and completion are online-only operations. Completion requires the current
 
 Managers may approve completion or release a claim with a reason, but cannot edit field records. Administrators may correct unlocked field records with their own audit attribution, but cannot request or directly complete a job as if they were the engineer. The immutable completion attribution remains the claiming engineer and device.
 
+Fault type, error code, environment, final outcome, first-time-fix, and rework evidence follow the same owner-only field-write rules. They freeze while completion approval is pending and become immutable when the work order is locked. Repair duration is calculated by the server from the recorded start and engineer completion-submission times; clients cannot submit it.
+
+## Engineer vehicle-receipt authentication
+
+Vehicle replenishment receipt uses the same registered-device session with an additional password step-up. A successful `receive` action requires all of the following at the same time:
+
+- the authenticated account has the exact engineer role;
+- the replenishment `target_user_id` matches the authenticated user;
+- the Bearer JWT names an active registered device and `X-Device-Token` proves possession of that device secret;
+- the destination van remains assigned to the same engineer;
+- `account_password` verifies against the current account password;
+- the replenishment is still `shipped` at the supplied `expected_version`.
+
+The server records `received_by`, `received_device_id`, and `received_at`, then posts the vehicle `INBOUND` inventory movement in the same transaction. Passwords and raw device secrets are never stored in custody or audit data.
+
+Managers and administrators approve or reject replenishment requests before custody begins; rejection requires a reason. Managers cannot pick, ship, receive, complete, or cancel. Warehouse users cannot approve their own queue and may only begin picking after approval. Warehouse users and administrators perform later custody actions, but cannot receive a delivery assigned to an engineer's van.
+
+Legacy custody rows marked `requires_reconciliation` reject every normal workflow action. Only an administrator may reconcile one through the dedicated endpoint, using a reason, matching version, and current administrator password. A row with linked inventory movements cannot use the historical reconciliation path. The password is verified and discarded exactly like the engineer receipt password.
+
+Manual replenishment creation requires a client-generated `client_request_id` and business reason. The ID provides organization-scoped retry idempotency; it is not an authentication credential and never replaces Bearer/device authorization.
+
+Vehicle returns follow the inverse custody rule. Only the vehicle owner on a registered device may create the request or confirm handover. Handover requires the current account password and records the engineer plus device before vehicle stock is deducted. Warehouse/admin users may approve and receive, but cannot impersonate the engineer handover.
+
+Inventory counts separate observation from authority. Warehouse users may record and submit physical quantities, but only an administrator who re-enters their current password can approve discrepancies and create linked adjustment transactions.
+
+Notification/manual request creation, picking, shipping, receipt, completion, cancellation, and reconciliation are online-only. The frontend never writes these operations or either password step-up to its offline queue.
+
 ## Legacy identity headers
 
 The application is fail-closed in every runnable environment: RBAC is enabled and `X-User-Id` authentication is disabled even when an older local `.env` still contains pilot values. Tests may opt into an in-memory legacy actor only inside the isolated test fixture. The production frontend contains no legacy identity fallback.

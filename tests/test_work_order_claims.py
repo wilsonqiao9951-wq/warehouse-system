@@ -379,7 +379,7 @@ def test_manager_approval_does_not_replace_engineer_completion_attribution(clien
             assert stored.completed_by_id != stored.completion_approved_by
 
 
-def test_part_usage_ignores_spoofed_user_id(client):
+def test_part_usage_ignores_spoofed_user_id(client, seed_inventory_ledger):
     _, engineer_a, engineer_b, warehouse_user = _standard_accounts(client)
     work_order = _create_work_order(client, "CLAIM-PART-1")
     warehouse = client.post(
@@ -396,7 +396,12 @@ def test_part_usage_ignores_spoofed_user_id(client):
             "to_warehouse_id": warehouse["id"],
         },
     )
-    assert inbound.status_code == 200, inbound.text
+    assert inbound.status_code == 409, inbound.text
+    seed_inventory_ledger(
+        part_id=part["id"],
+        quantity=2,
+        to_warehouse_id=warehouse["id"],
+    )
 
     with _enforced_rbac():
         engineer_a_headers, _, _ = _standard_device_headers(client, engineer_a, engineer_b, warehouse_user)
@@ -455,10 +460,24 @@ def test_part_usage_ignores_spoofed_user_id(client):
             assert {usage.user_id for usage in stored} == {engineer_a["id"]}
 
 
-def test_release_invalidates_old_account_device_and_claim_version(client):
+def test_release_invalidates_old_account_device_and_claim_version(client, seed_inventory_ledger):
     _, engineer_a, engineer_b, warehouse = _standard_accounts(client)
     manager = _create_user(client, "claims-release-manager", "manager", MANAGER_PASSWORD)
     work_order = _create_work_order(client, "CLAIM-RELEASE-1")
+    van_a = client.post(
+        "/api/warehouses",
+        json={"name": "Release Engineer A Van", "assigned_user_id": engineer_a["id"]},
+    ).json()
+    van_b = client.post(
+        "/api/warehouses",
+        json={"name": "Release Engineer B Van", "assigned_user_id": engineer_b["id"]},
+    ).json()
+    part = client.post(
+        "/api/parts",
+        json={"part_number": "RELEASE-PART", "name": "Release ownership part"},
+    ).json()
+    seed_inventory_ledger(part_id=part["id"], quantity=2, to_warehouse_id=van_a["id"])
+    seed_inventory_ledger(part_id=part["id"], quantity=2, to_warehouse_id=van_b["id"])
 
     with _enforced_rbac():
         engineer_a_headers, engineer_b_headers, _ = _standard_device_headers(
@@ -497,6 +516,18 @@ def test_release_invalidates_old_account_device_and_claim_version(client):
         )
         assert old_owner_write.status_code in {403, 409}, old_owner_write.text
 
+        stale_part_use = client.post(
+            f"/api/work-orders/{work_order['id']}/use-part",
+            headers=_execution_headers(engineer_a_headers, old_version),
+            json={
+                "work_order_id": work_order["id"],
+                "part_id": part["id"],
+                "warehouse_id": van_a["id"],
+                "quantity": 1,
+            },
+        )
+        assert stale_part_use.status_code in {403, 409}, stale_part_use.text
+
         current_owner_write = client.patch(
             f"/api/work-orders/{work_order['id']}",
             headers=_execution_headers(engineer_b_headers, second_claim.json()["claim_version"]),
@@ -504,3 +535,16 @@ def test_release_invalidates_old_account_device_and_claim_version(client):
         )
         assert current_owner_write.status_code == 200, current_owner_write.text
         assert current_owner_write.json()["problem_description"] == "Authorized edit"
+
+        current_part_use = client.post(
+            f"/api/work-orders/{work_order['id']}/use-part",
+            headers=_execution_headers(engineer_b_headers, second_claim.json()["claim_version"]),
+            json={
+                "work_order_id": work_order["id"],
+                "part_id": part["id"],
+                "warehouse_id": van_b["id"],
+                "quantity": 1,
+            },
+        )
+        assert current_part_use.status_code == 200, current_part_use.text
+        assert current_part_use.json()["user_id"] == engineer_b["id"]

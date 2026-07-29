@@ -142,3 +142,168 @@ Verification:
 - Frontend: Next.js production build passed with type/lint validation and 27 static pages.
 - Source hygiene: `git diff --check` passed and no frontend `X-User-Id`/legacy-auth fallback remains.
 - Dependency review: production audit reports the existing Next.js/PostCSS baseline (1 high, 1 moderate); the available automatic fix is a breaking Next.js 14 → 16 upgrade and remains isolated to a separate framework-migration batch.
+
+## 2026-07-11 — Phase 2 replenishment custody and vehicle receipt
+
+Status: implemented and verified.
+
+Delivered:
+
+- Replaced free-form replenishment status changes with the strict `requested → picking → shipped → received → completed` custody workflow.
+- Restricted picking, shipping, completion, and eligible cancellation to warehouse users and administrators. Managers can create and supervise replenishment requests but cannot perform custody transitions.
+- Restricted vehicle receipt to the exact target engineer using their Bearer-authenticated account, active registered device, and current account password.
+- Validated that a van destination remains active and assigned to the same engineer before receipt.
+- Added `expected_version` optimistic concurrency control; stale actions fail with `409` instead of overwriting newer custody state.
+- Reserved picking quantities when calculating available source stock so other inventory writes cannot consume committed pick stock.
+- Posted a linked source-warehouse `OUTBOUND` transaction at shipment and a linked destination-vehicle `INBOUND` transaction at receipt.
+- Added unique request/stage transaction links so retries cannot create duplicate shipment or receipt inventory movements.
+- Limited cancellation to `requested` and `picking`, required a reason, and resolved the originating low-stock notification so a cancelled task does not create a duplicate request loop.
+- Resolved the source low-stock notification only after a received request is completed.
+- Recorded requester, picker, shipper, receiver, receiving device, completer, canceller, timestamps, transaction IDs, and cancellation reason.
+- Added audit events for request, pick, ship, receive, complete, cancel, and historical reconciliation with prior/new state or resolution, prior/new version, warehouses, target engineer, reason, quantity, and inventory transaction attribution.
+- Added role-scoped replenishment reads, server-calculated `can_start_picking`, `can_ship`, `can_receive`, `can_complete`, `can_cancel`, and `can_reconcile` flags, plus the authenticated `GET /api/inventory/my-van` endpoint.
+- Added idempotent manual first-fill requests for assigned vehicles through `POST /api/inventory/replenishment-requests`, requiring a business reason and organization-scoped `client_request_id`.
+- Added administrator-only reconciliation for flagged legacy rows. It requires current password verification, a reason, matching version, a status-compatible `reset_requested` or `accept_historical` resolution, and no linked inventory movements.
+- Added warehouse stage-grouped custody UI and an engineer My Van receipt workflow with password confirmation and immediate vehicle-balance refresh.
+- Marked alert/manual request creation, custody transitions, and reconciliation as online-only; request payloads, password step-ups, and inventory state changes never enter the offline queue.
+- Restricted engineer work-order parts consumption to that engineer's assigned vehicle warehouse.
+- Classified any warehouse owned by an engineer as a vehicle, automatically normalized new engineer-owned warehouses to `van`, and rejected inactive/non-engineer vehicle ownership.
+- Prevented vehicles from serving as replenishment sources and blocked generic inventory transactions and opening-inventory preview/commit from changing vehicle stock.
+- Restricted the generic inventory endpoint to `INBOUND`, `OUTBOUND`, `TRANSFER`, and `DAMAGE`; `RETURN` and `WORK_ORDER_USED` must use their authenticated business workflows.
+- Enabled SQLite foreign-key enforcement and busy timeout on every connection, and serialized inventory-affecting custody writes with `BEGIN IMMEDIATE`; PostgreSQL continues to use row locks.
+- Added Alembic revision `20260711_0019`; legacy `picking`, `shipped`, `received`, and `completed` rows are flagged `requires_reconciliation`, while the three intermediate labels are also reopened as `requested` because they lacked trustworthy inventory movements or custody evidence.
+- Blocked `0019` downgrade whenever linked replenishment inventory movements exist, preventing custody history from being silently orphaned.
+
+Verification:
+
+- Backend: full suite passed, 66 tests.
+- Replenishment custody/security: 14 targeted tests passed.
+- File-backed SQLite concurrency: 2 targeted contention tests passed.
+- Database: fresh base-to-`0019`, empty `0019 → 0018 → 0019`, and legacy compatibility database-to-`0019` paths passed.
+- Downgrade safety: a linked replenishment movement blocks `0019 → 0018` before any DDL is applied.
+- Frontend: Next.js 16.2.10 production build passed with ESLint 9/type validation and all 26 static routes.
+- Dependency security: npm resolved to 0 known vulnerabilities after the Next.js 16 upgrade and the PostCSS security override.
+- Source hygiene: frontend and documentation `git diff --check` passed.
+
+## 2026-07-12 - Phase 2 vehicle return custody
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added engineer-owned vehicle return requests with organization-scoped idempotency keys.
+- Added warehouse approval and vehicle-stock reservation so work-order usage and competing returns cannot consume committed units.
+- Added exact-engineer, registered-device, current-password handover; administrators and warehouse users cannot impersonate this step.
+- Added linked vehicle `OUTBOUND` and warehouse `INBOUND` transactions with unique stages, copied cost, actor/device timestamps, and audit history.
+- Added warehouse receipt validation, pre-handover cancellation, optimistic versions, tenant isolation, and retry safety.
+- Added My Van request/handover UI and warehouse approval/receipt UI; every mutation is online-only.
+- Added Alembic revision `20260712_0020` and downgrade protection for linked return movements.
+
+Verification:
+
+- Backend: full suite passed, 70 tests.
+- Vehicle/replenishment custody target suite: 18 tests passed.
+- Database: fresh base-to-`0020` and empty `0020 -> 0019 -> 0020` passed on SQLite.
+- Frontend: ESLint and Next.js 16.2.10 production build passed for all 26 static routes.
+- Source hygiene: `git diff --check` passed.
+
+## 2026-07-12 - Phase 2 inventory count custody
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added `draft -> submitted -> approved` warehouse counts with pre-approval cancellation.
+- Added physical entry, submission book snapshots, approval-time recalculation, explicit variances, optimistic versions, tenant isolation, and audit events.
+- Warehouse users count and submit; managers are read-only; administrators re-enter their password before uniquely linked adjustment movements change the ledger.
+- Added the Inventory Counts workspace and made all count mutations online-only.
+- Excluded engineer vehicle warehouses and added Alembic revision `20260712_0021` with downgrade protection.
+
+Verification:
+
+- Inventory count security/workflow tests: 2 passed.
+- Backend: full suite passed, 72 tests.
+- Database: fresh base-to-`0021` and empty `0021 -> 0020 -> 0021` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Source hygiene: `git diff --check` passed.
+
+## 2026-07-12 - Phase 2 warehouse and location scanning
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added warehouse and shelf/bin label tokens using server IDs plus current codes; stale or altered labels are rejected.
+- Added warehouse-first location validation, duplicate-code ambiguity protection, inactive-location checks, and cross-warehouse rejection.
+- Added registered label discovery for QR/barcode generation and audit events for warehouse, location, and part scans.
+- Rebuilt the mobile scan workspace as a required `warehouse -> shelf/bin -> part` flow with camera and manual scanner input.
+- Bound part quantity results to the validated location and prevented engineers from probing inventory outside their assigned vehicle.
+
+Verification:
+
+- Location/scan target suite: 7 passed.
+- Backend: full suite passed, 75 tests; migration head remains `20260712_0021` because this batch adds no database tables.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Source hygiene: `git diff --check` passed.
+
+## 2026-07-12 - Phase 2 replenishment request approval
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added manager/administrator approval or reason-required rejection before warehouse picking.
+- Separated business authorization from physical custody: warehouse users cannot self-approve and pending requests cannot reserve or move stock.
+- Added approver/rejector identity, timestamps, rejection evidence, capability-driven UI, timeline display, optimistic checks, and audit events.
+- Added Alembic revision `20260712_0022`; historical in-progress custody is marked approved and rejected rows downgrade to cancelled without losing the reason.
+
+Verification:
+
+- Replenishment custody/approval suite: 19 passed.
+- Backend: full suite passed, 76 tests.
+- Database: fresh base-to-`0022` and empty `0022 -> 0021 -> 0022` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Source hygiene: `git diff --check` passed.
+
+## 2026-07-12 - Phase 3 work-order learning data foundation
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added fault type, error code, environment information, final outcome, first-time-fix, rework, and server-measured repair duration.
+- Integrated learning capture into the authenticated engineer completion form and immutable completion evidence lifecycle.
+- Added structured learning details to equipment service history and completion audit metadata.
+- Preserved legacy compatibility by allowing historical unknown values while new mobile completions explicitly capture the result fields.
+- Added indexed lookup fields and Alembic revision `20260712_0023` with a non-negative duration constraint.
+
+Verification:
+
+- Work-order flow, completion policy, and ownership target suites: 17 passed.
+- Backend: full suite passed, 77 tests.
+- Database: fresh base-to-`0023` and empty `0023 -> 0022 -> 0023` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Source hygiene: `git diff --check` passed.
+
+## 2026-07-28 - Phase 3 explainable part recommendation ranking
+
+Status: implemented and verified.
+
+Delivered:
+
+- Replaced simple machine/job aggregate ordering with tenant-scoped completed-work-order ranking.
+- Added ordered matching for machine plus job type, machine, fault type, error code, similar symptoms, and job type.
+- Added historical usage count, average recommended quantity, first-time repair success, average repair duration, current available quantity, best warehouse/bin, reason, and confidence.
+- Preferred the assigned engineer's vehicle as the displayed stock location while retaining total organization availability.
+- Deducted active inventory reservations and excluded unlabeled legacy outcomes from the success denominator.
+- Preserved legacy aggregate fallback with visibly lower capped confidence.
+- Added mobile departure-checklist metrics plus ranking, inventory, compatibility, and tenant-isolation tests.
+- No database migration is required; this batch computes from the Phase 3 learning fields introduced by `20260712_0023`.
+
+Verification:
+
+- Recommendation ranking, legacy fallback, and tenant isolation target suite: 3 passed.
+- Backend: full suite passed, 79 tests.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Database: no migration required; schema head remains `20260712_0023`.
+- Source hygiene: `git diff --check` passed.

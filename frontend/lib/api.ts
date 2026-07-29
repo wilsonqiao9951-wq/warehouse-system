@@ -11,8 +11,12 @@ import {
   StockBalance,
   StorageLocation,
   InventoryScanResult,
+  InventoryLocationScan,
+  InventoryLocationLabel,
   InventoryNotification,
   ReplenishmentRequest,
+  VehicleReturnRequest,
+  InventoryCount,
   User,
   Warehouse,
   WorkOrder,
@@ -93,6 +97,10 @@ function workOrderIdForRequest(path: string, init?: RequestInit): number | undef
 function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (method === "GET") return false;
   if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
+  if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
+  if (path === "/inventory/vehicle-returns" || path.startsWith("/inventory/vehicle-returns/")) return true;
+  if (path === "/inventory/counts" || path.startsWith("/inventory/counts/")) return true;
+  if (/^\/inventory\/notifications\/\d+\/create-request(?:\?|$)/.test(path)) return true;
   if (/^\/work-orders\/\d+\/(claim|release|start|pause|complete|request-completion|approve-completion|reject-completion)$/.test(path)) return true;
   return path === "/job-status";
 }
@@ -447,11 +455,85 @@ export const api = {
     request<StorageLocation[]>(`/storage-locations${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   scanInventory: (payload: { barcode?: string; part_number?: string; quantity?: number; warehouse_id?: number; location_id?: number }) =>
     request<InventoryScanResult>("/inventory/scan", { method: "POST", body: JSON.stringify(payload) }),
+  scanInventoryLocation: (payload: { label: string; expected_warehouse_id?: number }) =>
+    request<InventoryLocationScan>("/inventory/location-scan", { method: "POST", body: JSON.stringify(payload) }),
+  listInventoryLocationLabels: (warehouseId: number) =>
+    request<InventoryLocationLabel[]>(`/inventory/location-labels?warehouse_id=${warehouseId}`),
   listInventoryNotifications: () => request<InventoryNotification[]>("/inventory/notifications"),
   updateInventoryNotification: (id: number, status: string) => request<InventoryNotification>(`/inventory/notifications/${id}?status=${status}`, { method: "PATCH" }),
   createReplenishmentRequest: (id: number, quantity: number, sourceWarehouseId?: number) => request<ReplenishmentRequest>(`/inventory/notifications/${id}/create-request?quantity=${quantity}${sourceWarehouseId ? `&source_warehouse_id=${sourceWarehouseId}` : ""}`, { method: "POST" }),
+  createManualReplenishmentRequest: (payload: {
+    part_id: number;
+    destination_warehouse_id: number;
+    quantity: number;
+    source_warehouse_id?: number;
+    reason: string;
+    client_request_id: string;
+  }) => request<ReplenishmentRequest>("/inventory/replenishment-requests", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
   listReplenishmentRequests: () => request<ReplenishmentRequest[]>("/inventory/replenishment-requests"),
-  updateReplenishmentRequest: (id: number, status: string) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}?status=${status}`, { method: "PATCH" }),
+  actOnReplenishmentRequest: (
+    id: number,
+    payload: {
+      action: "approve" | "reject" | "start_picking" | "ship" | "receive" | "complete" | "cancel";
+      expected_version: number;
+      source_warehouse_id?: number;
+      reason?: string;
+      account_password?: string;
+    }
+  ) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}/actions`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  reconcileReplenishmentRequest: (
+    id: number,
+    payload: {
+      expected_version: number;
+      resolution: "reset_requested" | "accept_historical";
+      reason: string;
+      account_password: string;
+    }
+  ) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}/reconcile`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listVehicleReturnDestinations: () => request<Warehouse[]>("/inventory/vehicle-return-destinations"),
+  createVehicleReturnRequest: (payload: {
+    part_id: number;
+    source_warehouse_id: number;
+    destination_warehouse_id: number;
+    quantity: number;
+    reason: string;
+    client_request_id: string;
+  }) => request<VehicleReturnRequest>("/inventory/vehicle-returns", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listVehicleReturnRequests: () => request<VehicleReturnRequest[]>("/inventory/vehicle-returns"),
+  actOnVehicleReturnRequest: (
+    id: number,
+    payload: {
+      action: "approve" | "ship" | "receive" | "cancel";
+      expected_version: number;
+      reason?: string;
+      account_password?: string;
+    }
+  ) => request<VehicleReturnRequest>(`/inventory/vehicle-returns/${id}/actions`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listInventoryCounts: () => request<InventoryCount[]>("/inventory/counts"),
+  createInventoryCount: (payload: {
+    client_request_id: string; warehouse_id: number; location_id?: number; title: string; notes?: string;
+  }) => request<InventoryCount>("/inventory/counts", { method: "POST", body: JSON.stringify(payload) }),
+  recordInventoryCountLine: (id: number, payload: {
+    part_id: number; counted_quantity: number; notes?: string; expected_version: number;
+  }) => request<InventoryCount>(`/inventory/counts/${id}/lines`, { method: "PUT", body: JSON.stringify(payload) }),
+  actOnInventoryCount: (id: number, payload: {
+    action: "submit" | "approve" | "cancel"; expected_version: number; reason?: string; password?: string;
+  }) => request<InventoryCount>(`/inventory/counts/${id}/actions`, { method: "POST", body: JSON.stringify(payload) }),
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),
@@ -459,6 +541,7 @@ export const api = {
     request<LocationStockBalance[]>(`/inventory/location-balances${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   getVanInventory: (userId: number) =>
     request<StockBalance[]>(`/employees/${userId}/van-inventory?limit=500`),
+  getMyVanInventory: () => request<StockBalance[]>("/inventory/my-van?limit=500"),
   usePartOnWorkOrder: (
     workOrderId: number,
     payload: {
@@ -522,6 +605,12 @@ export const api = {
     request<WorkOrder>(`/work-orders/${workOrderId}/pause`, { method: "POST", body: JSON.stringify({ notes }) }),
   completeJob: (workOrderId: number, payload: {
     repair_result?: string;
+    fault_type?: string;
+    error_code?: string;
+    environment_info?: string;
+    final_outcome?: string;
+    first_time_fix?: boolean;
+    is_rework?: boolean;
     checklist_json?: string;
     customer_signature_name?: string;
     customer_signature_data?: string;

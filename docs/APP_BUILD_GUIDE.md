@@ -5,7 +5,7 @@
 ## 架构摘要
 
 - **后端**：FastAPI（默认 `http://127.0.0.1:8000/api`）。
-- **前端**：Next.js 14，`output: "export"` 静态导出，产物目录为 `frontend/out`。
+- **前端**：Next.js 16，`output: "export"` 静态导出，产物目录为 `frontend/out`（Node.js 20.9+）。
 - **PWA**：`public/manifest.json`、`public/sw.js`（仅缓存**同源**静态资源，**不**缓存跨域 API 响应，避免离线误读接口数据）。
 - **Capacitor**：`frontend/capacitor.config.ts` 中 `webDir: "out"`，`appId: com.openpartsflow.app`，`appName: OpenPartsFlow`。
 

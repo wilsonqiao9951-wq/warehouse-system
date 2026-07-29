@@ -8,14 +8,14 @@
     "build": "next build",
     "build:mobile": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "eslint .",
     "cap:sync": "npx cap sync",
     "cap:open:ios": "npx cap open ios",
     "cap:open:android": "npx cap open android"
   },
   "dependencies": {
     "@capacitor/core": "^7.4.3",
-    "next": "^14.2.5",
+    "next": "^16.2.10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -26,8 +26,11 @@
     "@types/node": "^20.14.10",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
-    "eslint": "^8.57.0",
-    "eslint-config-next": "^14.2.35",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.2.10",
     "typescript": "^5.5.3"
+  },
+  "overrides": {
+    "postcss": "8.5.17"
   }
 }

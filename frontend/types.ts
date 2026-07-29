@@ -105,8 +105,173 @@ export interface InventoryNotification {
 }
 
 export interface ReplenishmentRequest {
-  id: number; part_id: number; destination_warehouse_id: number; source_warehouse_id?: number | null;
-  quantity: number; work_order_id?: number | null; requested_by?: number | null; status: string; created_at: string;
+  id: number;
+  organization_id?: number;
+  notification_id?: number | null;
+  client_request_id?: string | null;
+  request_reason?: string | null;
+  part_id: number;
+  part_number?: string | null;
+  part_name?: string | null;
+  destination_warehouse_id: number;
+  destination_warehouse_name?: string | null;
+  source_warehouse_id?: number | null;
+  source_warehouse_name?: string | null;
+  target_user_id?: number | null;
+  target_user_name?: string | null;
+  quantity: number;
+  work_order_id?: number | null;
+  work_order_ticket_number?: string | null;
+  requested_by?: number | null;
+  requested_by_name?: string | null;
+  status: "requested" | "picking" | "shipped" | "received" | "completed" | "cancelled" | "rejected";
+  version: number;
+  requires_reconciliation: boolean;
+  approval_status: "pending" | "approved" | "rejected";
+  approved_by?: number | null;
+  approved_by_name?: string | null;
+  approved_at?: string | null;
+  rejected_by?: number | null;
+  rejected_by_name?: string | null;
+  rejected_at?: string | null;
+  rejection_reason?: string | null;
+  picking_by?: number | null;
+  picking_by_name?: string | null;
+  picking_at?: string | null;
+  shipped_by?: number | null;
+  shipped_by_name?: string | null;
+  shipped_at?: string | null;
+  received_by?: number | null;
+  received_by_name?: string | null;
+  received_at?: string | null;
+  received_device_name?: string | null;
+  completed_by?: number | null;
+  completed_by_name?: string | null;
+  completed_at?: string | null;
+  cancelled_by_name?: string | null;
+  cancelled_by?: number | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  shipment_transaction_id?: number | null;
+  receipt_transaction_id?: number | null;
+  source_available_quantity?: number | null;
+  destination_quantity?: number | null;
+  can_start_picking: boolean;
+  can_approve: boolean;
+  can_reject: boolean;
+  can_ship: boolean;
+  can_receive: boolean;
+  can_complete: boolean;
+  can_cancel: boolean;
+  can_reconcile: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface InventoryLocationScan {
+  scan_type: "warehouse" | "location";
+  label_token: string;
+  warehouse_id: number;
+  warehouse_code: string;
+  warehouse_name: string;
+  location_id?: number | null;
+  location_code?: string | null;
+  location_name?: string | null;
+  zone?: string | null;
+}
+
+export interface InventoryLocationLabel {
+  label_token: string;
+  warehouse_id: number;
+  warehouse_code: string;
+  warehouse_name: string;
+  location_id?: number | null;
+  location_code?: string | null;
+  location_name?: string | null;
+  zone?: string | null;
+}
+
+export interface VehicleReturnRequest {
+  id: number;
+  organization_id: number;
+  client_request_id: string;
+  part_id: number;
+  part_number?: string | null;
+  part_name?: string | null;
+  source_warehouse_id: number;
+  source_warehouse_name?: string | null;
+  destination_warehouse_id: number;
+  destination_warehouse_name?: string | null;
+  engineer_id: number;
+  engineer_name?: string | null;
+  quantity: number;
+  reason: string;
+  version: number;
+  status: "requested" | "approved" | "shipped" | "received" | "cancelled";
+  requested_by: number;
+  requested_by_name?: string | null;
+  requested_device_id: number;
+  requested_device_name?: string | null;
+  requested_at: string;
+  approved_by?: number | null;
+  approved_by_name?: string | null;
+  approved_at?: string | null;
+  shipped_by?: number | null;
+  shipped_by_name?: string | null;
+  shipped_device_id?: number | null;
+  shipped_device_name?: string | null;
+  shipped_at?: string | null;
+  received_by?: number | null;
+  received_by_name?: string | null;
+  received_at?: string | null;
+  cancelled_by?: number | null;
+  cancelled_by_name?: string | null;
+  cancelled_at?: string | null;
+  cancellation_reason?: string | null;
+  shipment_transaction_id?: number | null;
+  receipt_transaction_id?: number | null;
+  source_quantity: number;
+  destination_quantity: number;
+  can_approve: boolean;
+  can_ship: boolean;
+  can_receive: boolean;
+  can_cancel: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryCountLine {
+  id: number;
+  part_id: number;
+  part_number?: string | null;
+  part_name?: string | null;
+  counted_quantity: number;
+  submitted_book_quantity?: number | null;
+  approved_book_quantity?: number | null;
+  variance_quantity?: number | null;
+  adjustment_transaction_id?: number | null;
+  notes?: string | null;
+}
+
+export interface InventoryCount {
+  id: number;
+  client_request_id: string;
+  warehouse_id: number;
+  warehouse_name?: string | null;
+  location_id?: number | null;
+  location_code?: string | null;
+  title: string;
+  notes?: string | null;
+  status: "draft" | "submitted" | "approved" | "cancelled";
+  version: number;
+  lines: InventoryCountLine[];
+  can_edit: boolean;
+  can_submit: boolean;
+  can_approve: boolean;
+  can_cancel: boolean;
+  cancellation_reason?: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface LocationStockBalance {
@@ -158,6 +323,13 @@ export interface WorkOrder {
   completed_at?: string | null;
   paused_at?: string | null;
   repair_result?: string | null;
+  fault_type?: string | null;
+  error_code?: string | null;
+  environment_info?: string | null;
+  final_outcome?: string | null;
+  first_time_fix?: boolean | null;
+  is_rework: boolean;
+  repair_duration_minutes?: number | null;
   checklist_json?: string | null;
   customer_signature_name?: string | null;
   customer_signature_data?: string | null;
@@ -215,6 +387,9 @@ export interface Equipment {
 export interface ServiceHistoryItem {
   id: number; ticket_number: string; schedule_date?: string | null; job_type?: string | null;
   problem_description?: string | null; repair_result?: string | null; status: string;
+  fault_type?: string | null; error_code?: string | null; environment_info?: string | null;
+  final_outcome?: string | null; first_time_fix?: boolean | null; is_rework: boolean;
+  repair_duration_minutes?: number | null;
   completed_at?: string | null; engineer_id?: number | null;
   parts_used: Array<{ part_number: string; name: string; quantity: number }>;
 }
@@ -229,6 +404,13 @@ export interface WorkOrderPartRecommendation {
   recommended_quantity: number;
   usage_count: number;
   total_quantity: number;
+  success_rate?: number | null;
+  average_repair_minutes?: number | null;
+  available_quantity: number;
+  inventory_location?: string | null;
+  inventory_warehouse_id?: number | null;
+  inventory_location_id?: number | null;
+  confidence: number;
   reason: string;
 }
 
