@@ -86,6 +86,7 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 ## API Migration Notes
 
 - `POST /api/work-orders/{id}/use-part` is the recommended endpoint for work-order part usage.
+- `GET /api/work-orders/{id}/part-recommendations` ranks tenant-scoped completed-job evidence by machine, job type, fault, error code, symptoms, outcome success, repair time, and current stock location. See [`docs/PART_RECOMMENDATION_RANKING.md`](docs/PART_RECOMMENDATION_RANKING.md).
 - `POST /api/work-order-parts` is still available for backward compatibility but marked deprecated.
 - `GET /api/inventory/replenishment-requests` returns the role-scoped replenishment queue and server-calculated action capabilities.
 - `POST /api/inventory/replenishment-requests` creates a manual vehicle request with a required business reason and client-generated idempotency key.

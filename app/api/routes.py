@@ -44,7 +44,6 @@ from app.models import (
     Organization,
     Part,
     PartMachineAssociation,
-    WorkOrderPartMemory,
     QCPicture,
     ReturnEquipment,
     StorageLocation,
@@ -142,6 +141,7 @@ from app.services.inventory import (
     warehouse_is_vehicle,
     begin_inventory_write,
 )
+from app.services.recommendations import build_part_recommendations
 
 router = APIRouter()
 
@@ -3104,26 +3104,7 @@ def work_order_part_recommendations(
     work_order = db.get(WorkOrder, work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
-    memories = db.scalars(select(WorkOrderPartMemory).where(
-        or_(
-            and_(WorkOrderPartMemory.machine_type == work_order.machine_type, WorkOrderPartMemory.job_type == work_order.job_type),
-            WorkOrderPartMemory.machine_type == work_order.machine_type,
-            WorkOrderPartMemory.job_type == work_order.job_type,
-        )
-    ).order_by(WorkOrderPartMemory.usage_count.desc(), WorkOrderPartMemory.total_quantity.desc()).limit(20)).all()
-    recommendations = []
-    for memory in memories:
-        part = db.get(Part, memory.part_id)
-        if part:
-            average = max(1, round(memory.total_quantity / memory.usage_count))
-            exact = memory.machine_type == work_order.machine_type and memory.job_type == work_order.job_type
-            basis = "相同机型和工单类型" if exact else ("相同机型" if memory.machine_type == work_order.machine_type else "相同工单类型")
-            recommendations.append(WorkOrderPartRecommendation(
-                part=PartRead.model_validate(part), recommended_quantity=average,
-                usage_count=memory.usage_count, total_quantity=memory.total_quantity,
-                reason=f"基于{basis}：历史上 {memory.usage_count} 个类似工单使用过，平均每单 {average} 件。",
-            ))
-    return recommendations
+    return build_part_recommendations(db, work_order)
 
 
 @router.get("/work-order-parts", response_model=list[WorkOrderPartRead])

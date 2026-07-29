@@ -369,6 +369,13 @@ class WorkOrderPartRecommendation(BaseModel):
     recommended_quantity: int
     usage_count: int
     total_quantity: int
+    success_rate: float | None = Field(default=None, ge=0, le=1)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    available_quantity: int = Field(ge=0)
+    inventory_location: str | None = None
+    inventory_warehouse_id: int | None = None
+    inventory_location_id: int | None = None
+    confidence: float = Field(ge=0, le=1)
     reason: str
 
 

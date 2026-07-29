@@ -284,3 +284,26 @@ Verification:
 - Database: fresh base-to-`0023` and empty `0023 -> 0022 -> 0023` passed on SQLite.
 - Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-28 - Phase 3 explainable part recommendation ranking
+
+Status: implemented and verified.
+
+Delivered:
+
+- Replaced simple machine/job aggregate ordering with tenant-scoped completed-work-order ranking.
+- Added ordered matching for machine plus job type, machine, fault type, error code, similar symptoms, and job type.
+- Added historical usage count, average recommended quantity, first-time repair success, average repair duration, current available quantity, best warehouse/bin, reason, and confidence.
+- Preferred the assigned engineer's vehicle as the displayed stock location while retaining total organization availability.
+- Deducted active inventory reservations and excluded unlabeled legacy outcomes from the success denominator.
+- Preserved legacy aggregate fallback with visibly lower capped confidence.
+- Added mobile departure-checklist metrics plus ranking, inventory, compatibility, and tenant-isolation tests.
+- No database migration is required; this batch computes from the Phase 3 learning fields introduced by `20260712_0023`.
+
+Verification:
+
+- Recommendation ranking, legacy fallback, and tenant isolation target suite: 3 passed.
+- Backend: full suite passed, 79 tests.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.10 production build passed for all 27 static routes.
+- Database: no migration required; schema head remains `20260712_0023`.
+- Source hygiene: `git diff --check` passed.

@@ -404,6 +404,13 @@ export interface WorkOrderPartRecommendation {
   recommended_quantity: number;
   usage_count: number;
   total_quantity: number;
+  success_rate?: number | null;
+  average_repair_minutes?: number | null;
+  available_quantity: number;
+  inventory_location?: string | null;
+  inventory_warehouse_id?: number | null;
+  inventory_location_id?: number | null;
+  confidence: number;
   reason: string;
 }
 
