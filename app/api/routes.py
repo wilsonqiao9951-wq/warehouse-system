@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
 from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -92,6 +92,8 @@ from app.schemas import (
     MachineKnowledgeEntryCreate,
     MachineKnowledgeEntryRead,
     MachineKnowledgeEntryUpdate,
+    MachineKnowledgeDraftGenerate,
+    MachineKnowledgeDraftGenerationRead,
     MachineKnowledgeEvidenceRead,
     MachineKnowledgePartRead,
     MachineKnowledgeProfileCreate,
@@ -544,6 +546,36 @@ def _image_extension(data: bytes) -> str | None:
     return None
 
 
+def _knowledge_media_file_type(data: bytes) -> tuple[str, str, str] | None:
+    image_extension = _image_extension(data)
+    if image_extension:
+        image_mime_types = {
+            ".jpg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".heic": "image/heic",
+        }
+        return "photo", image_extension, image_mime_types[image_extension]
+    if data.startswith(b"\x1aE\xdf\xa3"):
+        return "video", ".webm", "video/webm"
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        brand = data[8:12]
+        if brand == b"qt  ":
+            return "video", ".mov", "video/quicktime"
+        if brand in {
+            b"isom",
+            b"iso2",
+            b"mp41",
+            b"mp42",
+            b"avc1",
+            b"M4V ",
+            b"MSNV",
+        }:
+            return "video", ".mp4", "video/mp4"
+    return None
+
+
 @router.post("/uploads/work-order-parts")
 async def upload_work_order_part_photo(
     work_order_id: int = Form(..., ge=1),
@@ -796,6 +828,11 @@ def _knowledge_entry_read(
 ) -> MachineKnowledgeEntryRead:
     curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
     related_part = db.get(Part, entry.related_part_id) if entry.related_part_id else None
+    alternative_for_part = (
+        db.get(Part, entry.alternative_for_part_id)
+        if entry.alternative_for_part_id
+        else None
+    )
     return MachineKnowledgeEntryRead(
         id=entry.id,
         organization_id=entry.organization_id,
@@ -805,8 +842,17 @@ def _knowledge_entry_read(
         content=entry.content,
         fault_code=entry.fault_code,
         related_part=_knowledge_part_read(related_part) if related_part else None,
+        related_part_role=entry.related_part_role,
+        alternative_for_part=(
+            _knowledge_part_read(alternative_for_part)
+            if alternative_for_part
+            else None
+        ),
+        installation_location=entry.installation_location,
         source_work_order_id=entry.source_work_order_id,
         media_url=entry.media_url,
+        media_mime_type=entry.media_mime_type,
+        media_size_bytes=entry.media_size_bytes,
         sort_order=entry.sort_order,
         status=entry.status,
         version=entry.version,
@@ -918,11 +964,39 @@ def _validate_machine_knowledge_links(
     *,
     related_part_id: int | None,
     source_work_order_id: int | None,
+    related_part_role: str | None = None,
+    alternative_for_part_id: int | None = None,
 ) -> None:
     if related_part_id is not None and not db.get(Part, related_part_id):
         raise HTTPException(
             status_code=400,
             detail="related_part_id is not available in this organization",
+        )
+    if related_part_role is not None and related_part_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="A related part is required when a part role is selected",
+        )
+    if alternative_for_part_id is not None:
+        if not db.get(Part, alternative_for_part_id):
+            raise HTTPException(
+                status_code=400,
+                detail="alternative_for_part_id is not available in this organization",
+            )
+        if related_part_role != "alternative":
+            raise HTTPException(
+                status_code=422,
+                detail="alternative_for_part_id is valid only for an alternative part",
+            )
+        if alternative_for_part_id == related_part_id:
+            raise HTTPException(
+                status_code=422,
+                detail="An alternative part must differ from the primary part",
+            )
+    if related_part_role == "alternative" and alternative_for_part_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="An alternative part must identify the primary part it replaces",
         )
     if source_work_order_id is None:
         return
@@ -1147,6 +1221,8 @@ def create_machine_knowledge_entry(
         profile,
         related_part_id=payload.related_part_id,
         source_work_order_id=payload.source_work_order_id,
+        related_part_role=payload.related_part_role,
+        alternative_for_part_id=payload.alternative_for_part_id,
     )
     media_url = _knowledge_media_url(payload.media_url)
     if payload.entry_type in {"photo", "video"} and not media_url:
@@ -1161,6 +1237,9 @@ def create_machine_knowledge_entry(
         content=payload.content.strip(),
         fault_code=_knowledge_optional_text(payload.fault_code),
         related_part_id=payload.related_part_id,
+        related_part_role=payload.related_part_role,
+        alternative_for_part_id=payload.alternative_for_part_id,
+        installation_location=_knowledge_optional_text(payload.installation_location),
         source_work_order_id=payload.source_work_order_id,
         media_url=media_url,
         sort_order=payload.sort_order,
@@ -1184,6 +1263,320 @@ def create_machine_knowledge_entry(
     db.commit()
     db.refresh(profile)
     return _machine_knowledge_profile_read(db, actor, profile)
+
+
+def _work_order_knowledge_specs(
+    db: Session,
+    work_order: WorkOrder,
+) -> list[dict]:
+    specs: list[dict] = []
+    fault_lines = []
+    if work_order.fault_type:
+        fault_lines.append(f"Fault type: {work_order.fault_type.strip()}")
+    if work_order.error_code:
+        fault_lines.append(f"Error code: {work_order.error_code.strip()}")
+    if work_order.problem_description:
+        fault_lines.append(
+            f"Observed problem: {work_order.problem_description.strip()}"
+        )
+    if work_order.environment_info:
+        fault_lines.append(
+            f"Field conditions: {work_order.environment_info.strip()}"
+        )
+    if fault_lines:
+        fault_name = (
+            _knowledge_optional_text(work_order.fault_type)
+            or _knowledge_optional_text(work_order.error_code)
+            or _knowledge_optional_text(work_order.job_type)
+            or work_order.ticket_number
+        )
+        specs.append(
+            {
+                "origin_key": f"work_order:{work_order.id}:fault",
+                "entry_type": "fault",
+                "title": f"Field fault: {fault_name}"[:255],
+                "content": "\n".join(fault_lines)[:20000],
+                "fault_code": _knowledge_optional_text(work_order.error_code),
+                "sort_order": 100,
+            }
+        )
+
+    if work_order.repair_result:
+        repair_lines = [
+            f"Repair performed and verified: {work_order.repair_result.strip()}"
+        ]
+        if work_order.final_outcome:
+            repair_lines.append(f"Final outcome: {work_order.final_outcome.strip()}")
+        if work_order.repair_duration_minutes is not None:
+            repair_lines.append(
+                f"Recorded field duration: {work_order.repair_duration_minutes} minutes"
+            )
+        repair_lines.append(
+            "Review this draft and convert the result into reusable ordered steps before publishing."
+        )
+        specs.append(
+            {
+                "origin_key": f"work_order:{work_order.id}:repair",
+                "entry_type": "repair_step",
+                "title": f"Verified repair from {work_order.ticket_number}"[:255],
+                "content": "\n".join(repair_lines)[:20000],
+                "sort_order": 200,
+            }
+        )
+
+    part_rows = db.execute(
+        select(WorkOrderPart, Part)
+        .join(Part, Part.id == WorkOrderPart.part_id)
+        .where(WorkOrderPart.work_order_id == work_order.id)
+        .order_by(Part.part_number, WorkOrderPart.id)
+    ).all()
+    part_totals: dict[int, dict] = {}
+    for usage, part in part_rows:
+        aggregate = part_totals.setdefault(
+            part.id,
+            {"part": part, "quantity": 0},
+        )
+        aggregate["quantity"] += usage.quantity
+
+    successful_repair = bool(
+        work_order.first_time_fix is True
+        and not work_order.is_rework
+        and (work_order.final_outcome or "").strip().casefold()
+        in {"repaired", "fixed", "resolved", "success", "successful"}
+    )
+    for position, aggregate in enumerate(part_totals.values(), start=1):
+        part = aggregate["part"]
+        quantity = aggregate["quantity"]
+        part_role = "recommended" if successful_repair else "reference"
+        outcome_note = (
+            "This part came from a labeled successful first-time repair."
+            if successful_repair
+            else "This usage is reference evidence only until a successful outcome is confirmed."
+        )
+        specs.append(
+            {
+                "origin_key": f"work_order:{work_order.id}:part:{part.id}",
+                "entry_type": "note",
+                "title": f"{part.part_number} used on {work_order.ticket_number}"[:255],
+                "content": (
+                    f"Completed work order recorded {quantity} × {part.name}. "
+                    f"{outcome_note}"
+                )[:20000],
+                "related_part_id": part.id,
+                "related_part_role": part_role,
+                "sort_order": 300 + position,
+            }
+        )
+    return specs
+
+
+@router.post(
+    "/machine-knowledge/{profile_id}/drafts/from-work-order",
+    response_model=MachineKnowledgeDraftGenerationRead,
+)
+def generate_machine_knowledge_drafts(
+    profile_id: int,
+    payload: MachineKnowledgeDraftGenerate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = db.scalar(
+        select(MachineKnowledgeProfile)
+        .where(MachineKnowledgeProfile.id == profile_id)
+        .with_for_update()
+    )
+    if not profile or not profile.is_active:
+        raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
+    _validate_machine_knowledge_links(
+        db,
+        profile,
+        related_part_id=None,
+        source_work_order_id=payload.work_order_id,
+    )
+    work_order = db.get(WorkOrder, payload.work_order_id)
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Completed work order not found")
+    specs = _work_order_knowledge_specs(db, work_order)
+    if not specs:
+        raise HTTPException(
+            status_code=409,
+            detail="Completed work order has no reusable fault, repair, or part evidence",
+        )
+    origin_keys = [spec["origin_key"] for spec in specs]
+    existing_keys = set(
+        db.scalars(
+            select(MachineKnowledgeEntry.origin_key).where(
+                MachineKnowledgeEntry.profile_id == profile.id,
+                MachineKnowledgeEntry.origin_key.in_(origin_keys),
+            )
+        ).all()
+    )
+    created_count = 0
+    for spec in specs:
+        if spec["origin_key"] in existing_keys:
+            continue
+        db.add(
+            MachineKnowledgeEntry(
+                profile_id=profile.id,
+                source_work_order_id=work_order.id,
+                created_by=actor.user_id,
+                updated_by=actor.user_id,
+                **spec,
+            )
+        )
+        created_count += 1
+    skipped_count = len(specs) - created_count
+    _audit(
+        db,
+        actor,
+        "generate_machine_knowledge_drafts",
+        "machine_knowledge_profile",
+        profile.id,
+        {
+            "work_order_id": work_order.id,
+            "created_entries": created_count,
+            "skipped_entries": skipped_count,
+            "origin_keys": origin_keys,
+        },
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge drafts changed concurrently; refresh and retry",
+        )
+    db.refresh(profile)
+    return MachineKnowledgeDraftGenerationRead(
+        profile=_machine_knowledge_profile_read(db, actor, profile),
+        created_entries=created_count,
+        skipped_entries=skipped_count,
+    )
+
+
+@router.post(
+    "/machine-knowledge/{profile_id}/media",
+    response_model=MachineKnowledgeProfileRead,
+)
+async def upload_machine_knowledge_media(
+    profile_id: int,
+    title: str = Form(..., min_length=1, max_length=255),
+    description: str = Form(..., min_length=1, max_length=20000),
+    file: UploadFile = File(...),
+    source_work_order_id: int | None = Form(default=None, ge=1),
+    sort_order: int = Form(default=0, ge=0, le=10000),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = db.get(MachineKnowledgeProfile, profile_id)
+    if not profile or not profile.is_active:
+        raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
+    _validate_machine_knowledge_links(
+        db,
+        profile,
+        related_part_id=None,
+        source_work_order_id=source_work_order_id,
+    )
+    data = await file.read(settings.max_knowledge_media_upload_bytes + 1)
+    if len(data) > settings.max_knowledge_media_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail="Knowledge media exceeds the configured upload limit",
+        )
+    file_type = _knowledge_media_file_type(data)
+    if not file_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported or invalid knowledge photo/video",
+        )
+    entry_type, extension, mime_type = file_type
+    if entry_type == "photo" and len(data) > settings.max_image_upload_bytes:
+        raise HTTPException(status_code=413, detail="Image exceeds the configured upload limit")
+
+    filename = f"{uuid4().hex}{extension}"
+    storage_key = f"machine-knowledge/{actor.organization_id}/{filename}"
+    storage_root = Path("private_uploads")
+    target_path = storage_root / storage_key
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(data)
+
+    entry = MachineKnowledgeEntry(
+        profile_id=profile.id,
+        entry_type=entry_type,
+        title=title.strip(),
+        content=description.strip(),
+        source_work_order_id=source_work_order_id,
+        media_storage_key=storage_key,
+        media_mime_type=mime_type,
+        media_size_bytes=len(data),
+        sort_order=sort_order,
+        created_by=actor.user_id,
+        updated_by=actor.user_id,
+    )
+    db.add(entry)
+    try:
+        db.flush()
+        entry.media_url = f"/api/machine-knowledge/media/{entry.id}"
+        _audit(
+            db,
+            actor,
+            "upload_machine_knowledge_media",
+            "machine_knowledge_entry",
+            entry.id,
+            {
+                "profile_id": profile.id,
+                "entry_type": entry_type,
+                "mime_type": mime_type,
+                "size_bytes": len(data),
+                "source_work_order_id": source_work_order_id,
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        target_path.unlink(missing_ok=True)
+        raise
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.get("/machine-knowledge/media/{entry_id}")
+def get_machine_knowledge_media(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    entry = db.get(MachineKnowledgeEntry, entry_id)
+    if not entry or not entry.media_storage_key or not entry.media_mime_type:
+        raise HTTPException(status_code=404, detail="Knowledge media not found")
+    profile = db.get(MachineKnowledgeProfile, entry.profile_id)
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    if not profile or (
+        not curator and (not profile.is_active or entry.status != "published")
+    ):
+        raise HTTPException(status_code=404, detail="Knowledge media not found")
+    storage_root = Path("private_uploads").resolve()
+    target_path = (storage_root / entry.media_storage_key).resolve()
+    if storage_root not in target_path.parents or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Knowledge media not found")
+    return FileResponse(
+        target_path,
+        media_type=entry.media_mime_type,
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Content-Disposition": f'inline; filename="knowledge-{entry.id}{target_path.suffix}"',
+        },
+    )
 
 
 @router.patch(
@@ -1219,6 +1612,11 @@ def update_machine_knowledge_entry(
         raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
     changes = payload.model_dump(exclude={"expected_version"}, exclude_unset=True)
     related_part_id = changes.get("related_part_id", entry.related_part_id)
+    related_part_role = changes.get("related_part_role", entry.related_part_role)
+    alternative_for_part_id = changes.get(
+        "alternative_for_part_id",
+        entry.alternative_for_part_id,
+    )
     source_work_order_id = changes.get(
         "source_work_order_id",
         entry.source_work_order_id,
@@ -1228,14 +1626,34 @@ def update_machine_knowledge_entry(
         profile,
         related_part_id=related_part_id,
         source_work_order_id=source_work_order_id,
+        related_part_role=related_part_role,
+        alternative_for_part_id=alternative_for_part_id,
     )
-    for field in {"title", "content", "fault_code"} & changes.keys():
+    for field in {
+        "title",
+        "content",
+        "fault_code",
+        "installation_location",
+    } & changes.keys():
         changes[field] = _knowledge_optional_text(changes[field])
     if changes.get("title") is None and "title" in changes:
         raise HTTPException(status_code=422, detail="Knowledge title is required")
     if changes.get("content") is None and "content" in changes:
         raise HTTPException(status_code=422, detail="Knowledge content is required")
-    if "media_url" in changes:
+    if entry.media_storage_key and (
+        ("entry_type" in changes and changes["entry_type"] != entry.entry_type)
+        or (
+            "media_url" in changes
+            and changes["media_url"] != entry.media_url
+        )
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Uploaded media type and protected URL cannot be replaced in place",
+        )
+    if entry.media_storage_key:
+        changes.pop("media_url", None)
+    elif "media_url" in changes:
         changes["media_url"] = _knowledge_media_url(changes["media_url"])
     entry_type = changes.get("entry_type", entry.entry_type)
     media_url = changes.get("media_url", entry.media_url)

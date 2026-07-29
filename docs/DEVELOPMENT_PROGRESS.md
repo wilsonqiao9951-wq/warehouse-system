@@ -357,3 +357,31 @@ Verification:
 - Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 28 static routes.
 - Dependency security: upgraded Next.js to 16.2.12 and overrode PostCSS 8.5.24 plus Sharp 0.35.3; the production npm audit reports 0 vulnerabilities. Remaining npm audit findings are development-only ESLint/minimatch advisories whose automatic fix requires a separate breaking ESLint 10 migration.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-28 - Phase 5 work-order and media knowledge capture
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added one-click curator extraction from completed same-model work orders into fault, repair-result, and used-part drafts.
+- Added unique origin keys and duplicate skipping so retries cannot create duplicate knowledge.
+- Classified parts from labeled successful first-time repairs as recommended; rework, failed, or unlabeled usage remains reference-only.
+- Added recommended, alternative, consumable, and reference roles, including primary-part substitution and installation location.
+- Added safe tenant validation for both the linked part and the primary part an alternative replaces.
+- Added validated photo/video uploads for JPEG, PNG, GIF, WebP, HEIC, MP4, MOV, and WebM with image and media size limits.
+- Stored knowledge media outside the public upload mount with random private storage keys.
+- Added authenticated media delivery: curators can preview drafts, while engineers and warehouse users can open media only after administrator publication.
+- Prevented protected media URLs/types from being replaced during ordinary draft editing.
+- Marked every knowledge mutation as online-only in the mobile client.
+- Extended the mobile workspace with work-order extraction, protected capture/upload, part-role, substitution, installation-location, and secure preview controls.
+- Added Alembic revision `20260728_0026`.
+
+Verification:
+
+- Knowledge capture, governance, idempotency, part-role, tenant, protected-media, and publication target suite: 6 passed.
+- Backend: full suite passed, 89 tests.
+- Database: fresh base-to-`0026` and empty `0026 -> 0025 -> 0026` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 28 static routes.
+- Production dependency audit: 0 vulnerabilities.
+- Source hygiene: `git diff --check` passed.

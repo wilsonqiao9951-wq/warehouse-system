@@ -365,6 +365,11 @@ export type MachineKnowledgeEntryType =
   | "note";
 
 export type MachineKnowledgeStatus = "draft" | "published" | "archived";
+export type MachineKnowledgePartRole =
+  | "recommended"
+  | "alternative"
+  | "consumable"
+  | "reference";
 
 export interface MachineKnowledgePart {
   id: number;
@@ -393,8 +398,13 @@ export interface MachineKnowledgeEntry {
   content: string;
   fault_code?: string | null;
   related_part?: MachineKnowledgePart | null;
+  related_part_role?: MachineKnowledgePartRole | null;
+  alternative_for_part?: MachineKnowledgePart | null;
+  installation_location?: string | null;
   source_work_order_id?: number | null;
   media_url?: string | null;
+  media_mime_type?: string | null;
+  media_size_bytes?: number | null;
   sort_order: number;
   status: MachineKnowledgeStatus;
   version: number;
@@ -410,6 +420,12 @@ export interface MachineKnowledgeEntry {
   can_reopen: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface MachineKnowledgeDraftGeneration {
+  profile: MachineKnowledgeProfile;
+  created_entries: number;
+  skipped_entries: number;
 }
 
 export interface MachineKnowledgeProfile {

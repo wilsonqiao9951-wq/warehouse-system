@@ -948,6 +948,13 @@ MachineKnowledgeEntryType = Literal[
     "note",
 ]
 
+MachineKnowledgePartRole = Literal[
+    "recommended",
+    "alternative",
+    "consumable",
+    "reference",
+]
+
 
 class MachineKnowledgeProfileCreate(BaseModel):
     model: str = Field(min_length=1, max_length=255)
@@ -971,6 +978,9 @@ class MachineKnowledgeEntryCreate(BaseModel):
     content: str = Field(min_length=1, max_length=20000)
     fault_code: str | None = Field(default=None, max_length=120)
     related_part_id: int | None = Field(default=None, ge=1)
+    related_part_role: MachineKnowledgePartRole | None = None
+    alternative_for_part_id: int | None = Field(default=None, ge=1)
+    installation_location: str | None = Field(default=None, max_length=500)
     source_work_order_id: int | None = Field(default=None, ge=1)
     media_url: str | None = Field(default=None, max_length=1000)
     sort_order: int = Field(default=0, ge=0, le=10000)
@@ -983,6 +993,9 @@ class MachineKnowledgeEntryUpdate(BaseModel):
     content: str | None = Field(default=None, min_length=1, max_length=20000)
     fault_code: str | None = Field(default=None, max_length=120)
     related_part_id: int | None = Field(default=None, ge=1)
+    related_part_role: MachineKnowledgePartRole | None = None
+    alternative_for_part_id: int | None = Field(default=None, ge=1)
+    installation_location: str | None = Field(default=None, max_length=500)
     source_work_order_id: int | None = Field(default=None, ge=1)
     media_url: str | None = Field(default=None, max_length=1000)
     sort_order: int | None = Field(default=None, ge=0, le=10000)
@@ -991,6 +1004,10 @@ class MachineKnowledgeEntryUpdate(BaseModel):
 class MachineKnowledgeEntryAction(BaseModel):
     action: Literal["publish", "archive", "reopen"]
     expected_version: int = Field(ge=0)
+
+
+class MachineKnowledgeDraftGenerate(BaseModel):
+    work_order_id: int = Field(ge=1)
 
 
 class MachineKnowledgePartRead(BaseModel):
@@ -1020,8 +1037,13 @@ class MachineKnowledgeEntryRead(BaseModel):
     content: str
     fault_code: str | None = None
     related_part: MachineKnowledgePartRead | None = None
+    related_part_role: MachineKnowledgePartRole | None = None
+    alternative_for_part: MachineKnowledgePartRead | None = None
+    installation_location: str | None = None
     source_work_order_id: int | None = None
     media_url: str | None = None
+    media_mime_type: str | None = None
+    media_size_bytes: int | None = Field(default=None, ge=0)
     sort_order: int
     status: Literal["draft", "published", "archived"]
     version: int = Field(ge=0)
@@ -1057,6 +1079,12 @@ class MachineKnowledgeProfileRead(BaseModel):
     evidence: MachineKnowledgeEvidenceRead
     created_at: datetime
     updated_at: datetime
+
+
+class MachineKnowledgeDraftGenerationRead(BaseModel):
+    profile: MachineKnowledgeProfileRead
+    created_entries: int = Field(ge=0)
+    skipped_entries: int = Field(ge=0)
 
 
 class ServiceHistoryPart(BaseModel):

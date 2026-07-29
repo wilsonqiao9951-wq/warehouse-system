@@ -342,6 +342,11 @@ class MachineKnowledgeProfile(Base):
 class MachineKnowledgeEntry(Base):
     __tablename__ = "machine_knowledge_entries"
     __table_args__ = (
+        UniqueConstraint(
+            "profile_id",
+            "origin_key",
+            name="uq_machine_knowledge_entry_profile_origin",
+        ),
         CheckConstraint(
             "entry_type IN ('fault', 'repair_step', 'tool', 'caution', "
             "'common_error', 'photo', 'video', 'note')",
@@ -358,6 +363,31 @@ class MachineKnowledgeEntry(Base):
         CheckConstraint(
             "version >= 0",
             name="ck_machine_knowledge_entry_version_non_negative",
+        ),
+        CheckConstraint(
+            "related_part_role IS NULL OR related_part_role IN "
+            "('recommended', 'alternative', 'consumable', 'reference')",
+            name="ck_machine_knowledge_related_part_role",
+        ),
+        CheckConstraint(
+            "related_part_role IS NULL OR related_part_id IS NOT NULL",
+            name="ck_machine_knowledge_part_role_requires_part",
+        ),
+        CheckConstraint(
+            "related_part_role != 'alternative' OR alternative_for_part_id IS NOT NULL",
+            name="ck_machine_knowledge_alternative_requires_primary",
+        ),
+        CheckConstraint(
+            "alternative_for_part_id IS NULL OR alternative_for_part_id != related_part_id",
+            name="ck_machine_knowledge_alternative_distinct",
+        ),
+        CheckConstraint(
+            "alternative_for_part_id IS NULL OR related_part_role = 'alternative'",
+            name="ck_machine_knowledge_primary_only_for_alternative",
+        ),
+        CheckConstraint(
+            "media_size_bytes IS NULL OR media_size_bytes >= 0",
+            name="ck_machine_knowledge_media_size_non_negative",
         ),
         Index(
             "ix_machine_knowledge_entry_profile_status",
@@ -382,10 +412,19 @@ class MachineKnowledgeEntry(Base):
     related_part_id: Mapped[int | None] = mapped_column(
         ForeignKey("parts.id"), nullable=True, index=True
     )
+    related_part_role: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    alternative_for_part_id: Mapped[int | None] = mapped_column(
+        ForeignKey("parts.id"), nullable=True, index=True
+    )
+    installation_location: Mapped[str | None] = mapped_column(String(500), nullable=True)
     source_work_order_id: Mapped[int | None] = mapped_column(
         ForeignKey("work_orders.id"), nullable=True, index=True
     )
+    origin_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     media_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    media_storage_key: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    media_mime_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    media_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[str] = mapped_column(
         String(20), default="draft", nullable=False, index=True
@@ -403,7 +442,8 @@ class MachineKnowledgeEntry(Base):
     )
 
     profile = relationship("MachineKnowledgeProfile", back_populates="entries")
-    related_part = relationship("Part")
+    related_part = relationship("Part", foreign_keys=[related_part_id])
+    alternative_for_part = relationship("Part", foreign_keys=[alternative_for_part_id])
     source_work_order = relationship("WorkOrder")
 
 

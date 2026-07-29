@@ -220,7 +220,11 @@ Recognition actions never mutate inventory. A candidate can reach trusted knowle
 | View drafts, archived entries, inactive profiles | Deny | Allow | Allow | Deny |
 | Create/update machine profiles | Deny | Allow | Allow | Deny |
 | Create/update draft entries | Deny | Allow | Allow | Deny |
+| Generate drafts from a completed same-model work order | Deny | Allow | Allow | Deny |
+| Upload protected photo/video draft | Deny | Allow | Allow | Deny |
 | Publish, archive, or reopen entries | Deny | Deny | Allow | Deny |
 | Modify published content in place | Deny | Deny | Deny | Deny |
+| Preview protected draft/archived media | Deny | Allow | Allow | Deny |
+| Read protected published media | Allow | Allow | Allow | Allow |
 
-All reads and writes are tenant-scoped. Optional source work orders must already be completed and locked and must match the profile model. Engineer and warehouse responses use a redacted part summary that excludes cost, supplier, and other commercial fields. Frontend capability flags mirror these rules but do not replace API enforcement.
+All reads and writes are tenant-scoped. Optional source work orders must already be completed and locked and must match the profile model. Work-order extraction is idempotent and never auto-publishes. Recommended-part drafts require a labeled successful first-time repair; other usage is reference-only. Uploaded media uses file-header validation, private random storage keys, and authenticated delivery. Engineer and warehouse responses use a redacted part summary that excludes cost, supplier, and other commercial fields. Frontend capability flags mirror these rules but do not replace API enforcement.

@@ -7,6 +7,7 @@ import { AppRole, getCurrentRole } from "@/lib/role";
 import {
   MachineKnowledgeEntry,
   MachineKnowledgeEntryType,
+  MachineKnowledgePartRole,
   MachineKnowledgeProfile,
   Part,
 } from "@/types";
@@ -28,6 +29,9 @@ const emptyEntry = {
   content: "",
   faultCode: "",
   relatedPartId: "",
+  relatedPartRole: "" as MachineKnowledgePartRole | "",
+  alternativeForPartId: "",
+  installationLocation: "",
   sourceWorkOrderId: "",
   mediaUrl: "",
   sortOrder: "0",
@@ -51,6 +55,13 @@ export default function KnowledgeBasePage() {
     summary: "",
   });
   const [entryForm, setEntryForm] = useState(emptyEntry);
+  const [draftWorkOrderId, setDraftWorkOrderId] = useState("");
+  const [mediaForm, setMediaForm] = useState({
+    title: "",
+    description: "",
+    sourceWorkOrderId: "",
+  });
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [editingEntryId, setEditingEntryId] = useState<number | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -155,8 +166,15 @@ export default function KnowledgeBasePage() {
       content: entry.content,
       faultCode: entry.fault_code || "",
       relatedPartId: entry.related_part ? String(entry.related_part.id) : "",
+      relatedPartRole: entry.related_part_role || "",
+      alternativeForPartId: entry.alternative_for_part
+        ? String(entry.alternative_for_part.id)
+        : "",
+      installationLocation: entry.installation_location || "",
       sourceWorkOrderId: entry.source_work_order_id ? String(entry.source_work_order_id) : "",
-      mediaUrl: entry.media_url || "",
+      mediaUrl: entry.media_url?.startsWith("/api/machine-knowledge/media/")
+        ? ""
+        : entry.media_url || "",
       sortOrder: String(entry.sort_order),
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -168,17 +186,29 @@ export default function KnowledgeBasePage() {
       return;
     }
     const relatedPartId = entryForm.relatedPartId ? Number(entryForm.relatedPartId) : undefined;
+    const alternativeForPartId = entryForm.alternativeForPartId
+      ? Number(entryForm.alternativeForPartId)
+      : undefined;
     const sourceWorkOrderId = entryForm.sourceWorkOrderId
       ? Number(entryForm.sourceWorkOrderId)
       : undefined;
     const sortOrder = Number(entryForm.sortOrder || "0");
     if (
       (relatedPartId !== undefined && (!Number.isInteger(relatedPartId) || relatedPartId < 1))
+      || (alternativeForPartId !== undefined && (!Number.isInteger(alternativeForPartId) || alternativeForPartId < 1))
       || (sourceWorkOrderId !== undefined && (!Number.isInteger(sourceWorkOrderId) || sourceWorkOrderId < 1))
       || !Number.isInteger(sortOrder)
       || sortOrder < 0
     ) {
       setError("Part, work-order, and order values must be valid positive numbers.");
+      return;
+    }
+    if (entryForm.relatedPartRole && !relatedPartId) {
+      setError("Select a related part when assigning a part role.");
+      return;
+    }
+    if (entryForm.relatedPartRole === "alternative" && !alternativeForPartId) {
+      setError("Select the primary part that this alternative replaces.");
       return;
     }
     try {
@@ -190,13 +220,27 @@ export default function KnowledgeBasePage() {
         content: entryForm.content.trim(),
         fault_code: entryForm.faultCode.trim() || undefined,
         related_part_id: relatedPartId,
+        related_part_role: entryForm.relatedPartRole || undefined,
+        alternative_for_part_id: alternativeForPartId,
+        installation_location: entryForm.installationLocation.trim() || undefined,
         source_work_order_id: sourceWorkOrderId,
         media_url: entryForm.mediaUrl.trim() || undefined,
         sort_order: sortOrder,
       };
       const editing = selected.entries.find((entry) => entry.id === editingEntryId);
       const updated = editing
-        ? await api.updateMachineKnowledgeEntry(editing, commonPayload)
+        ? await api.updateMachineKnowledgeEntry(editing, {
+            ...commonPayload,
+            fault_code: entryForm.faultCode.trim() || null,
+            related_part_id: relatedPartId ?? null,
+            related_part_role: entryForm.relatedPartRole || null,
+            alternative_for_part_id: alternativeForPartId ?? null,
+            installation_location: entryForm.installationLocation.trim() || null,
+            source_work_order_id: sourceWorkOrderId ?? null,
+            media_url: editing.media_url?.startsWith("/api/machine-knowledge/media/")
+              ? undefined
+              : entryForm.mediaUrl.trim() || null,
+          })
         : await api.createMachineKnowledgeEntry(selected.id, commonPayload);
       replaceProfile(updated);
       resetEntryForm();
@@ -205,6 +249,79 @@ export default function KnowledgeBasePage() {
       setError(saveError instanceof Error ? saveError.message : "Unable to save knowledge.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const generateFromWorkOrder = async () => {
+    if (!selected) return;
+    const workOrderId = Number(draftWorkOrderId);
+    if (!Number.isInteger(workOrderId) || workOrderId < 1) {
+      setError("Enter a valid completed work-order ID.");
+      return;
+    }
+    try {
+      setBusy(true);
+      setError("");
+      const result = await api.generateMachineKnowledgeDrafts(selected.id, workOrderId);
+      replaceProfile(result.profile);
+      setMessage(
+        result.created_entries
+          ? `${result.created_entries} review drafts created; ${result.skipped_entries} existing drafts skipped.`
+          : `No duplicates created; ${result.skipped_entries} existing drafts already cover this work order.`,
+      );
+      setDraftWorkOrderId("");
+    } catch (generationError) {
+      setError(
+        generationError instanceof Error
+          ? generationError.message
+          : "Unable to generate work-order knowledge drafts.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const uploadMedia = async () => {
+    if (!selected || !mediaFile || !mediaForm.title.trim() || !mediaForm.description.trim()) {
+      setError("Select a photo or video and enter a title and description.");
+      return;
+    }
+    const sourceWorkOrderId = mediaForm.sourceWorkOrderId
+      ? Number(mediaForm.sourceWorkOrderId)
+      : undefined;
+    if (
+      sourceWorkOrderId !== undefined
+      && (!Number.isInteger(sourceWorkOrderId) || sourceWorkOrderId < 1)
+    ) {
+      setError("Media work-order ID must be a positive number.");
+      return;
+    }
+    try {
+      setBusy(true);
+      setError("");
+      const updated = await api.uploadMachineKnowledgeMedia(selected.id, {
+        file: mediaFile,
+        title: mediaForm.title.trim(),
+        description: mediaForm.description.trim(),
+        sourceWorkOrderId,
+      });
+      replaceProfile(updated);
+      setMediaFile(null);
+      setMediaForm({ title: "", description: "", sourceWorkOrderId: "" });
+      setMessage("Protected media uploaded as a draft. An administrator must publish it.");
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Unable to upload knowledge media.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openProtectedMedia = async (entry: MachineKnowledgeEntry) => {
+    try {
+      setError("");
+      await api.openMachineKnowledgeMedia(entry.id);
+    } catch (mediaError) {
+      setError(mediaError instanceof Error ? mediaError.message : "Unable to open protected media.");
     }
   };
 
@@ -389,6 +506,81 @@ export default function KnowledgeBasePage() {
 
           {selected.can_add_entry && (
             <section className="card">
+              <h3 style={{ marginTop: 0 }}>Create drafts from a completed job</h3>
+              <p className="muted">
+                The system extracts fault evidence, the verified repair result, and used parts.
+                Successful first-time repairs can produce recommended-part drafts; all output still
+                requires human review and administrator publication.
+              </p>
+              <div className="two-col">
+                <input
+                  inputMode="numeric"
+                  value={draftWorkOrderId}
+                  onChange={(event) => setDraftWorkOrderId(event.target.value)}
+                  placeholder="Completed work-order ID"
+                />
+                <button
+                  type="button"
+                  onClick={() => void generateFromWorkOrder()}
+                  disabled={busy}
+                >
+                  Generate review drafts
+                </button>
+              </div>
+            </section>
+          )}
+
+          {selected.can_add_entry && (
+            <section className="card">
+              <h3 style={{ marginTop: 0 }}>Upload protected field media</h3>
+              <p className="muted">
+                Photos and videos remain private to this organization. Field users can open them
+                only after an administrator publishes the draft.
+              </p>
+              <div className="two-col">
+                <label>
+                  Media title
+                  <input
+                    value={mediaForm.title}
+                    onChange={(event) => setMediaForm((previous) => ({ ...previous, title: event.target.value }))}
+                    placeholder="Control cabinet connector positions"
+                  />
+                </label>
+                <label>
+                  Completed work-order ID
+                  <input
+                    inputMode="numeric"
+                    value={mediaForm.sourceWorkOrderId}
+                    onChange={(event) => setMediaForm((previous) => ({ ...previous, sourceWorkOrderId: event.target.value }))}
+                    placeholder="Optional same-model evidence"
+                  />
+                </label>
+              </div>
+              <label style={{ display: "block", marginTop: 10 }}>
+                Description
+                <textarea
+                  value={mediaForm.description}
+                  onChange={(event) => setMediaForm((previous) => ({ ...previous, description: event.target.value }))}
+                  placeholder="What the photo or video shows and when it should be used"
+                />
+              </label>
+              <label style={{ display: "block", marginTop: 10 }}>
+                Photo or video
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp,image/heic,video/mp4,video/quicktime,video/webm"
+                  capture="environment"
+                  onChange={(event) => setMediaFile(event.target.files?.[0] || null)}
+                />
+              </label>
+              <button type="button" onClick={() => void uploadMedia()} disabled={busy} style={{ marginTop: 10 }}>
+                Upload as protected draft
+              </button>
+            </section>
+          )}
+
+          {selected.can_add_entry && (
+            <section className="card">
               <h3 style={{ marginTop: 0 }}>{editingEntryId ? "Edit knowledge draft" : "Add knowledge draft"}</h3>
               <div className="two-col">
                 <label>
@@ -444,6 +636,59 @@ export default function KnowledgeBasePage() {
                   </select>
                 </label>
               </div>
+              <div className="two-col" style={{ marginTop: 10 }}>
+                <label>
+                  Part role
+                  <select
+                    value={entryForm.relatedPartRole}
+                    onChange={(event) => {
+                      const nextRole = event.target.value as MachineKnowledgePartRole | "";
+                      setEntryForm((previous) => ({
+                        ...previous,
+                        relatedPartRole: nextRole,
+                        alternativeForPartId: nextRole === "alternative"
+                          ? previous.alternativeForPartId
+                          : "",
+                      }));
+                    }}
+                  >
+                    <option value="">No role</option>
+                    <option value="recommended">Recommended</option>
+                    <option value="alternative">Alternative</option>
+                    <option value="consumable">Consumable</option>
+                    <option value="reference">Reference only</option>
+                  </select>
+                </label>
+                <label>
+                  Primary part replaced
+                  <select
+                    value={entryForm.alternativeForPartId}
+                    disabled={entryForm.relatedPartRole !== "alternative"}
+                    onChange={(event) => setEntryForm((previous) => ({
+                      ...previous,
+                      alternativeForPartId: event.target.value,
+                    }))}
+                  >
+                    <option value="">Select primary part</option>
+                    {parts
+                      .filter((part) => String(part.id) !== entryForm.relatedPartId)
+                      .map((part) => (
+                        <option key={part.id} value={part.id}>{part.part_number} · {part.name}</option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+              <label style={{ display: "block", marginTop: 10 }}>
+                Installation location
+                <input
+                  value={entryForm.installationLocation}
+                  onChange={(event) => setEntryForm((previous) => ({
+                    ...previous,
+                    installationLocation: event.target.value,
+                  }))}
+                  placeholder="Upper electrical cabinet, slot J4"
+                />
+              </label>
               <div className="two-col" style={{ marginTop: 10 }}>
                 <label>
                   Completed work-order ID
@@ -504,17 +749,34 @@ export default function KnowledgeBasePage() {
                   <p style={{ whiteSpace: "pre-wrap" }}>{entry.content}</p>
                   {entry.related_part && (
                     <p className="muted">
-                      Part: {entry.related_part.part_number} · {entry.related_part.name}
+                      Part{entry.related_part_role ? ` (${entry.related_part_role.replace("_", " ")})` : ""}:{" "}
+                      {entry.related_part.part_number} · {entry.related_part.name}
                     </p>
+                  )}
+                  {entry.alternative_for_part && (
+                    <p className="muted">
+                      Replaces: {entry.alternative_for_part.part_number} · {entry.alternative_for_part.name}
+                    </p>
+                  )}
+                  {entry.installation_location && (
+                    <p className="muted">Installation location: {entry.installation_location}</p>
                   )}
                   {entry.source_work_order_id && (
                     <p className="muted">Evidence: completed work order #{entry.source_work_order_id}</p>
                   )}
-                  {entry.media_url && (
+                  {entry.media_url?.startsWith("/api/machine-knowledge/media/") ? (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => void openProtectedMedia(entry)}
+                    >
+                      Open protected field media
+                    </button>
+                  ) : entry.media_url ? (
                     <a className="nav-item" href={knowledgeMediaUrl(entry.media_url)} target="_blank" rel="noreferrer">
-                      Open field media
+                      Open external field media
                     </a>
-                  )}
+                  ) : null}
                   <div className="one-hand-actions" style={{ marginTop: 10 }}>
                     {entry.can_edit && (
                       <button type="button" onClick={() => editEntry(entry)} disabled={busy}>

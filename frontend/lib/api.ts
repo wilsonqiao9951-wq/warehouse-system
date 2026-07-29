@@ -3,8 +3,10 @@ import {
   JobStatus,
   LowStockAlert,
   LocationStockBalance,
+  MachineKnowledgeDraftGeneration,
   MachineKnowledgeEntry,
   MachineKnowledgeEntryType,
+  MachineKnowledgePartRole,
   MachineKnowledgeProfile,
   Organization,
   PilotChecklist,
@@ -102,6 +104,7 @@ function workOrderIdForRequest(path: string, init?: RequestInit): number | undef
 function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (method === "GET") return false;
   if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
+  if (path === "/machine-knowledge" || path.startsWith("/machine-knowledge/")) return true;
   if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
   if (path === "/inventory/vehicle-returns" || path.startsWith("/inventory/vehicle-returns/")) return true;
   if (path === "/inventory/counts" || path.startsWith("/inventory/counts/")) return true;
@@ -527,6 +530,9 @@ export const api = {
       content: string;
       fault_code?: string;
       related_part_id?: number;
+      related_part_role?: MachineKnowledgePartRole;
+      alternative_for_part_id?: number;
+      installation_location?: string;
       source_work_order_id?: number;
       media_url?: string;
       sort_order?: number;
@@ -543,6 +549,9 @@ export const api = {
       content?: string;
       fault_code?: string | null;
       related_part_id?: number | null;
+      related_part_role?: MachineKnowledgePartRole | null;
+      alternative_for_part_id?: number | null;
+      installation_location?: string | null;
       source_work_order_id?: number | null;
       media_url?: string | null;
       sort_order?: number;
@@ -558,6 +567,66 @@ export const api = {
     method: "POST",
     body: JSON.stringify({ action, expected_version: entry.version })
   }),
+  generateMachineKnowledgeDrafts: (profileId: number, workOrderId: number) =>
+    request<MachineKnowledgeDraftGeneration>(
+      `/machine-knowledge/${profileId}/drafts/from-work-order`,
+      {
+        method: "POST",
+        body: JSON.stringify({ work_order_id: workOrderId })
+      }
+    ),
+  uploadMachineKnowledgeMedia: (
+    profileId: number,
+    payload: {
+      file: File;
+      title: string;
+      description: string;
+      sourceWorkOrderId?: number;
+      sortOrder?: number;
+    }
+  ) => {
+    const form = new FormData();
+    form.append("file", payload.file);
+    form.append("title", payload.title);
+    form.append("description", payload.description);
+    if (payload.sourceWorkOrderId) {
+      form.append("source_work_order_id", String(payload.sourceWorkOrderId));
+    }
+    if (payload.sortOrder !== undefined) {
+      form.append("sort_order", String(payload.sortOrder));
+    }
+    return request<MachineKnowledgeProfile>(
+      `/machine-knowledge/${profileId}/media`,
+      { method: "POST", body: form }
+    );
+  },
+  openMachineKnowledgeMedia: async (entryId: number) => {
+    if (typeof window === "undefined") throw new Error("Media preview requires a browser.");
+    const preview = window.open("about:blank", "_blank");
+    const token = window.localStorage.getItem("opf_access_token");
+    try {
+      const response = await fetch(`${API_BASE}/machine-knowledge/media/${entryId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!response.ok) {
+        let detail = `Unable to open media (${response.status})`;
+        try {
+          const body = await response.json() as { detail?: string };
+          if (body.detail) detail = body.detail;
+        } catch {
+          // Keep the status fallback.
+        }
+        throw new Error(detail);
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      if (preview) preview.location.href = objectUrl;
+      else window.location.href = objectUrl;
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 300_000);
+    } catch (error) {
+      preview?.close();
+      throw error;
+    }
+  },
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=100"),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),

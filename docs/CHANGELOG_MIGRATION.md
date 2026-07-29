@@ -320,4 +320,16 @@ Verification: full backend suite 70 passed, vehicle custody target suite 18 pass
 - Records profile, draft, publish, archive, and reopen actions in the organization audit log.
 
 Verification: target workflow tests 3 passed, full backend suite 86 passed, fresh base-to-`0025` plus `0025 -> 0024 -> 0025` passed on SQLite, the Next.js 16.2.12 production build generated all 28 static routes, and the production dependency audit reported 0 vulnerabilities.
+
+## 20260728_0026 - Governed knowledge capture
+
+- Adds idempotent per-profile origin keys so repeated completed-work-order extraction cannot duplicate knowledge drafts.
+- Adds recommended, alternative, consumable, and reference part roles plus primary-part substitution and installation-location fields.
+- Adds protected media storage metadata, MIME type, byte size, and non-negative/relationship database constraints.
+- Generates curator-only drafts from completed same-model work orders: fault context, repair result, and used parts.
+- Marks parts as recommended only when the source work order records a successful first-time repair; rework or unlabeled evidence remains reference-only.
+- Adds validated JPEG, PNG, GIF, WebP, HEIC, MP4, MOV, and WebM upload with configurable size limits and random private storage keys.
+- Serves uploaded media only through an authenticated tenant- and publication-scoped API; it is not mounted under public `/uploads`.
+
+Verification: knowledge capture/governance target suite 6 passed, full backend suite 89 passed, fresh base-to-`0026` plus `0026 -> 0025 -> 0026` passed on SQLite, and the Next.js 16.2.12 production build generated all 28 static routes.
 - Work-order-linked evidence is restricted to the claiming engineer's registered device and claim generation or an administrator.

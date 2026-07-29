@@ -24,12 +24,23 @@ Knowledge entry types are:
 - `video`
 - `note`
 
-Each entry may link a part, a completed work order from the same machine model, a fault/error code, and a safe HTTP(S) or `/uploads/` media URL.
+Each entry may link a part, a completed work order from the same machine model, a fault/error code, an installation location, and an external HTTP(S) reference.
+
+Related parts can be classified as:
+
+- `recommended`
+- `alternative` with the primary part it replaces
+- `consumable`
+- `reference`
+
+The application also accepts protected photo/video uploads. These files are stored outside the public upload mount and served only through an authenticated knowledge-media endpoint.
 
 ## Governance lifecycle
 
 ```text
 Manager or administrator creates draft
+→ Or generate idempotent drafts from a completed same-model work order
+→ Or upload a protected field photo/video draft
 → Curator edits draft
 → Administrator publishes
 → Engineers and warehouse users can read it
@@ -38,6 +49,14 @@ Manager or administrator creates draft
 ```
 
 Published or archived content cannot be edited in place. This prevents already-distributed repair guidance from changing without an explicit audit event. A replacement can be prepared as a new draft and published after review.
+
+Completed-work-order capture creates up to three kinds of draft:
+
+- fault/error/problem context
+- the verified repair result
+- one used-part note per distinct part
+
+Only a completed work order labeled as a successful first-time repair can produce a `recommended` part draft. Rework and incomplete outcome labeling produce `reference` evidence instead. Origin keys make repeated extraction safe and idempotent.
 
 ## Evidence and privacy
 
@@ -80,8 +99,14 @@ Administrator review:
 
 - `POST /api/machine-knowledge/entries/{entry_id}/actions`
 
+Capture:
+
+- `POST /api/machine-knowledge/{profile_id}/drafts/from-work-order`
+- `POST /api/machine-knowledge/{profile_id}/media`
+- `GET /api/machine-knowledge/media/{entry_id}`
+
 Every mutation uses server-enforced role checks. Profile and entry changes use `expected_version` where an existing record can be overwritten or transitioned.
 
 ## Mobile workflow
 
-The `/knowledge-base` workspace is available to engineers, managers, administrators, and warehouse users. A work-order detail page links directly to its exact machine model. Managers and administrators see draft tools; engineers and warehouse users see only published entries on active profiles.
+The `/knowledge-base` workspace is available to engineers, managers, administrators, and warehouse users. A work-order detail page links directly to its exact machine model. Managers and administrators can generate drafts, upload protected media, and classify recommended/alternative parts and installation locations. Engineers and warehouse users see only published entries on active profiles.
