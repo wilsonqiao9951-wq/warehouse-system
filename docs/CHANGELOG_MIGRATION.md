@@ -333,3 +333,13 @@ Verification: target workflow tests 3 passed, full backend suite 86 passed, fres
 
 Verification: knowledge capture/governance target suite 6 passed, full backend suite 89 passed, fresh base-to-`0026` plus `0026 -> 0025 -> 0026` passed on SQLite, and the Next.js 16.2.12 production build generated all 28 static routes.
 - Work-order-linked evidence is restricted to the claiming engineer's registered device and claim generation or an administrator.
+
+## Phase 5 explainable service intelligence (no schema migration)
+
+- Adds `GET /api/work-orders/{id}/service-intelligence` using the existing work-order learning and governed-knowledge schema.
+- Ranks locked completed history by machine, work type, fault, error code, and symptoms and returns an explanation for every match.
+- Calculates exact-model first-time-fix, rework, duration, fault, and error-code evidence with low-confidence warnings.
+- Ranks only published entries on the active exact-model profile; drafts, archived entries, unlocked jobs, and other tenants are excluded.
+- Adds the read-only mobile intelligence panel without broadening work-order mutation permissions.
+
+Verification: service-intelligence target suite 3 passed, full backend suite 92 passed, ESLint passed, and the Next.js 16.2.12 production build generated all 28 static routes. Schema head remains `20260728_0026`.

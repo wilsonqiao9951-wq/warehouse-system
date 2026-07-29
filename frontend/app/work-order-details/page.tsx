@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from "rea
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
-import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart, WorkOrderServiceContext, WorkOrderVoiceNote } from "@/types";
+import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
 import { VoiceRecorder } from "@/components/voice-recorder";
 
@@ -22,6 +22,8 @@ export default function WorkOrderDetailsPage() {
   const [woParts, setWoParts] = useState<WorkOrderPart[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<WorkOrderVoiceNote[]>([]);
   const [serviceContext, setServiceContext] = useState<WorkOrderServiceContext | null>(null);
+  const [serviceIntelligence, setServiceIntelligence] = useState<WorkOrderServiceIntelligence | null>(null);
+  const [serviceIntelligenceLoaded, setServiceIntelligenceLoaded] = useState(false);
   const [completionPolicy, setCompletionPolicy] = useState<CompletionPolicy | null>(null);
   const [role, setRole] = useState("");
   const [completionPassword, setCompletionPassword] = useState("");
@@ -156,13 +158,29 @@ export default function WorkOrderDetailsPage() {
 
   useEffect(() => {
     if (!currentWorkOrderId) return;
+    let active = true;
     setServiceContext(null);
+    setServiceIntelligence(null);
+    setServiceIntelligenceLoaded(false);
     api.getWorkOrderServiceContext(currentWorkOrderId, 5)
       .then(setServiceContext)
       .catch(() => setServiceContext({ history: [] }));
+    api.getWorkOrderServiceIntelligence(currentWorkOrderId)
+      .then((result) => {
+        if (active) setServiceIntelligence(result);
+      })
+      .catch(() => {
+        if (active) setServiceIntelligence(null);
+      })
+      .finally(() => {
+        if (active) setServiceIntelligenceLoaded(true);
+      });
     api.getCompletionPolicy(currentWorkOrderId)
       .then(setCompletionPolicy)
       .catch(() => setCompletionPolicy(null));
+    return () => {
+      active = false;
+    };
   }, [currentWorkOrderId]);
 
   const onStartJob = async () => {
@@ -489,6 +507,125 @@ export default function WorkOrderDetailsPage() {
                 ))}</ul></div>}
               </details>
             ))}
+          </div>
+
+          <div className="card">
+            <h3 className="section-title">Service intelligence</h3>
+            {!serviceIntelligenceLoaded ? (
+              <div className="skeleton" style={{ width: "80%" }} />
+            ) : !serviceIntelligence ? (
+              <div className="empty-state">Service intelligence is currently unavailable.</div>
+            ) : (
+              <>
+                <p style={{ marginTop: 0 }}>{serviceIntelligence.fault_analysis.summary}</p>
+                <div className="grid" style={{ marginBottom: 12 }}>
+                  <div className="card" style={{ marginBottom: 0 }}>
+                    <div className="muted">Same-model evidence</div>
+                    <div className="metric">{serviceIntelligence.fault_analysis.completed_work_orders}</div>
+                  </div>
+                  <div className="card" style={{ marginBottom: 0 }}>
+                    <div className="muted">First-time fix</div>
+                    <div className="metric">
+                      {serviceIntelligence.fault_analysis.first_time_fix_rate == null
+                        ? "—"
+                        : `${Math.round(serviceIntelligence.fault_analysis.first_time_fix_rate * 100)}%`}
+                    </div>
+                  </div>
+                  <div className="card" style={{ marginBottom: 0 }}>
+                    <div className="muted">Rework</div>
+                    <div className="metric">
+                      {serviceIntelligence.fault_analysis.rework_rate == null
+                        ? "—"
+                        : `${Math.round(serviceIntelligence.fault_analysis.rework_rate * 100)}%`}
+                    </div>
+                  </div>
+                  <div className="card" style={{ marginBottom: 0 }}>
+                    <div className="muted">Average repair</div>
+                    <div className="metric">
+                      {serviceIntelligence.fault_analysis.average_repair_minutes == null
+                        ? "—"
+                        : `${Math.round(serviceIntelligence.fault_analysis.average_repair_minutes)} min`}
+                    </div>
+                  </div>
+                </div>
+                {(serviceIntelligence.fault_analysis.top_fault_types.length > 0
+                  || serviceIntelligence.fault_analysis.top_error_codes.length > 0) && (
+                  <p className="muted">
+                    Frequent evidence:{" "}
+                    {[
+                      ...serviceIntelligence.fault_analysis.top_fault_types.map((item) => `${item.value} (${item.count})`),
+                      ...serviceIntelligence.fault_analysis.top_error_codes.map((item) => `${item.value} (${item.count})`)
+                    ].join(" · ")}
+                  </p>
+                )}
+                {serviceIntelligence.fault_analysis.warnings.map((warning) => (
+                  <p className="notice" key={warning}>{warning}</p>
+                ))}
+
+                <h4>Published machine guidance</h4>
+                {serviceIntelligence.knowledge_entries.length === 0 ? (
+                  <div className="empty-state">No published exact-model guidance matches this job yet.</div>
+                ) : serviceIntelligence.knowledge_entries.map((entry) => (
+                  <details key={entry.id} style={{ padding: "10px 0", borderBottom: "1px solid #e2e8f0" }}>
+                    <summary style={{ cursor: "pointer" }}>
+                      <strong>{entry.title}</strong> · {Math.round(entry.confidence * 100)}% match
+                    </summary>
+                    <p style={{ whiteSpace: "pre-wrap" }}>{entry.content}</p>
+                    <p className="muted">{entry.reason}</p>
+                    {entry.related_part && (
+                      <p>
+                        <strong>{entry.related_part_role || "related"} part:</strong>{" "}
+                        {entry.related_part.part_number} · {entry.related_part.name}
+                        {entry.installation_location ? ` · ${entry.installation_location}` : ""}
+                      </p>
+                    )}
+                    {entry.alternative_for_part && (
+                      <p><strong>Replaces:</strong> {entry.alternative_for_part.part_number} · {entry.alternative_for_part.name}</p>
+                    )}
+                    {entry.media_url?.startsWith("/api/machine-knowledge/media/") ? (
+                      <button
+                        type="button"
+                        onClick={() => void api.openMachineKnowledgeMedia(entry.id).catch((error: Error) => (
+                          setNotice({ type: "error", text: error.message })
+                        ))}
+                      >
+                        Open protected field media
+                      </button>
+                    ) : entry.media_url ? (
+                      <a className="nav-item" href={resolveUploadedImageUrl(entry.media_url)} target="_blank" rel="noreferrer">
+                        Open reference media
+                      </a>
+                    ) : null}
+                  </details>
+                ))}
+
+                <h4>Similar completed work orders</h4>
+                {serviceIntelligence.similar_work_orders.length === 0 ? (
+                  <div className="empty-state">No sufficiently similar completed work orders found.</div>
+                ) : serviceIntelligence.similar_work_orders.map((item) => (
+                  <details key={item.id} style={{ padding: "10px 0", borderBottom: "1px solid #e2e8f0" }}>
+                    <summary style={{ cursor: "pointer" }}>
+                      <strong>{item.ticket_number}</strong> · {Math.round(item.confidence * 100)}% match ·{" "}
+                      {item.completed_at ? new Date(item.completed_at).toLocaleDateString() : "date unavailable"}
+                    </summary>
+                    <p className="muted">{item.reason}</p>
+                    <p><strong>Problem:</strong> {item.problem_description || "Not recorded"}</p>
+                    <p><strong>Repair:</strong> {item.repair_result || "Not recorded"}</p>
+                    <p>
+                      <strong>Outcome:</strong> {item.final_outcome || "Not labeled"} ·{" "}
+                      first-time fix {item.first_time_fix == null ? "unknown" : item.first_time_fix ? "yes" : "no"} ·{" "}
+                      rework {item.is_rework ? "yes" : "no"} · {item.repair_duration_minutes ?? "—"} min
+                    </p>
+                    {item.parts_used.length > 0 && (
+                      <p><strong>Parts:</strong> {item.parts_used.map((part) => `${part.part_number} × ${part.quantity}`).join(", ")}</p>
+                    )}
+                  </details>
+                ))}
+                <p className="muted" style={{ marginBottom: 0 }}>
+                  Evidence is limited to this company&apos;s locked completed work orders and published exact-model knowledge.
+                </p>
+              </>
+            )}
           </div>
 
           <div className="card" id="completion">

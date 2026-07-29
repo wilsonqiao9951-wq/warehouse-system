@@ -545,6 +545,69 @@ export interface WorkOrderServiceContext {
   fallback_contact_phone?: string | null; fallback_equipment_model?: string | null; history: ServiceHistoryItem[];
 }
 
+export interface ServiceIntelligencePattern {
+  value: string;
+  count: number;
+}
+
+export interface ServiceIntelligenceFaultAnalysis {
+  machine_model?: string | null;
+  completed_work_orders: number;
+  labeled_outcomes: number;
+  first_time_fix_rate?: number | null;
+  rework_rate?: number | null;
+  average_repair_minutes?: number | null;
+  top_fault_types: ServiceIntelligencePattern[];
+  top_error_codes: ServiceIntelligencePattern[];
+  summary: string;
+  warnings: string[];
+}
+
+export interface ServiceIntelligenceSimilarWorkOrder {
+  id: number;
+  ticket_number: string;
+  completed_at?: string | null;
+  job_type?: string | null;
+  problem_description?: string | null;
+  fault_type?: string | null;
+  error_code?: string | null;
+  repair_result?: string | null;
+  final_outcome?: string | null;
+  first_time_fix?: boolean | null;
+  is_rework: boolean;
+  repair_duration_minutes?: number | null;
+  parts_used: Array<{ part_number: string; name: string; quantity: number }>;
+  confidence: number;
+  reason: string;
+}
+
+export interface ServiceIntelligenceKnowledgeEntry {
+  id: number;
+  profile_id: number;
+  machine_model: string;
+  entry_type: MachineKnowledgeEntryType;
+  title: string;
+  content: string;
+  fault_code?: string | null;
+  related_part?: MachineKnowledgePart | null;
+  related_part_role?: MachineKnowledgePartRole | null;
+  alternative_for_part?: MachineKnowledgePart | null;
+  installation_location?: string | null;
+  media_url?: string | null;
+  media_mime_type?: string | null;
+  published_at?: string | null;
+  confidence: number;
+  reason: string;
+}
+
+export interface WorkOrderServiceIntelligence {
+  work_order_id: number;
+  evidence_scope: "organization_completed_work_orders_and_published_exact_model_knowledge";
+  fault_analysis: ServiceIntelligenceFaultAnalysis;
+  knowledge_entries: ServiceIntelligenceKnowledgeEntry[];
+  similar_work_orders: ServiceIntelligenceSimilarWorkOrder[];
+}
+
 export interface WorkOrderPartRecommendation {
   part: Part;
   recommended_quantity: number;

@@ -33,8 +33,12 @@ import {
   ImportBatch,
   InvitationCreated,
   InvitationInfo,
-  WorkOrderProfit
-  ,WorkOrderPartRecommendation, WorkOrderVoiceNote, WorkOrderServiceContext, CompletionPolicy
+  WorkOrderProfit,
+  WorkOrderPartRecommendation,
+  WorkOrderVoiceNote,
+  WorkOrderServiceContext,
+  WorkOrderServiceIntelligence,
+  CompletionPolicy
 } from "@/types";
 import { ensureDeviceCredentials, getCurrentDeviceId, getCurrentDeviceToken } from "@/lib/device";
 
@@ -630,6 +634,8 @@ export const api = {
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=100"),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),
+  getWorkOrderServiceIntelligence: (workOrderId: number) =>
+    request<WorkOrderServiceIntelligence>(`/work-orders/${workOrderId}/service-intelligence`),
   listCompletionPolicies: () => request<CompletionPolicy[]>("/completion-policies"),
   saveCompletionPolicy: (payload: Omit<CompletionPolicy, "id" | "organization_id" | "source">) =>
     request<CompletionPolicy>("/completion-policies", { method: "POST", body: JSON.stringify(payload) }),

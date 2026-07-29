@@ -143,6 +143,7 @@ from app.schemas import (
     WorkOrderRead,
     WorkOrderUpdate,
     WorkOrderServiceContext,
+    WorkOrderServiceIntelligence,
     WorkOrderVoiceNoteRead,
     WarehouseSummary,
 )
@@ -160,6 +161,7 @@ from app.services.inventory import (
     begin_inventory_write,
 )
 from app.services.recommendations import build_part_recommendations
+from app.services.service_intelligence import build_service_intelligence
 from app.services.visual_recognition import generate_visual_part_candidates
 
 router = APIRouter()
@@ -2553,6 +2555,22 @@ def get_work_order_service_context(
         "fallback_equipment_model": current.machine_type,
         "history": history,
     }
+
+
+@router.get(
+    "/work-orders/{work_order_id}/service-intelligence",
+    response_model=WorkOrderServiceIntelligence,
+)
+def get_work_order_service_intelligence(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    current = db.get(WorkOrder, work_order_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    return build_service_intelligence(db, current, actor.organization_id)
 
 
 @router.patch("/work-orders/{work_order_id}", response_model=WorkOrderRead)

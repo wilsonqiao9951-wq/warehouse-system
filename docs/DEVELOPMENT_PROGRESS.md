@@ -385,3 +385,29 @@ Verification:
 - Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 28 static routes.
 - Production dependency audit: 0 vulnerabilities.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-28 - Phase 5 explainable service intelligence
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added a read-only work-order intelligence API for every same-organization operational role.
+- Ranked up to five locked completed work orders by exact machine, work type, fault, error code, and symptom similarity with a visible score and match reason.
+- Added exact-model completed-job analysis for labeled first-time-fix rate, rework rate, average repair duration, common fault types, and common error codes.
+- Added explicit no-evidence, low-sample, and elevated-rework warnings so historical statistics are not presented as a certain diagnosis.
+- Ranked up to eight administrator-published entries from the active exact-model knowledge profile against the current error code, fault terms, and symptoms.
+- Kept draft, archived, inactive-profile, unlocked, incomplete, and cross-tenant evidence out of every result.
+- Returned service-safe part and historical fields without financial values, customer signatures, supplier/cost data, or device secrets.
+- Added mobile work-order metrics, published guidance with authenticated media access, and expandable similar-case outcomes/parts.
+- Preserved the ownership boundary: other engineers can read the intelligence for a shared work order but still cannot modify it.
+- No database migration is required; this batch computes from the governed Phase 3 and Phase 5 evidence already stored at schema head `20260728_0026`.
+
+Verification:
+
+- Service intelligence ranking, publication, shared visibility, safe-response, and tenant-isolation target suite: 3 passed.
+- Backend: full suite passed, 92 tests.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 28 static routes.
+- Production dependency audit: 0 vulnerabilities.
+- Database: no migration required; schema head remains `20260728_0026`.
+- Source hygiene: `git diff --check` passed.

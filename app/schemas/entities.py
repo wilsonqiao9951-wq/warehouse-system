@@ -1122,6 +1122,71 @@ class WorkOrderServiceContext(BaseModel):
     history: list[ServiceHistoryItem] = Field(default_factory=list)
 
 
+class ServiceIntelligencePattern(BaseModel):
+    value: str
+    count: int = Field(ge=1)
+
+
+class ServiceIntelligenceFaultAnalysis(BaseModel):
+    machine_model: str | None = None
+    completed_work_orders: int = Field(default=0, ge=0)
+    labeled_outcomes: int = Field(default=0, ge=0)
+    first_time_fix_rate: float | None = Field(default=None, ge=0, le=1)
+    rework_rate: float | None = Field(default=None, ge=0, le=1)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    top_fault_types: list[ServiceIntelligencePattern] = Field(default_factory=list)
+    top_error_codes: list[ServiceIntelligencePattern] = Field(default_factory=list)
+    summary: str
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ServiceIntelligenceSimilarWorkOrder(BaseModel):
+    id: int
+    ticket_number: str
+    completed_at: datetime | None = None
+    job_type: str | None = None
+    problem_description: str | None = None
+    fault_type: str | None = None
+    error_code: str | None = None
+    repair_result: str | None = None
+    final_outcome: str | None = None
+    first_time_fix: bool | None = None
+    is_rework: bool = False
+    repair_duration_minutes: int | None = None
+    parts_used: list[ServiceHistoryPart] = Field(default_factory=list)
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+
+
+class ServiceIntelligenceKnowledgeEntry(BaseModel):
+    id: int
+    profile_id: int
+    machine_model: str
+    entry_type: MachineKnowledgeEntryType
+    title: str
+    content: str
+    fault_code: str | None = None
+    related_part: MachineKnowledgePartRead | None = None
+    related_part_role: MachineKnowledgePartRole | None = None
+    alternative_for_part: MachineKnowledgePartRead | None = None
+    installation_location: str | None = None
+    media_url: str | None = None
+    media_mime_type: str | None = None
+    published_at: datetime | None = None
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+
+
+class WorkOrderServiceIntelligence(BaseModel):
+    work_order_id: int
+    evidence_scope: Literal[
+        "organization_completed_work_orders_and_published_exact_model_knowledge"
+    ]
+    fault_analysis: ServiceIntelligenceFaultAnalysis
+    knowledge_entries: list[ServiceIntelligenceKnowledgeEntry] = Field(default_factory=list)
+    similar_work_orders: list[ServiceIntelligenceSimilarWorkOrder] = Field(default_factory=list)
+
+
 class WorkOrderVoiceNoteRead(BaseModel):
     id: int
     organization_id: int

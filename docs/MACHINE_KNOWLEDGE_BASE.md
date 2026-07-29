@@ -109,4 +109,6 @@ Every mutation uses server-enforced role checks. Profile and entry changes use `
 
 ## Mobile workflow
 
-The `/knowledge-base` workspace is available to engineers, managers, administrators, and warehouse users. A work-order detail page links directly to its exact machine model. Managers and administrators can generate drafts, upload protected media, and classify recommended/alternative parts and installation locations. Engineers and warehouse users see only published entries on active profiles.
+The `/knowledge-base` workspace is available to engineers, managers, administrators, and warehouse users. A work-order detail page links directly to its exact machine model and ranks published exact-model guidance against the current fault, error code, and symptoms. Managers and administrators can generate drafts, upload protected media, and classify recommended/alternative parts and installation locations. Engineers and warehouse users see only published entries on active profiles.
+
+The read-only work-order intelligence contract is documented in [`SERVICE_INTELLIGENCE.md`](SERVICE_INTELLIGENCE.md). It never promotes a draft or writes learned output back to a work order automatically.

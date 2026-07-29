@@ -7,7 +7,7 @@ OpenPartsFlow separates visibility, field execution, and management. Frontend ca
 | Operation | Other engineer | Active claimant on bound device | Manager | Admin | Warehouse |
 | --- | --- | --- | --- | --- | --- |
 | View organization work-order pool and progress | Allow | Allow | Allow | Allow | Deny |
-| View service context, parts, evidence, and history | Allow | Allow | Allow | Allow | Existing scoped read only |
+| View service context, service intelligence, parts, evidence, and history | Allow | Allow | Allow | Allow | Existing scoped read only |
 | Claim an available work order | Allow with verified Bearer device | Idempotent on same device | Deny | Deny | Deny |
 | Edit field data | Deny | Allow with current claim version | Deny | Allow with audit | Deny |
 | Start/pause/add evidence/use parts | Deny | Allow with current claim version | Deny | Allow with audit | Deny |
@@ -29,6 +29,8 @@ OpenPartsFlow separates visibility, field execution, and management. Frontend ca
 `POST /api/work-orders/{id}/claim` requires an engineer Bearer token plus a verified registered device. It uses one conditional database update, so concurrent claim attempts have a single winner.
 
 `POST /api/work-orders/{id}/release` is restricted to managers/admins, requires a reason, clears the claim, increments `claim_version`, and records an audit event.
+
+`GET /api/work-orders/{id}/service-intelligence` follows the shared read scope. It uses only tenant-scoped locked completions and published active exact-model knowledge. Another engineer may inspect its evidence and progress, but the response creates no write capability and omits financial values, customer signatures, commercial part fields, and device secrets.
 
 ## Field execution APIs
 
@@ -89,6 +91,7 @@ Claim, release, execution, approval, rejection, and completion actions record th
 - Completion fails with an incorrect password and permanently records the correct engineer/device.
 - Manager approval preserves engineer attribution.
 - Other engineers can read the owner's parts and progress records but cannot mutate them.
+- Service-intelligence tests prove published-only knowledge, deterministic ranking, shared engineer read access, and cross-tenant evidence exclusion.
 - Administrators can correct unlocked records with their own audit attribution; managers cannot impersonate the field owner.
 - Releasing a claim invalidates the prior user's device and queued claim generation.
 
