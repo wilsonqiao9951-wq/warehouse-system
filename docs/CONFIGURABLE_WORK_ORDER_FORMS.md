@@ -133,11 +133,26 @@ The mobile workbench can retain configured-form edits while the browser reports 
 
 Repeated offline saves for the same account, device, work order, claim generation, and form version are merged into one retained operation. Signing out does not discard pending work, but a different account or device cannot list or replay it.
 
-The client refreshes visible work-order claim generations before replay. A released or reclaimed work order is marked blocked and its local record is retained. A server form-version conflict is marked as a conflict and retained without overwriting either server data or the local queue record. Authentication, authorization, and claim-generation failures are also retained as blocked operations.
+The client refreshes every queued work order directly before replay instead of relying on a paginated work-order list. A released or reclaimed work order is marked blocked and its local record is retained. A server form-version conflict is marked as a conflict and retained without overwriting either server data or the local queue record. Authentication, authorization, and claim-generation failures are also retained as blocked operations.
 
-The sync center shows pending, failed, blocked, and conflicting records without exposing submitted field or signature values. It supports an explicit retry after an ownership or connectivity problem has been reviewed. Conflicts remain locked for administrator resolution. Eligible operations retry when the application starts online and when network connectivity returns.
+When a stale form version is confirmed, the claiming engineer's authenticated phone registers an idempotent, tenant-scoped server conflict containing the offline candidate, the server snapshot at detection, account, device, claim generation, form versions, and a payload hash. The phone receives only the conflict receipt. Retrying the same queue record returns the original receipt; reusing its queue id for changed data is rejected.
+
+The sync center shows pending, failed, blocked, and conflicting records without exposing submitted field or signature values. It supports an explicit retry after an ownership or connectivity problem has been reviewed. Registered conflicts remain locked for administrator resolution. Eligible operations retry when the application starts online and when network connectivity returns. After an administrator resolves a registered conflict, only the originating account and registered device can observe its receipt and remove the local copy.
 
 Configured-form values are the first supported offline write. Verified status transitions, claiming/releasing, completion and approval, inventory custody, and photo-file uploads remain online-only. The API repeats all ownership, device, claim-generation, type, size, form-version, and frozen-evidence checks during replay.
+
+## Offline conflict APIs
+
+```text
+POST  /api/work-order-form-conflicts
+GET   /api/work-order-form-conflicts
+GET   /api/work-order-form-conflicts/{conflict_id}/status
+PATCH /api/work-order-form-conflicts/{conflict_id}
+```
+
+Only the exact claiming engineer account and registered device can create a conflict. Only administrators can list full local/server evidence or resolve it. Managers, warehouse users, other engineers, devices, and organizations cannot inspect the conflict values.
+
+An administrator can keep the current server values, apply the offline copy, or choose a field-by-field merge. Every decision requires optimistic conflict and current server-form versions plus resolution notes. If the server changes again, resolution returns `409` until the administrator refreshes the comparison. Applying or merging repeats immutable-schema type and size validation, advances the form version only for real changes, creates normal form-action tasks, and writes the resolving administrator and decision to the audit log. Frozen evidence can only keep the server version.
 
 ## User interfaces
 
@@ -146,6 +161,7 @@ Configured-form values are the first supported offline write. Verified status tr
 - `/work-order-details`: dynamic mobile controls, camera upload, drawn signature, required-field status, verified save, and read-only visibility for non-owners.
 - `/form-actions`: role-scoped notification/inventory-review inbox with acknowledgment, resolution, and links back to the source job.
 - `/sync-center`: account/device-isolated retained operations, claim-generation blocks, form-version conflicts, attempts, and explicit retry.
+- `/sync-conflicts`: administrator-only field comparison, server-change warning, keep/apply/merge decisions, and resolution evidence.
 
 ## Migration
 
@@ -156,6 +172,8 @@ Revision `20260729_0029` creates:
 - the template link, template version, form version, schema snapshot, and value snapshot on `work_orders`
 
 Revision `20260729_0030` creates `work_order_form_actions` with trigger uniqueness, status/type/version constraints, actor attribution, resolution evidence, and organization/status/type indexes. Downgrade is blocked while action evidence exists so acknowledged or resolved workflow history cannot be silently discarded.
+
+Revision `20260729_0031` creates `work_order_form_conflicts` with per-organization queue idempotency, creator account/device, claim and form versions, local/server snapshots, payload hash, optimistic status, administrator resolution evidence, and organization/status indexes. Downgrade is blocked while any conflict evidence exists.
 
 Apply with:
 

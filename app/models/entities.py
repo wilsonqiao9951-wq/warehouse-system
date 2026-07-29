@@ -661,6 +661,82 @@ class WorkOrderFormAction(Base):
     organization = relationship("Organization")
 
 
+class WorkOrderFormConflict(Base):
+    __tablename__ = "work_order_form_conflicts"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "client_queue_id",
+            name="uq_work_order_form_conflict_org_queue",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'kept_server', 'applied_local', 'merged')",
+            name="ck_work_order_form_conflict_status",
+        ),
+        CheckConstraint(
+            "base_form_version >= 0 AND server_form_version >= 0",
+            name="ck_work_order_form_conflict_form_versions_non_negative",
+        ),
+        CheckConstraint(
+            "claim_version >= 0 AND version >= 0",
+            name="ck_work_order_form_conflict_versions_non_negative",
+        ),
+        CheckConstraint(
+            "resolved_server_form_version IS NULL OR resolved_server_form_version >= 0",
+            name="ck_work_order_form_conflict_resolved_version_non_negative",
+        ),
+        Index(
+            "ix_work_order_form_conflicts_org_status",
+            "organization_id",
+            "status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    work_order_id: Mapped[int] = mapped_column(
+        ForeignKey("work_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    client_queue_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    created_device_id: Mapped[int] = mapped_column(
+        ForeignKey("user_devices.id"), nullable=False
+    )
+    claim_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_form_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    server_form_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    local_values_json: Mapped[str] = mapped_column(Text, nullable=False)
+    server_values_json: Mapped[str] = mapped_column(Text, nullable=False)
+    local_payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(24), default="pending", nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    resolved_values_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_server_form_version: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    work_order = relationship("WorkOrder")
+    creator = relationship("User", foreign_keys=[created_by])
+    created_device = relationship("UserDevice", foreign_keys=[created_device_id])
+    resolver = relationship("User", foreign_keys=[resolved_by])
+    organization = relationship("Organization")
+
+
 class WorkOrder(Base):
     __tablename__ = "work_orders"
     __table_args__ = (

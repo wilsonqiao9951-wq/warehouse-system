@@ -614,6 +614,95 @@ class WorkOrderFormUpdate(BaseModel):
         return values
 
 
+class WorkOrderFormConflictCreate(BaseModel):
+    work_order_id: int = Field(ge=1)
+    client_queue_id: str = Field(min_length=8, max_length=80)
+    claim_version: int = Field(ge=0)
+    base_form_version: int = Field(ge=0)
+    local_values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+
+    @field_validator("client_queue_id")
+    @classmethod
+    def normalize_queue_id(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("local_values")
+    @classmethod
+    def bound_local_values(
+        cls,
+        values: dict[str, WorkOrderFormValue],
+    ) -> dict[str, WorkOrderFormValue]:
+        if len(values) > 100:
+            raise ValueError("Form cannot contain more than 100 values")
+        encoded = json.dumps(values, separators=(",", ":"), default=str)
+        if len(encoded.encode("utf-8")) > 262_144:
+            raise ValueError("Form values cannot exceed 256 KiB")
+        return values
+
+
+class WorkOrderFormConflictReceipt(BaseModel):
+    id: int
+    status: Literal["pending", "kept_server", "applied_local", "merged"]
+    version: int = Field(ge=0)
+
+
+class WorkOrderFormConflictRead(WorkOrderFormConflictReceipt):
+    organization_id: int
+    work_order_id: int
+    work_order_ticket_number: str
+    client_queue_id: str
+    created_by: int
+    created_by_name: str | None = None
+    created_device_id: int
+    created_device_name: str | None = None
+    claim_version: int = Field(ge=0)
+    base_form_version: int = Field(ge=0)
+    server_form_version: int = Field(ge=0)
+    current_server_form_version: int = Field(ge=0)
+    local_values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+    server_values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+    current_server_values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+    resolved_values: dict[str, WorkOrderFormValue] | None = None
+    resolved_server_form_version: int | None = Field(default=None, ge=0)
+    resolution_notes: str | None = None
+    resolved_by: int | None = None
+    resolved_by_name: str | None = None
+    resolved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkOrderFormConflictResolve(BaseModel):
+    expected_version: int = Field(ge=0)
+    expected_server_form_version: int = Field(ge=0)
+    action: Literal["keep_server", "apply_local", "merge"]
+    values: dict[str, WorkOrderFormValue] | None = None
+    resolution_notes: str = Field(min_length=3, max_length=2000)
+
+    @field_validator("resolution_notes")
+    @classmethod
+    def normalize_conflict_notes(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("Resolution notes must contain at least 3 characters")
+        return normalized
+
+    @field_validator("values")
+    @classmethod
+    def bound_resolution_values(
+        cls,
+        values: dict[str, WorkOrderFormValue] | None,
+    ) -> dict[str, WorkOrderFormValue] | None:
+        if values is None:
+            return None
+        if len(values) > 100:
+            raise ValueError("Form cannot contain more than 100 values")
+        encoded = json.dumps(values, separators=(",", ":"), default=str)
+        if len(encoded.encode("utf-8")) > 262_144:
+            raise ValueError("Form values cannot exceed 256 KiB")
+        return values
+
+
 class WorkOrderFormActionRead(BaseModel):
     id: int
     organization_id: int

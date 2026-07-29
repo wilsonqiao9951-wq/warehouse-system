@@ -89,7 +89,7 @@ export default function SyncCenterPage() {
                 {item.stale && <div className="notice notice-error" style={{ marginTop: 8 }}>Blocked: this work order was released or reclaimed. The queued change will not be replayed.</div>}
                 {!item.stale && item.syncState === "conflict" && (
                   <div className="notice notice-error" style={{ marginTop: 8 }}>
-                    Conflict retained: the server form changed after this offline copy was opened. Local data has not overwritten the server; administrator resolution is required.
+                    Conflict retained{item.serverConflictId ? ` as review #${item.serverConflictId}` : ""}: the server form changed after this offline copy was opened. Local data has not overwritten the server; administrator resolution is required.
                   </div>
                 )}
                 {!item.stale && item.blockedReason && <div className="notice notice-error" style={{ marginTop: 8 }}>Last sync attempt: {item.blockedReason}</div>}

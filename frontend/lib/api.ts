@@ -45,6 +45,9 @@ import {
   CompletionPolicy,
   WorkOrderForm,
   WorkOrderFormAction,
+  WorkOrderFormConflict,
+  WorkOrderFormConflictReceipt,
+  WorkOrderFormConflictStatus,
   WorkOrderFormField,
   WorkOrderFormTemplate,
   WorkOrderFormValue,
@@ -72,6 +75,7 @@ interface OfflineQueueItem {
   attemptCount: number;
   lastAttemptAt?: string;
   blockedReason?: string;
+  serverConflictId?: number;
 }
 
 class ApiRequestError extends Error {
@@ -150,6 +154,7 @@ function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (path === "/integrations" || path.startsWith("/integrations/")) return true;
   if (path === "/work-order-form-templates" || path.startsWith("/work-order-form-templates/")) return true;
   if (path === "/work-order-form-actions" || path.startsWith("/work-order-form-actions/")) return true;
+  if (path === "/work-order-form-conflicts" || path.startsWith("/work-order-form-conflicts/")) return true;
   if (path === "/machine-knowledge" || path.startsWith("/machine-knowledge/")) return true;
   if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
   if (path === "/inventory/vehicle-returns" || path.startsWith("/inventory/vehicle-returns/")) return true;
@@ -444,9 +449,16 @@ export async function syncOfflineQueue(): Promise<number> {
   const queue = readOfflineQueue();
   if (!queue.length) return 0;
   const currentQueue = queue.filter((row) => row.userId === userId && row.deviceId === deviceId);
-  if (currentQueue.some((row) => row.workOrderId !== undefined)) {
+  const queuedWorkOrderIds = Array.from(new Set(
+    currentQueue
+      .map((row) => row.workOrderId)
+      .filter((id): id is number => id !== undefined)
+  ));
+  if (queuedWorkOrderIds.length) {
     try {
-      await request<WorkOrder[]>("/work-orders?scope=all&limit=100");
+      for (const workOrderId of queuedWorkOrderIds) {
+        await request<WorkOrder>(`/work-orders/${workOrderId}`);
+      }
     } catch {
       return 0;
     }
@@ -454,7 +466,36 @@ export async function syncOfflineQueue(): Promise<number> {
   let remaining = [...queue];
   let synced = 0;
   for (const item of currentQueue) {
-    if (item.syncState === "conflict" || item.syncState === "blocked") {
+    if (item.syncState === "conflict") {
+      if (item.serverConflictId) {
+        try {
+          const receipt = await request<WorkOrderFormConflictReceipt>(
+            `/work-order-form-conflicts/${item.serverConflictId}/status`,
+            undefined,
+            false
+          );
+          if (receipt.status !== "pending") {
+            remaining = remaining.filter((row) => row !== item);
+            synced += 1;
+          }
+        } catch (error) {
+          item.blockedReason = error instanceof Error
+            ? error.message
+            : "Could not refresh administrator conflict resolution.";
+        }
+        continue;
+      }
+      if (item.operationType !== "work_order_form") {
+        item.syncState = "blocked";
+        item.blockedReason = "This legacy conflict requires manual review before retry.";
+        continue;
+      }
+      // Upgrade pre-server-conflict queue records by replaying once. A stale
+      // version will enter the authenticated registration path below.
+      item.syncState = "pending";
+      item.blockedReason = undefined;
+    }
+    if (item.syncState === "blocked") {
       continue;
     }
     if (item.workOrderId !== undefined) {
@@ -477,9 +518,54 @@ export async function syncOfflineQueue(): Promise<number> {
       synced += 1;
     } catch (error) {
       item.blockedReason = error instanceof Error ? error.message : "Sync failed";
+      if (
+        item.operationType === "work_order_form"
+        && error instanceof ApiRequestError
+        && error.status === 409
+        && error.message === "Work-order form version is stale"
+        && item.workOrderId !== undefined
+        && item.claimVersion !== undefined
+      ) {
+        try {
+          const formPayload = JSON.parse(item.body) as {
+            expected_version: number;
+            values: Record<string, WorkOrderFormValue>;
+          };
+          const receipt = await request<WorkOrderFormConflictReceipt>(
+            "/work-order-form-conflicts",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                work_order_id: item.workOrderId,
+                client_queue_id: item.id,
+                claim_version: item.claimVersion,
+                base_form_version: formPayload.expected_version,
+                local_values: formPayload.values
+              }),
+              headers: { "X-Claim-Version": String(item.claimVersion) }
+            },
+            false
+          );
+          item.serverConflictId = receipt.id;
+          item.syncState = "conflict";
+          item.blockedReason = "Server form changed; administrator resolution is pending.";
+          continue;
+        } catch (registrationError) {
+          item.blockedReason = registrationError instanceof Error
+            ? `Conflict retained locally; server registration failed: ${registrationError.message}`
+            : "Conflict retained locally; server registration failed.";
+          item.syncState = (
+            registrationError instanceof ApiRequestError
+            && [401, 403, 409, 428].includes(registrationError.status)
+          )
+            ? "blocked"
+            : "failed";
+          continue;
+        }
+      }
       item.syncState = (
         error instanceof ApiRequestError && error.status === 409
-          ? "conflict"
+          ? "blocked"
           : error instanceof ApiRequestError && [401, 403, 428].includes(error.status)
             ? "blocked"
             : "failed"
@@ -511,6 +597,7 @@ export function getOfflineQueue(): Array<{
   syncState: OfflineQueueItem["syncState"];
   attemptCount: number;
   lastAttemptAt?: string;
+  serverConflictId?: number;
   stale: boolean;
   blockedReason?: string;
 }> {
@@ -520,7 +607,7 @@ export function getOfflineQueue(): Array<{
   const versions = readClaimVersions();
   return readOfflineQueue()
     .filter((row) => row.userId === userId && row.deviceId === deviceId)
-    .map(({ id, path, method, queuedAt, updatedAt, workOrderId, claimVersion, operationType, syncState, attemptCount, lastAttemptAt, blockedReason }) => ({
+    .map(({ id, path, method, queuedAt, updatedAt, workOrderId, claimVersion, operationType, syncState, attemptCount, lastAttemptAt, serverConflictId, blockedReason }) => ({
       id,
       path,
       method,
@@ -532,6 +619,7 @@ export function getOfflineQueue(): Array<{
       syncState,
       attemptCount,
       lastAttemptAt,
+      serverConflictId,
       stale: workOrderId !== undefined && versions[String(workOrderId)] !== claimVersion,
       blockedReason
     }));
@@ -657,6 +745,8 @@ export const api = {
     if (!query.has("limit")) query.set("limit", "100");
     return request<WorkOrder[]>(`/work-orders?${query.toString()}`);
   },
+  getWorkOrder: (workOrderId: number) =>
+    request<WorkOrder>(`/work-orders/${workOrderId}`),
   createWorkOrder: (payload: Partial<WorkOrder> & { ticket_number: string }) =>
     request<WorkOrder>("/work-orders", { method: "POST", body: JSON.stringify(payload) }),
   listWorkOrderFormTemplates: (includeInactive = false) =>
@@ -704,6 +794,34 @@ export const api = {
     request<WorkOrderForm | OfflineQueuedResult>(`/work-orders/${workOrderId}/form`, {
       method: "PATCH",
       body: JSON.stringify({ expected_version: expectedVersion, values })
+    }),
+  listWorkOrderFormConflicts: (params?: {
+    status?: WorkOrderFormConflictStatus;
+    work_order_id?: number;
+    limit?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.work_order_id) query.set("work_order_id", String(params.work_order_id));
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString();
+    return request<WorkOrderFormConflict[]>(
+      `/work-order-form-conflicts${suffix ? `?${suffix}` : ""}`
+    );
+  },
+  resolveWorkOrderFormConflict: (
+    conflictId: number,
+    payload: {
+      expected_version: number;
+      expected_server_form_version: number;
+      action: "keep_server" | "apply_local" | "merge";
+      values?: Record<string, WorkOrderFormValue>;
+      resolution_notes: string;
+    }
+  ) =>
+    request<WorkOrderFormConflict>(`/work-order-form-conflicts/${conflictId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
     }),
   listWorkOrderFormActions: (params?: {
     status?: "pending" | "acknowledged" | "resolved";

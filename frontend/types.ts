@@ -583,6 +583,44 @@ export interface OfflineQueuedResult {
   queued_at: string;
 }
 
+export type WorkOrderFormConflictStatus =
+  | "pending"
+  | "kept_server"
+  | "applied_local"
+  | "merged";
+
+export interface WorkOrderFormConflictReceipt {
+  id: number;
+  status: WorkOrderFormConflictStatus;
+  version: number;
+}
+
+export interface WorkOrderFormConflict extends WorkOrderFormConflictReceipt {
+  organization_id: number;
+  work_order_id: number;
+  work_order_ticket_number: string;
+  client_queue_id: string;
+  created_by: number;
+  created_by_name: string | null;
+  created_device_id: number;
+  created_device_name: string | null;
+  claim_version: number;
+  base_form_version: number;
+  server_form_version: number;
+  current_server_form_version: number;
+  local_values: Record<string, WorkOrderFormValue>;
+  server_values: Record<string, WorkOrderFormValue>;
+  current_server_values: Record<string, WorkOrderFormValue>;
+  resolved_values: Record<string, WorkOrderFormValue> | null;
+  resolved_server_form_version: number | null;
+  resolution_notes: string | null;
+  resolved_by: number | null;
+  resolved_by_name: string | null;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkOrderFormField {
   id?: number | null;
   field_key: string;

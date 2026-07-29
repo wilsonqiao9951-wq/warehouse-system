@@ -22,6 +22,7 @@ const links = [
   { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
   { href: "/work-order-templates", label: "Job Forms", roles: ["manager", "admin"] },
   { href: "/form-actions", label: "Form Actions", roles: ["warehouse", "manager", "admin"] },
+  { href: "/sync-conflicts", label: "Sync Conflicts", roles: ["admin"] },
   { href: "/integrations", label: "Integrations", roles: ["manager", "admin"] },
   { href: "/platform", label: "Customers", roles: ["admin"] },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },

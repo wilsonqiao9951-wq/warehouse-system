@@ -550,3 +550,30 @@ Verification:
 - Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 31 static routes.
 - Production dependency audit: 0 vulnerabilities.
 - Backend schema and API behavior remain on the verified `0030` / 109-test baseline; replay uses the existing server ownership, device, claim-generation, form-version, frozen-evidence, type, and size checks.
+
+## 2026-07-29 - Phase 8 administrator sync-conflict resolution
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added durable tenant-scoped server conflicts for stale offline configured-form saves.
+- Bound conflict creation to the exact claiming engineer account, registered device, claim generation, work order, and offline form version.
+- Added per-organization queue idempotency plus canonical payload hashes so response-loss retries are safe and changed-data queue reuse is rejected.
+- Retained bounded offline/server snapshots for administrator review while exposing only a status receipt to the originating phone.
+- Restricted full conflict listing and resolution to administrators; managers, warehouse users, other engineers/devices, and organizations cannot inspect values or decide outcomes.
+- Added keep-server, apply-offline, and field-by-field merge outcomes with optimistic conflict and current-server versions, mandatory notes, resolver attribution, and timestamps.
+- Forced administrators to refresh if the server changes again after conflict detection.
+- Reused immutable form-schema validation and generated normal notification/inventory-review tasks for real values applied by a resolution.
+- Prevented application to frozen completion/approval evidence while still allowing an administrator to close the conflict by keeping server values.
+- Added origin-device resolution polling so a resolved server record can safely replace and clear the retained local copy.
+- Added exact single-work-order reads and changed replay preflight to refresh every queued work order without list pagination gaps.
+- Added the administrator-only `/sync-conflicts` comparison and resolution workspace.
+- Added Alembic revision `20260729_0031` with downgrade protection for retained conflict evidence.
+
+Verification:
+
+- Conflict, idempotency, account/device, administrator role, cross-tenant, merge, server-revision, form-action, and claim regression suite: 17 passed.
+- Backend: all 111 tests passed in two bounded groups (45 plus 66).
+- Database: fresh base-to-`0031` and empty `0031 -> 0030 -> 0031` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 32 static routes.

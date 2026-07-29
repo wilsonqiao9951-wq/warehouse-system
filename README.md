@@ -160,7 +160,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260729_0030` (durable configured-form notification and inventory-review actions).
+- Current schema head: `20260729_0031` (audited offline configured-form conflict resolution).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

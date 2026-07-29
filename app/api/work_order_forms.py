@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from hashlib import sha256
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +13,7 @@ from app.core.database import get_db
 from app.core.rbac import (
     Actor,
     get_current_actor,
+    require_bound_device,
     require_roles,
     require_work_order_scope,
     require_work_order_write_scope,
@@ -19,14 +21,20 @@ from app.core.rbac import (
 from app.models import (
     AuditLog,
     User,
+    UserDevice,
     UserRole,
     WorkOrder,
     WorkOrderFormAction,
+    WorkOrderFormConflict,
     WorkOrderFormTemplate,
 )
 from app.schemas import (
     WorkOrderFormActionRead,
     WorkOrderFormActionUpdate,
+    WorkOrderFormConflictCreate,
+    WorkOrderFormConflictRead,
+    WorkOrderFormConflictReceipt,
+    WorkOrderFormConflictResolve,
     WorkOrderFormRead,
     WorkOrderFormTemplateCreate,
     WorkOrderFormTemplateRead,
@@ -149,6 +157,56 @@ def _form_action_read(
         can_resolve=can_resolve,
         created_at=task.created_at,
         updated_at=task.updated_at,
+    )
+
+
+def _stored_values(raw: str | None) -> dict:
+    try:
+        values = json.loads(raw or "{}")
+        return values if isinstance(values, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _form_conflict_read(
+    db: Session,
+    conflict: WorkOrderFormConflict,
+) -> WorkOrderFormConflictRead:
+    work_order = db.get(WorkOrder, conflict.work_order_id)
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    device = db.get(UserDevice, conflict.created_device_id)
+    return WorkOrderFormConflictRead(
+        id=conflict.id,
+        organization_id=conflict.organization_id,
+        work_order_id=conflict.work_order_id,
+        work_order_ticket_number=work_order.ticket_number,
+        client_queue_id=conflict.client_queue_id,
+        created_by=conflict.created_by,
+        created_by_name=_user_name(db, conflict.created_by),
+        created_device_id=conflict.created_device_id,
+        created_device_name=device.device_name if device else None,
+        claim_version=conflict.claim_version,
+        base_form_version=conflict.base_form_version,
+        server_form_version=conflict.server_form_version,
+        current_server_form_version=work_order.form_version,
+        local_values=_stored_values(conflict.local_values_json),
+        server_values=_stored_values(conflict.server_values_json),
+        current_server_values=work_order_form_values(work_order),
+        status=conflict.status,
+        version=conflict.version,
+        resolved_values=(
+            _stored_values(conflict.resolved_values_json)
+            if conflict.resolved_values_json is not None
+            else None
+        ),
+        resolved_server_form_version=conflict.resolved_server_form_version,
+        resolution_notes=conflict.resolution_notes,
+        resolved_by=conflict.resolved_by,
+        resolved_by_name=_user_name(db, conflict.resolved_by),
+        resolved_at=conflict.resolved_at,
+        created_at=conflict.created_at,
+        updated_at=conflict.updated_at,
     )
 
 
@@ -427,6 +485,311 @@ def update_work_order_form(
     db.commit()
     db.refresh(work_order)
     return work_order_form_read(db, work_order, can_edit=True)
+
+
+@router.post(
+    "/work-order-form-conflicts",
+    response_model=WorkOrderFormConflictReceipt,
+)
+def create_work_order_form_conflict(
+    payload: WorkOrderFormConflictCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.role != UserRole.ENGINEER:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the claiming engineer can register an offline form conflict",
+        )
+    require_bound_device(actor)
+    require_work_order_scope(db, actor, payload.work_order_id)
+    canonical_local = json.dumps(
+        payload.local_values,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    payload_hash = sha256(canonical_local.encode("utf-8")).hexdigest()
+    existing = db.scalar(
+        select(WorkOrderFormConflict).where(
+            WorkOrderFormConflict.client_queue_id == payload.client_queue_id
+        )
+    )
+    if existing:
+        if (
+            existing.work_order_id != payload.work_order_id
+            or existing.created_by != actor.user_id
+            or existing.created_device_id != actor.device_record_id
+            or existing.claim_version != payload.claim_version
+            or existing.base_form_version != payload.base_form_version
+            or existing.local_payload_hash != payload_hash
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Offline queue id was already used for different conflict data",
+            )
+        return WorkOrderFormConflictReceipt(
+            id=existing.id,
+            status=existing.status,
+            version=existing.version,
+        )
+
+    work_order = require_work_order_write_scope(db, actor, payload.work_order_id)
+    if payload.claim_version != work_order.claim_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Work order claim changed before conflict registration",
+        )
+    if payload.base_form_version == work_order.form_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Server form is not in conflict with the offline base version",
+        )
+    # Validate every local value against the immutable work-order form snapshot
+    # before any sensitive evidence is retained for administrator review.
+    merge_work_order_form_values(work_order, payload.local_values)
+    conflict = WorkOrderFormConflict(
+        organization_id=actor.organization_id,
+        work_order_id=work_order.id,
+        client_queue_id=payload.client_queue_id,
+        created_by=actor.user_id,
+        created_device_id=actor.device_record_id,
+        claim_version=payload.claim_version,
+        base_form_version=payload.base_form_version,
+        server_form_version=work_order.form_version,
+        local_values_json=canonical_local,
+        server_values_json=json.dumps(
+            work_order_form_values(work_order),
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        ),
+        local_payload_hash=payload_hash,
+    )
+    db.add(conflict)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Offline conflict could not be registered safely",
+        ) from exc
+    _audit(
+        db,
+        actor,
+        "create_work_order_form_conflict",
+        "work_order_form_conflict",
+        conflict.id,
+        {
+            "work_order_id": work_order.id,
+            "claim_version": payload.claim_version,
+            "base_form_version": payload.base_form_version,
+            "server_form_version": work_order.form_version,
+            "local_field_keys": sorted(payload.local_values),
+            "local_payload_hash": payload_hash,
+        },
+    )
+    db.commit()
+    db.refresh(conflict)
+    return WorkOrderFormConflictReceipt(
+        id=conflict.id,
+        status=conflict.status,
+        version=conflict.version,
+    )
+
+
+@router.get(
+    "/work-order-form-conflicts",
+    response_model=list[WorkOrderFormConflictRead],
+)
+def list_work_order_form_conflicts(
+    status: str | None = Query(
+        default=None,
+        pattern="^(pending|kept_server|applied_local|merged)$",
+    ),
+    work_order_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    stmt = select(WorkOrderFormConflict)
+    if status:
+        stmt = stmt.where(WorkOrderFormConflict.status == status)
+    if work_order_id:
+        stmt = stmt.where(WorkOrderFormConflict.work_order_id == work_order_id)
+    conflicts = db.scalars(
+        stmt.order_by(WorkOrderFormConflict.id.desc()).limit(limit)
+    ).all()
+    return [_form_conflict_read(db, conflict) for conflict in conflicts]
+
+
+@router.get(
+    "/work-order-form-conflicts/{conflict_id}/status",
+    response_model=WorkOrderFormConflictReceipt,
+)
+def get_work_order_form_conflict_status(
+    conflict_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    conflict = db.get(WorkOrderFormConflict, conflict_id)
+    if not conflict:
+        raise HTTPException(status_code=404, detail="Work-order form conflict not found")
+    if actor.role != UserRole.ADMIN:
+        if actor.role != UserRole.ENGINEER:
+            raise HTTPException(status_code=403, detail="Conflict status access denied")
+        require_bound_device(actor)
+        if (
+            conflict.created_by != actor.user_id
+            or conflict.created_device_id != actor.device_record_id
+        ):
+            raise HTTPException(status_code=403, detail="Conflict status access denied")
+    return WorkOrderFormConflictReceipt(
+        id=conflict.id,
+        status=conflict.status,
+        version=conflict.version,
+    )
+
+
+@router.patch(
+    "/work-order-form-conflicts/{conflict_id}",
+    response_model=WorkOrderFormConflictRead,
+)
+def resolve_work_order_form_conflict(
+    conflict_id: int,
+    payload: WorkOrderFormConflictResolve,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    conflict = db.scalar(
+        select(WorkOrderFormConflict)
+        .where(WorkOrderFormConflict.id == conflict_id)
+        .with_for_update()
+    )
+    if not conflict:
+        raise HTTPException(status_code=404, detail="Work-order form conflict not found")
+    if conflict.status != "pending":
+        raise HTTPException(status_code=409, detail="Work-order form conflict is already resolved")
+    if conflict.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Conflict version is stale")
+    work_order = db.scalar(
+        select(WorkOrder)
+        .where(WorkOrder.id == conflict.work_order_id)
+        .with_for_update()
+    )
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    if work_order.form_version != payload.expected_server_form_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Server form changed again; refresh conflict before resolving",
+        )
+
+    resolution_values: dict | None = None
+    action_tasks: list[WorkOrderFormAction] = []
+    changed_fields: list[str] = []
+    if payload.action != "keep_server":
+        if work_order.is_locked or work_order.status == "PENDING_APPROVAL":
+            raise HTTPException(
+                status_code=409,
+                detail="Work-order form is frozen; only keeping the server version is allowed",
+            )
+        if payload.action == "apply_local":
+            resolution_values = _stored_values(conflict.local_values_json)
+        else:
+            if payload.values is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Merged resolution values are required",
+                )
+            resolution_values = payload.values
+        previous_values = work_order_form_values(work_order)
+        merged = merge_work_order_form_values(work_order, resolution_values)
+        changed_fields = sorted(
+            key
+            for key, value in resolution_values.items()
+            if value != previous_values.get(key)
+        )
+        if changed_fields:
+            work_order.form_data_json = json.dumps(
+                merged,
+                separators=(",", ":"),
+                default=str,
+            )
+            work_order.form_version += 1
+            fields = {
+                field.field_key: field
+                for field in work_order_form_fields(work_order)
+            }
+            action_tasks = create_form_action_tasks(
+                db,
+                work_order,
+                changed_fields=changed_fields,
+                fields=fields,
+                created_by=actor.user_id,
+            )
+            db.add(work_order)
+
+    conflict.status = {
+        "keep_server": "kept_server",
+        "apply_local": "applied_local",
+        "merge": "merged",
+    }[payload.action]
+    conflict.version += 1
+    conflict.resolved_values_json = (
+        json.dumps(
+            resolution_values,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        if resolution_values is not None
+        else None
+    )
+    conflict.resolved_server_form_version = work_order.form_version
+    conflict.resolution_notes = payload.resolution_notes
+    conflict.resolved_by = actor.user_id
+    conflict.resolved_at = datetime.utcnow()
+    db.add(conflict)
+    _audit(
+        db,
+        actor,
+        "resolve_work_order_form_conflict",
+        "work_order_form_conflict",
+        conflict.id,
+        {
+            "work_order_id": work_order.id,
+            "resolution": payload.action,
+            "changed_fields": changed_fields,
+            "resulting_form_version": work_order.form_version,
+            "action_task_ids": [task.id for task in action_tasks],
+        },
+    )
+    if action_tasks:
+        _audit(
+            db,
+            actor,
+            "work_order_form_actions_created_from_conflict_resolution",
+            "work_order",
+            work_order.id,
+            {
+                "conflict_id": conflict.id,
+                "tasks": [
+                    {
+                        "id": task.id,
+                        "field_key": task.field_key,
+                        "action_type": task.action_type,
+                    }
+                    for task in action_tasks
+                ],
+            },
+        )
+    db.commit()
+    db.refresh(conflict)
+    return _form_conflict_read(db, conflict)
 
 
 @router.get(

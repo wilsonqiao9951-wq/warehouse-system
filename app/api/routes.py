@@ -2386,6 +2386,19 @@ def list_work_orders(
     return [_work_order_read_for_actor(db, actor, item) for item in rows]
 
 
+@router.get("/work-orders/{work_order_id}", response_model=WorkOrderRead)
+def get_work_order(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    item = db.get(WorkOrder, work_order_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    return _work_order_read_for_actor(db, actor, item)
+
+
 @router.post("/work-orders/{work_order_id}/claim", response_model=WorkOrderRead)
 def claim_work_order(
     work_order_id: int,

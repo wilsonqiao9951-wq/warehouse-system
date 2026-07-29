@@ -391,3 +391,18 @@ Verification: configurable-form target suite 5 passed, full backend suite 106 pa
 - Blocks downgrade while any action evidence exists.
 
 Verification: form-action target suite 3 passed, all 109 backend tests passed in two bounded modules, fresh base-to-`0030` plus `0030 -> 0029 -> 0030` passed on SQLite, and the Next.js 16.2.12 production build generated all 31 static routes.
+
+## 20260729_0031 - Audited offline configured-form conflicts
+
+- Adds tenant-scoped server conflict records linked to the work order, originating engineer, registered device, claim generation, offline base version, and server version.
+- Stores bounded local and server form snapshots plus a canonical payload hash under administrator-only full-value access.
+- Enforces per-organization client queue idempotency and rejects changed-data reuse.
+- Adds pending, kept-server, applied-local, and merged states with optimistic versions, mandatory notes, resolver attribution, and timestamps.
+- Lets only the originating account and registered device create a conflict or poll its status receipt.
+- Lets only administrators compare full values and resolve by keeping server data, applying the offline copy, or selecting a field merge.
+- Requires the latest server form version at resolution and repeats immutable-schema validation; frozen evidence can only keep server data.
+- Generates normal notification/inventory-review tasks for real values applied through conflict resolution.
+- Adds exact work-order reads so offline replay refreshes every queued claim generation without a 100-record pagination gap.
+- Blocks downgrade while any conflict evidence exists.
+
+Verification: conflict, idempotency, account/device ownership, administrator role, cross-tenant, merge, server-revision, form-action, and claim regression suite 17 passed; all 111 backend tests passed in two bounded groups (45 plus 66); fresh base-to-`0031` plus `0031 -> 0030 -> 0031` passed on SQLite; the Next.js 16.2.12 production build generated all 32 static routes.
