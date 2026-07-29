@@ -432,9 +432,192 @@ class ImportBatchRead(BaseModel):
     created_at: datetime
 
 
+WorkOrderFormFieldType = Literal[
+    "text",
+    "textarea",
+    "number",
+    "boolean",
+    "date",
+    "select",
+    "photo",
+    "signature",
+]
+WorkOrderFormValue = str | int | float | bool | None
+
+
+class WorkOrderFormFieldCreate(BaseModel):
+    field_key: str = Field(
+        min_length=2,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9_]*$",
+    )
+    label: str = Field(min_length=1, max_length=160)
+    field_type: WorkOrderFormFieldType
+    help_text: str | None = Field(default=None, max_length=1000)
+    placeholder: str | None = Field(default=None, max_length=500)
+    default_value: WorkOrderFormValue = None
+    options: list[str] = Field(default_factory=list, max_length=100)
+    required_at_completion: bool = False
+    requires_photo: bool = False
+    requires_signature: bool = False
+    requires_approval: bool = False
+    triggers_notification: bool = False
+    affects_inventory: bool = False
+    include_in_ai_learning: bool = False
+    sort_order: int = Field(default=0, ge=0, le=10_000)
+
+    @field_validator("field_key")
+    @classmethod
+    def normalize_field_key(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("label")
+    @classmethod
+    def normalize_field_label(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field label cannot be blank")
+        return cleaned
+
+    @field_validator("options")
+    @classmethod
+    def validate_field_options(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            cleaned = value.strip()
+            if not cleaned or len(cleaned) > 160:
+                raise ValueError("Field options must contain 1 to 160 characters")
+            if cleaned not in normalized:
+                normalized.append(cleaned)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_type_configuration(self):
+        if self.field_type == "select" and not self.options:
+            raise ValueError("Select fields require at least one option")
+        if self.field_type != "select" and self.options:
+            raise ValueError("Only select fields may define options")
+        if self.requires_photo and self.field_type != "photo":
+            raise ValueError("requires_photo can only be set on photo fields")
+        if self.requires_signature and self.field_type != "signature":
+            raise ValueError("requires_signature can only be set on signature fields")
+        return self
+
+
+class WorkOrderFormTemplateCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    industry: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=5000)
+    applicable_machine_type: str | None = Field(default=None, max_length=255)
+    applicable_job_type: str | None = Field(default=None, max_length=120)
+    default_work_order_status: Literal["open", "scheduled"] = "open"
+    fields: list[WorkOrderFormFieldCreate] = Field(default_factory=list, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_template_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Template name must contain at least two characters")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_unique_field_keys(self):
+        keys = [field.field_key for field in self.fields]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Template field keys must be unique")
+        return self
+
+
+class WorkOrderFormTemplateUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    industry: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=5000)
+    applicable_machine_type: str | None = Field(default=None, max_length=255)
+    applicable_job_type: str | None = Field(default=None, max_length=120)
+    default_work_order_status: Literal["open", "scheduled"] | None = None
+    is_active: bool | None = None
+    fields: list[WorkOrderFormFieldCreate] | None = Field(default=None, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_template_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Template name must contain at least two characters")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_unique_field_keys(self):
+        if self.fields is None:
+            return self
+        keys = [field.field_key for field in self.fields]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Template field keys must be unique")
+        return self
+
+
+class WorkOrderFormFieldRead(WorkOrderFormFieldCreate):
+    id: int | None = None
+
+
+class WorkOrderFormTemplateRead(BaseModel):
+    id: int
+    organization_id: int
+    name: str
+    industry: str | None = None
+    description: str | None = None
+    applicable_machine_type: str | None = None
+    applicable_job_type: str | None = None
+    default_work_order_status: Literal["open", "scheduled"]
+    is_active: bool
+    version: int = Field(ge=0)
+    fields: list[WorkOrderFormFieldRead] = Field(default_factory=list)
+    created_by: int | None = None
+    updated_by: int | None = None
+    can_edit: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkOrderFormRead(BaseModel):
+    work_order_id: int
+    template_id: int | None = None
+    template_name: str | None = None
+    template_version: int | None = None
+    form_version: int = Field(ge=0)
+    fields: list[WorkOrderFormFieldRead] = Field(default_factory=list)
+    values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+    missing_required_fields: list[str] = Field(default_factory=list)
+    can_edit: bool = False
+    is_frozen: bool = False
+
+
+class WorkOrderFormUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+
+    @field_validator("values")
+    @classmethod
+    def bound_values(
+        cls,
+        values: dict[str, WorkOrderFormValue],
+    ) -> dict[str, WorkOrderFormValue]:
+        if len(values) > 100:
+            raise ValueError("Form cannot contain more than 100 values")
+        encoded = json.dumps(values, separators=(",", ":"), default=str)
+        if len(encoded.encode("utf-8")) > 262_144:
+            raise ValueError("Form values cannot exceed 256 KiB")
+        return values
+
+
 class WorkOrderCreate(BaseModel):
     customer_id: int | None = None
     equipment_id: int | None = None
+    form_template_id: int | None = Field(default=None, ge=1)
     ticket_number: str | None = None
     wo_number: str | None = None
     schedule_date: date | None = None
@@ -500,6 +683,8 @@ class WorkOrderUpdate(BaseModel):
 class WorkOrderRead(WorkOrderCreate):
     id: int
     organization_id: int
+    form_template_version: int | None = None
+    form_version: int = Field(default=0, ge=0)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     paused_at: datetime | None = None

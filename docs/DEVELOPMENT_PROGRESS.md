@@ -469,3 +469,31 @@ Verification:
 - Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 29 static routes.
 - Production dependency audit: 0 vulnerabilities; Python dependency consistency check passed.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-29 - Phase 7 configurable work-order forms
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added organization-owned work-order form templates with administrator editing and manager read-only review.
+- Added visual configuration for ordered text, long-text, number, yes/no, date, choice, photo, and signature fields.
+- Added typed defaults, exact machine/job applicability, initial work-order status, activation, and optimistic template versions.
+- Added completion-required, photo, signature, manager-approval, notification, inventory-declaration, and AI-learning controls.
+- Snapshotted the assigned template version, schema, rules, and defaults onto each new work order so template edits cannot rewrite historical jobs.
+- Added typed, bounded, optimistic form value updates and unknown-field rejection.
+- Preserved shared engineer visibility while limiting mutations to an administrator or the claiming engineer's authenticated account, registered phone, and current claim generation.
+- Froze configured evidence during approval and after completion.
+- Enforced required configured evidence through every server completion path and merged template approval requirements into the existing manager workflow.
+- Added mobile dynamic inputs, protected camera upload, drawn signatures, missing-evidence status, and verified saves.
+- Kept declared inventory impact separate from the custody ledger; form values cannot create stock movements.
+- Added Alembic revision `20260729_0029` and the configurable-form operator/API guide.
+
+Verification:
+
+- Configurable-form snapshot, validation, approval, ownership, role, and applicability target suite: 5 passed.
+- Backend: full suite passed, 106 tests.
+- Database: fresh base-to-`0029` and empty `0029 -> 0028 -> 0029` passed on SQLite.
+- Frontend: TypeScript and Next.js 16.2.12 production build passed for all 30 static routes.
+- Production dependency audit: 0 vulnerabilities; Python dependency consistency check passed.
+- Source hygiene: `git diff --check` passed.

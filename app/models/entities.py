@@ -466,6 +466,122 @@ class CompletionPolicy(Base):
     organization = relationship("Organization")
 
 
+class WorkOrderFormTemplate(Base):
+    __tablename__ = "work_order_form_templates"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "name",
+            name="uq_work_order_form_template_org_name",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_work_order_form_template_version_non_negative",
+        ),
+        CheckConstraint(
+            "default_work_order_status IN ('open', 'scheduled')",
+            name="ck_work_order_form_template_default_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    industry: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    applicable_machine_type: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    applicable_job_type: Mapped[str | None] = mapped_column(
+        String(120), nullable=True, index=True
+    )
+    default_work_order_status: Mapped[str] = mapped_column(
+        String(50), default="open", nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    fields = relationship(
+        "WorkOrderFormField",
+        back_populates="template",
+        cascade="all, delete-orphan",
+        order_by="WorkOrderFormField.sort_order, WorkOrderFormField.id",
+    )
+    organization = relationship("Organization")
+
+
+class WorkOrderFormField(Base):
+    __tablename__ = "work_order_form_fields"
+    __table_args__ = (
+        UniqueConstraint(
+            "template_id",
+            "field_key",
+            name="uq_work_order_form_field_template_key",
+        ),
+        CheckConstraint(
+            "field_type IN ('text', 'textarea', 'number', 'boolean', 'date', "
+            "'select', 'photo', 'signature')",
+            name="ck_work_order_form_field_type",
+        ),
+        CheckConstraint(
+            "sort_order >= 0",
+            name="ck_work_order_form_field_sort_non_negative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    template_id: Mapped[int] = mapped_column(
+        ForeignKey("work_order_form_templates.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    field_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(160), nullable=False)
+    field_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    help_text: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    placeholder: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    default_value_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    options_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    required_at_completion: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    requires_photo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    requires_signature: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    requires_approval: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    triggers_notification: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    affects_inventory: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    include_in_ai_learning: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    template = relationship("WorkOrderFormTemplate", back_populates="fields")
+    organization = relationship("Organization")
+
+
 class WorkOrder(Base):
     __tablename__ = "work_orders"
     __table_args__ = (
@@ -473,12 +589,29 @@ class WorkOrder(Base):
             "repair_duration_minutes IS NULL OR repair_duration_minutes >= 0",
             name="ck_work_order_repair_duration_non_negative",
         ),
+        CheckConstraint(
+            "form_version >= 0",
+            name="ck_work_order_form_version_non_negative",
+        ),
+        CheckConstraint(
+            "form_template_version IS NULL OR form_template_version >= 0",
+            name="ck_work_order_form_template_version_non_negative",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
     equipment_id: Mapped[int | None] = mapped_column(ForeignKey("equipment.id"), nullable=True, index=True)
+    form_template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_order_form_templates.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    form_template_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    form_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    form_schema_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    form_data_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     claimed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     claimed_device_id: Mapped[int | None] = mapped_column(ForeignKey("user_devices.id"), nullable=True)
@@ -540,6 +673,7 @@ class WorkOrder(Base):
     completed_by = relationship("User", foreign_keys=[completed_by_id])
     claimed_device = relationship("UserDevice", foreign_keys=[claimed_device_id])
     completed_device = relationship("UserDevice", foreign_keys=[completed_device_id])
+    form_template = relationship("WorkOrderFormTemplate")
 
 
 class ExternalIntegration(Base):

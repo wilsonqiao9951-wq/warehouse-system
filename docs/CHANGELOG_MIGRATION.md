@@ -366,3 +366,15 @@ Verification: external integration target suite 4 passed, full backend suite 96 
 - Rejects non-HTTPS and local/private/reserved Webhook targets.
 
 Verification: external delivery target suite 5 passed, full backend suite 101 passed, fresh base-to-`0028` plus `0028 -> 0027 -> 0028` passed on SQLite, and the Next.js 16.2.12 production build generated all 29 static routes.
+
+## 20260729_0029 - Configurable work-order forms
+
+- Adds tenant-scoped work-order form templates and ordered text, textarea, number, boolean, date, select, photo, and signature fields.
+- Adds typed defaults, applicability filters, completion requirements, approval, notification, inventory-declaration, and AI-learning flags.
+- Snapshots the exact template version, schema, rules, and defaults onto every assigned work order so later template changes cannot rewrite history.
+- Adds optimistic template and form value versions, bounded payloads, typed validation, and immutable evidence after approval submission or completion.
+- Keeps forms visible to all same-organization engineers while restricting updates to an administrator or the exact claiming engineer account, registered device, and claim generation.
+- Merges configured approval fields into the existing completion policy and blocks completion while configured required evidence is missing.
+- Treats inventory-impact flags as governed metadata; dynamic form submissions never mutate physical inventory.
+
+Verification: configurable-form target suite 5 passed, full backend suite 106 passed, fresh base-to-`0029` plus `0029 -> 0028 -> 0029` passed on SQLite, and the Next.js 16.2.12 production build generated all 30 static routes.

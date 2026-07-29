@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.pages import pages_router
 from app.api.integrations import router as integrations_router
+from app.api.work_order_forms import router as work_order_forms_router
 from app.api.routes import router
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine, ensure_schema_compatibility, get_db
@@ -67,6 +68,7 @@ app.add_middleware(
 )
 app.include_router(router, prefix="/api")
 app.include_router(integrations_router, prefix="/api")
+app.include_router(work_order_forms_router, prefix="/api")
 app.include_router(pages_router)
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(parents=True, exist_ok=True)

@@ -42,7 +42,11 @@ import {
   WorkOrderVoiceNote,
   WorkOrderServiceContext,
   WorkOrderServiceIntelligence,
-  CompletionPolicy
+  CompletionPolicy,
+  WorkOrderForm,
+  WorkOrderFormField,
+  WorkOrderFormTemplate,
+  WorkOrderFormValue
 } from "@/types";
 import { ensureDeviceCredentials, getCurrentDeviceId, getCurrentDeviceToken } from "@/lib/device";
 
@@ -113,6 +117,8 @@ function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (method === "GET") return false;
   if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
   if (path === "/integrations" || path.startsWith("/integrations/")) return true;
+  if (path === "/work-order-form-templates" || path.startsWith("/work-order-form-templates/")) return true;
+  if (/^\/work-orders\/\d+\/form(?:\?|$)/.test(path)) return true;
   if (path === "/machine-knowledge" || path.startsWith("/machine-knowledge/")) return true;
   if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
   if (path === "/inventory/vehicle-returns" || path.startsWith("/inventory/vehicle-returns/")) return true;
@@ -476,6 +482,52 @@ export const api = {
   },
   createWorkOrder: (payload: Partial<WorkOrder> & { ticket_number: string }) =>
     request<WorkOrder>("/work-orders", { method: "POST", body: JSON.stringify(payload) }),
+  listWorkOrderFormTemplates: (includeInactive = false) =>
+    request<WorkOrderFormTemplate[]>(
+      `/work-order-form-templates${includeInactive ? "?include_inactive=true" : ""}`
+    ),
+  createWorkOrderFormTemplate: (payload: {
+    name: string;
+    industry?: string | null;
+    description?: string | null;
+    applicable_machine_type?: string | null;
+    applicable_job_type?: string | null;
+    default_work_order_status: "open" | "scheduled";
+    fields: WorkOrderFormField[];
+  }) =>
+    request<WorkOrderFormTemplate>("/work-order-form-templates", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  updateWorkOrderFormTemplate: (
+    templateId: number,
+    payload: {
+      expected_version: number;
+      name?: string;
+      industry?: string | null;
+      description?: string | null;
+      applicable_machine_type?: string | null;
+      applicable_job_type?: string | null;
+      default_work_order_status?: "open" | "scheduled";
+      is_active?: boolean;
+      fields?: WorkOrderFormField[];
+    }
+  ) =>
+    request<WorkOrderFormTemplate>(`/work-order-form-templates/${templateId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  getWorkOrderForm: (workOrderId: number) =>
+    request<WorkOrderForm>(`/work-orders/${workOrderId}/form`),
+  updateWorkOrderForm: (
+    workOrderId: number,
+    expectedVersion: number,
+    values: Record<string, WorkOrderFormValue>
+  ) =>
+    request<WorkOrderForm>(`/work-orders/${workOrderId}/form`, {
+      method: "PATCH",
+      body: JSON.stringify({ expected_version: expectedVersion, values })
+    }),
   claimWorkOrder: (workOrderId: number) =>
     request<WorkOrder>(`/work-orders/${workOrderId}/claim`, { method: "POST", body: JSON.stringify({}) }),
   releaseWorkOrder: (workOrderId: number, reason: string) =>

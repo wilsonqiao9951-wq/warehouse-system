@@ -509,6 +509,9 @@ export interface WorkOrder {
   id: number;
   customer_id?: number | null;
   equipment_id?: number | null;
+  form_template_id?: number | null;
+  form_template_version?: number | null;
+  form_version: number;
   ticket_number: string;
   wo_number?: string | null;
   store_name?: string | null;
@@ -560,6 +563,69 @@ export interface WorkOrder {
   can_claim: boolean;
   can_edit: boolean;
   can_complete: boolean;
+}
+
+export type WorkOrderFormFieldType =
+  | "text"
+  | "textarea"
+  | "number"
+  | "boolean"
+  | "date"
+  | "select"
+  | "photo"
+  | "signature";
+
+export type WorkOrderFormValue = string | number | boolean | null;
+
+export interface WorkOrderFormField {
+  id?: number | null;
+  field_key: string;
+  label: string;
+  field_type: WorkOrderFormFieldType;
+  help_text?: string | null;
+  placeholder?: string | null;
+  default_value?: WorkOrderFormValue;
+  options: string[];
+  required_at_completion: boolean;
+  requires_photo: boolean;
+  requires_signature: boolean;
+  requires_approval: boolean;
+  triggers_notification: boolean;
+  affects_inventory: boolean;
+  include_in_ai_learning: boolean;
+  sort_order: number;
+}
+
+export interface WorkOrderFormTemplate {
+  id: number;
+  organization_id: number;
+  name: string;
+  industry?: string | null;
+  description?: string | null;
+  applicable_machine_type?: string | null;
+  applicable_job_type?: string | null;
+  default_work_order_status: "open" | "scheduled";
+  is_active: boolean;
+  version: number;
+  fields: WorkOrderFormField[];
+  created_by?: number | null;
+  updated_by?: number | null;
+  can_edit: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkOrderForm {
+  work_order_id: number;
+  template_id?: number | null;
+  template_name?: string | null;
+  template_version?: number | null;
+  form_version: number;
+  fields: WorkOrderFormField[];
+  values: Record<string, WorkOrderFormValue>;
+  missing_required_fields: string[];
+  can_edit: boolean;
+  is_frozen: boolean;
 }
 
 export interface CompletionPolicy {

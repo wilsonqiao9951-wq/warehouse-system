@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from "rea
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
-import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
+import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderForm, WorkOrderFormValue, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
 import { VoiceRecorder } from "@/components/voice-recorder";
 
@@ -25,6 +25,10 @@ export default function WorkOrderDetailsPage() {
   const [serviceIntelligence, setServiceIntelligence] = useState<WorkOrderServiceIntelligence | null>(null);
   const [serviceIntelligenceLoaded, setServiceIntelligenceLoaded] = useState(false);
   const [completionPolicy, setCompletionPolicy] = useState<CompletionPolicy | null>(null);
+  const [dynamicForm, setDynamicForm] = useState<WorkOrderForm | null>(null);
+  const [dynamicFormValues, setDynamicFormValues] = useState<Record<string, WorkOrderFormValue>>({});
+  const [dynamicFormSaving, setDynamicFormSaving] = useState(false);
+  const [dynamicPhotoBusy, setDynamicPhotoBusy] = useState("");
   const [role, setRole] = useState("");
   const [completionPassword, setCompletionPassword] = useState("");
   const [claimBusy, setClaimBusy] = useState(false);
@@ -162,6 +166,8 @@ export default function WorkOrderDetailsPage() {
     setServiceContext(null);
     setServiceIntelligence(null);
     setServiceIntelligenceLoaded(false);
+    setDynamicForm(null);
+    setDynamicFormValues({});
     api.getWorkOrderServiceContext(currentWorkOrderId, 5)
       .then(setServiceContext)
       .catch(() => setServiceContext({ history: [] }));
@@ -178,6 +184,19 @@ export default function WorkOrderDetailsPage() {
     api.getCompletionPolicy(currentWorkOrderId)
       .then(setCompletionPolicy)
       .catch(() => setCompletionPolicy(null));
+    api.getWorkOrderForm(currentWorkOrderId)
+      .then((result) => {
+        if (active) {
+          setDynamicForm(result);
+          setDynamicFormValues(result.values);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setDynamicForm(null);
+          setDynamicFormValues({});
+        }
+      });
     return () => {
       active = false;
     };
@@ -237,6 +256,12 @@ export default function WorkOrderDetailsPage() {
     if (completionPolicy?.require_completion_photo && qcPictures.length === 0) missing.push("field photo");
     if (completionPolicy?.require_parts_usage && woParts.length === 0) missing.push("part usage");
     if (completionPolicy?.require_all_checklist_items && !(completion.equipmentSafe && completion.siteClean && completion.customerBriefed)) missing.push("field checklist");
+    if (dynamicForm?.missing_required_fields.length) {
+      missing.push(...dynamicForm.missing_required_fields.map((key) => {
+        const field = dynamicForm.fields.find((item) => item.field_key === key);
+        return field?.label || key;
+      }));
+    }
     if (missing.length) {
       setNotice({ type: "error", text: `Complete the required evidence: ${missing.join(", ")}.` });
       return;
@@ -271,6 +296,48 @@ export default function WorkOrderDetailsPage() {
       void reloadDetails();
     } catch (e) {
       setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to complete job." });
+    }
+  };
+
+  const onSaveDynamicForm = async () => {
+    if (!currentWorkOrderId || !dynamicForm?.can_edit) return;
+    try {
+      setDynamicFormSaving(true);
+      const result = await api.updateWorkOrderForm(
+        currentWorkOrderId,
+        dynamicForm.form_version,
+        dynamicFormValues
+      );
+      setDynamicForm(result);
+      setDynamicFormValues(result.values);
+      setNotice({ type: "success", text: "Configured job form saved with verified ownership." });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to save configured job form."
+      });
+    } finally {
+      setDynamicFormSaving(false);
+    }
+  };
+
+  const onUploadDynamicPhoto = async (fieldKey: string, file: File | null) => {
+    if (!file || !currentWorkOrderId || !dynamicForm?.can_edit) return;
+    try {
+      setDynamicPhotoBusy(fieldKey);
+      const uploaded = await api.uploadPartUsagePhoto(currentWorkOrderId, file, () => undefined);
+      setDynamicFormValues((current) => ({
+        ...current,
+        [fieldKey]: resolveUploadedImageUrl(uploaded.url)
+      }));
+      setNotice({ type: "success", text: "Photo uploaded. Save the configured form to record it." });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to upload configured-form photo."
+      });
+    } finally {
+      setDynamicPhotoBusy("");
     }
   };
 
@@ -627,6 +694,169 @@ export default function WorkOrderDetailsPage() {
               </>
             )}
           </div>
+
+          {dynamicForm && dynamicForm.fields.length > 0 && (
+            <div className="card">
+              <h3 className="section-title">{dynamicForm.template_name || "Configured job form"}</h3>
+              <p className="muted">
+                Template snapshot v{dynamicForm.template_version ?? "—"} · form revision {dynamicForm.form_version}.
+                {!dynamicForm.can_edit && " Visible to everyone; editable only by the verified job owner or administrator."}
+              </p>
+              {dynamicForm.missing_required_fields.length > 0 && (
+                <p className="notice">
+                  Required before completion:{" "}
+                  {dynamicForm.missing_required_fields.map((key) => (
+                    dynamicForm.fields.find((field) => field.field_key === key)?.label || key
+                  )).join(", ")}
+                </p>
+              )}
+              <div className="form-grid">
+                {dynamicForm.fields.map((field) => {
+                  const value = dynamicFormValues[field.field_key];
+                  const disabled = !dynamicForm.can_edit || dynamicForm.is_frozen;
+                  const label = `${field.label}${field.required_at_completion || field.requires_photo || field.requires_signature ? " *" : ""}`;
+                  const updateValue = (next: WorkOrderFormValue) => {
+                    setDynamicFormValues((current) => ({ ...current, [field.field_key]: next }));
+                  };
+                  if (field.field_type === "boolean") {
+                    return (
+                      <label key={field.field_key} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={value === true}
+                          disabled={disabled}
+                          onChange={(event) => updateValue(event.target.checked)}
+                        />
+                        {label}
+                        {field.help_text && <span className="muted">· {field.help_text}</span>}
+                      </label>
+                    );
+                  }
+                  if (field.field_type === "textarea") {
+                    return (
+                      <label key={field.field_key}>
+                        {label}
+                        <textarea
+                          rows={4}
+                          value={String(value ?? "")}
+                          placeholder={field.placeholder || ""}
+                          disabled={disabled}
+                          onChange={(event) => updateValue(event.target.value)}
+                        />
+                        {field.help_text && <span className="muted">{field.help_text}</span>}
+                      </label>
+                    );
+                  }
+                  if (field.field_type === "select") {
+                    return (
+                      <label key={field.field_key}>
+                        {label}
+                        <select
+                          value={String(value ?? "")}
+                          disabled={disabled}
+                          onChange={(event) => updateValue(event.target.value)}
+                        >
+                          <option value="">Select…</option>
+                          {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                        {field.help_text && <span className="muted">{field.help_text}</span>}
+                      </label>
+                    );
+                  }
+                  if (field.field_type === "photo") {
+                    return (
+                      <label key={field.field_key}>
+                        {label}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          disabled={disabled || dynamicPhotoBusy === field.field_key}
+                          onChange={(event) => void onUploadDynamicPhoto(
+                            field.field_key,
+                            event.target.files?.[0] || null
+                          )}
+                        />
+                        {typeof value === "string" && value && (
+                          <a
+                            className="nav-item"
+                            href={resolveUploadedImageUrl(value)}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ marginTop: 6, display: "block" }}
+                          >
+                            Open uploaded photo
+                          </a>
+                        )}
+                        {dynamicPhotoBusy === field.field_key && <span className="muted">Uploading…</span>}
+                        {field.help_text && <span className="muted">{field.help_text}</span>}
+                      </label>
+                    );
+                  }
+                  if (field.field_type === "signature") {
+                    return (
+                      <div key={field.field_key}>
+                        <strong>{label}</strong>
+                        {typeof value === "string" && value.startsWith("data:image/") ? (
+                          <>
+                            {/* Signature data is an authenticated evidence payload, not an optimizable asset URL. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={value}
+                              alt={field.label}
+                              style={{ width: "100%", maxWidth: 420, border: "1px solid #cbd5e1", borderRadius: 8 }}
+                            />
+                            {!disabled && (
+                              <button type="button" onClick={() => updateValue("")}>
+                                Replace signature
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <SignaturePad
+                            onChange={(signature) => updateValue(signature)}
+                            disabled={disabled}
+                          />
+                        )}
+                        {field.help_text && <span className="muted">{field.help_text}</span>}
+                      </div>
+                    );
+                  }
+                  return (
+                    <label key={field.field_key}>
+                      {label}
+                      <input
+                        type={
+                          field.field_type === "number"
+                            ? "number"
+                            : field.field_type === "date"
+                              ? "date"
+                            : "text"
+                        }
+                        value={String(value ?? "")}
+                        placeholder={
+                          field.placeholder
+                          || ""
+                        }
+                        disabled={disabled}
+                        onChange={(event) => updateValue(
+                          field.field_type === "number"
+                            ? (event.target.value === "" ? null : Number(event.target.value))
+                            : event.target.value
+                        )}
+                      />
+                      {field.help_text && <span className="muted">{field.help_text}</span>}
+                    </label>
+                  );
+                })}
+              </div>
+              {dynamicForm.can_edit && !dynamicForm.is_frozen && (
+                <button type="button" disabled={dynamicFormSaving} onClick={() => void onSaveDynamicForm()}>
+                  {dynamicFormSaving ? "Saving…" : "Save configured form"}
+                </button>
+              )}
+            </div>
+          )}
 
           <div className="card" id="completion">
             <h3 className="section-title">Field completion</h3>

@@ -164,6 +164,12 @@ from app.services.integration_delivery import enqueue_work_order_event
 from app.services.recommendations import build_part_recommendations
 from app.services.service_intelligence import build_service_intelligence
 from app.services.visual_recognition import generate_visual_part_candidates
+from app.services.work_order_forms import (
+    snapshot_template,
+    template_for_assignment,
+    validate_work_order_form_completion,
+    work_order_form_requires_approval,
+)
 
 router = APIRouter()
 
@@ -2313,6 +2319,19 @@ def create_work_order(payload: WorkOrderCreate, db: Session = Depends(get_db), a
         data["engineer_id"] = data["assigned_user_id"]
     if not data.get("assigned_user_id") and data.get("engineer_id"):
         data["assigned_user_id"] = data["engineer_id"]
+    if data.get("form_template_id"):
+        template = template_for_assignment(
+            db,
+            template_id=data["form_template_id"],
+            machine_type=data.get("machine_type"),
+            job_type=data.get("job_type"),
+        )
+        form_schema_json, form_data_json = snapshot_template(template)
+        data["form_template_version"] = template.version
+        data["form_schema_json"] = form_schema_json
+        data["form_data_json"] = form_data_json
+        if "status" not in payload.model_fields_set:
+            data["status"] = template.default_work_order_status
     item = WorkOrder(**data)
     db.add(item)
     db.commit()
@@ -2697,7 +2716,7 @@ def complete_work_order(
         raise HTTPException(status_code=400, detail="Work order already completed")
     _apply_completion_payload(item, payload)
     _capture_repair_duration(item, datetime.utcnow())
-    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    policy = _completion_policy_for_work_order(db, item)
     _validate_completion_evidence(db, item, policy)
     if policy.get("require_manager_approval") and actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
         item.status = "PENDING_APPROVAL"
@@ -2767,6 +2786,23 @@ def _effective_completion_policy(db: Session, organization_id: int, job_type: st
     return _policy_dict(policy, organization_id, source)
 
 
+def _completion_policy_for_work_order(
+    db: Session,
+    item: WorkOrder,
+) -> dict:
+    policy = _effective_completion_policy(
+        db,
+        item.organization_id,
+        item.job_type,
+    )
+    if work_order_form_requires_approval(item):
+        policy = {
+            **policy,
+            "require_manager_approval": True,
+        }
+    return policy
+
+
 def _apply_completion_payload(item: WorkOrder, payload: WorkOrderFlowAction) -> None:
     if payload.repair_result is not None:
         item.repair_result = payload.repair_result.strip() or None
@@ -2824,6 +2860,7 @@ def _validate_completion_evidence(db: Session, item: WorkOrder, policy: dict) ->
         missing.append("parts_usage")
     if missing:
         raise HTTPException(status_code=422, detail={"message": "Completion evidence is incomplete", "missing": missing})
+    validate_work_order_form_completion(item)
 
 
 def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrderRead:
@@ -2969,7 +3006,7 @@ def get_work_order_completion_policy(
     item = db.get(WorkOrder, work_order_id)
     if not item:
         raise HTTPException(status_code=404, detail="Work order not found")
-    return _effective_completion_policy(db, actor.organization_id, item.job_type)
+    return _completion_policy_for_work_order(db, item)
 
 
 @router.post("/work-orders/{work_order_id}/request-completion", response_model=WorkOrderRead)
@@ -2985,7 +3022,7 @@ def request_work_order_completion(
         raise HTTPException(status_code=400, detail="Work order cannot request completion")
     if item.status == "PENDING_APPROVAL":
         raise HTTPException(status_code=409, detail="Completion approval is already pending")
-    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    policy = _completion_policy_for_work_order(db, item)
     if not policy.get("require_manager_approval"):
         raise HTTPException(status_code=409, detail="This work order does not require manager approval")
     _apply_completion_payload(item, payload)
@@ -3020,7 +3057,7 @@ def approve_work_order_completion(
     item = db.get(WorkOrder, work_order_id)
     if not item or item.status != "PENDING_APPROVAL" or item.is_locked:
         raise HTTPException(status_code=409, detail="Work order is not pending completion approval")
-    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    policy = _completion_policy_for_work_order(db, item)
     _validate_completion_evidence(db, item, policy)
     item.completion_approved_by = actor.user_id
     item.completion_approved_at = datetime.utcnow()
