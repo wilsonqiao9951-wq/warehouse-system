@@ -1,6 +1,7 @@
 from datetime import date, datetime
 import base64
 import binascii
+import json
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -94,6 +95,123 @@ class OrganizationRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+ExternalIntegrationProvider = Literal[
+    "appsheet",
+    "generic",
+    "google_sheets",
+    "crm",
+    "erp",
+    "wms",
+]
+
+
+class ExternalIntegrationCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    provider: ExternalIntegrationProvider = "appsheet"
+    field_mapping: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Integration name must contain at least 2 characters")
+        return cleaned
+
+
+class ExternalIntegrationUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    field_mapping: dict[str, str] | None = None
+    is_active: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_optional_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Integration name must contain at least 2 characters")
+        return cleaned
+
+
+class ExternalIntegrationRotate(BaseModel):
+    expected_version: int = Field(ge=0)
+
+
+class ExternalIntegrationRead(BaseModel):
+    id: int
+    organization_id: int
+    name: str
+    provider: ExternalIntegrationProvider
+    key_prefix: str
+    masked_api_key: str
+    field_mapping: dict[str, str] = Field(default_factory=dict)
+    is_active: bool
+    version: int = Field(ge=0)
+    last_used_at: datetime | None = None
+    created_by: int | None = None
+    updated_by: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExternalIntegrationSecretRead(BaseModel):
+    integration: ExternalIntegrationRead
+    api_key: str
+
+
+class ExternalSyncLogRead(BaseModel):
+    id: int
+    integration_id: int
+    direction: Literal["inbound", "outbound"]
+    event_type: str
+    external_id: str
+    idempotency_key: str
+    status: Literal["processing", "processed", "failed"]
+    attempt_count: int = Field(ge=1)
+    work_order_id: int | None = None
+    changed_fields: list[str] = Field(default_factory=list)
+    error_message: str | None = None
+    processed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExternalWorkOrderUpsert(BaseModel):
+    external_id: str = Field(min_length=1, max_length=255)
+    data: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("external_id")
+    @classmethod
+    def normalize_external_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("external_id cannot be blank")
+        return cleaned
+
+    @field_validator("data")
+    @classmethod
+    def bound_external_data(cls, value: dict[str, object]) -> dict[str, object]:
+        if len(value) > 200:
+            raise ValueError("data cannot contain more than 200 fields")
+        encoded = json.dumps(value, separators=(",", ":"), default=str)
+        if len(encoded.encode("utf-8")) > 262_144:
+            raise ValueError("data cannot exceed 256 KiB")
+        return value
+
+
+class ExternalWorkOrderUpsertRead(BaseModel):
+    integration_id: int
+    external_id: str
+    work_order_id: int
+    ticket_number: str
+    result: Literal["created", "updated"]
+    changed_fields: list[str] = Field(default_factory=list)
+    replayed: bool = False
 
 
 class WarehouseCreate(BaseModel):

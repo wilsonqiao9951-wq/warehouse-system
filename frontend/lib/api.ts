@@ -1,5 +1,9 @@
 import {
   EngineerDashboard,
+  ExternalIntegration,
+  ExternalIntegrationProvider,
+  ExternalIntegrationSecret,
+  ExternalSyncLog,
   JobStatus,
   LowStockAlert,
   LocationStockBalance,
@@ -108,6 +112,7 @@ function workOrderIdForRequest(path: string, init?: RequestInit): number | undef
 function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (method === "GET") return false;
   if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
+  if (path === "/integrations" || path.startsWith("/integrations/")) return true;
   if (path === "/machine-knowledge" || path.startsWith("/machine-knowledge/")) return true;
   if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
   if (path === "/inventory/vehicle-returns" || path.startsWith("/inventory/vehicle-returns/")) return true;
@@ -387,6 +392,34 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ is_active: isActive })
     }),
+  listIntegrations: () => request<ExternalIntegration[]>("/integrations"),
+  createIntegration: (payload: {
+    name: string;
+    provider: ExternalIntegrationProvider;
+    field_mapping: Record<string, string>;
+  }) => request<ExternalIntegrationSecret>("/integrations", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  updateIntegration: (
+    integrationId: number,
+    payload: {
+      expected_version: number;
+      name?: string;
+      field_mapping?: Record<string, string>;
+      is_active?: boolean;
+    }
+  ) => request<ExternalIntegration>(`/integrations/${integrationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  }),
+  rotateIntegrationKey: (integrationId: number, expectedVersion: number) =>
+    request<ExternalIntegrationSecret>(`/integrations/${integrationId}/rotate-key`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion })
+    }),
+  listIntegrationSyncLogs: (integrationId: number) =>
+    request<ExternalSyncLog[]>(`/integrations/${integrationId}/sync-logs?limit=100`),
   previewPartsImport: (file: File) => {
     const form = new FormData();
     form.append("file", file);

@@ -411,3 +411,33 @@ Verification:
 - Production dependency audit: 0 vulnerabilities.
 - Database: no migration required; schema head remains `20260728_0026`.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-28 - Phase 6 external integration foundation
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added tenant-scoped external integration records for AppSheet, generic REST, Google Sheets, CRM, ERP, and WMS connection labels.
+- Added high-entropy API keys whose raw value is shown only on creation/rotation; only a SHA-256 hash and lookup prefix are stored.
+- Added administrator-only creation, editing, activation, and key rotation with optimistic versions and audit events.
+- Added manager read access to mappings and synchronization logs without credential mutation rights.
+- Added configurable canonical-to-external work-order field mapping with a strict intake-only allowlist.
+- Added `POST /api/external/v1/work-orders` for authenticated create/update by stable external row ID.
+- Added per-integration work-order links so repeated events update the correct record without mixing external identifiers into the work-order table.
+- Added per-integration idempotency keys and request hashes: exact replay returns the original result, changed-body reuse is rejected, and failed events can retry with an incremented attempt count.
+- Added processed/failed synchronization logs with changed fields, safe errors, linked work orders, attempts, and timestamps.
+- Blocked mappings for engineer/device ownership, completion, signatures, financials, part usage, learning outcomes, and inventory.
+- Blocked every external update after claim, evidence freeze, or completion so the authenticated engineer workflow remains authoritative.
+- Added tenant isolation for integrations, links, logs, Webhook authentication, work orders, and integration audit events.
+- Added a responsive `/integrations` workspace with one-time key reveal, mapping editor, key rotation/deactivation, Webhook example, and sync log.
+- Added Alembic revision `20260728_0027`.
+
+Verification:
+
+- External key, mapping, idempotency, retry, ownership-boundary, role, rotation, deactivation, audit, and tenant target suite: 4 passed.
+- Backend: full suite passed, 96 tests.
+- Database: fresh base-to-`0027` and empty `0027 -> 0026 -> 0027` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 29 static routes.
+- Production dependency audit: 0 vulnerabilities.
+- Source hygiene: `git diff --check` passed.

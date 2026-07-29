@@ -343,3 +343,14 @@ Verification: knowledge capture/governance target suite 6 passed, full backend s
 - Adds the read-only mobile intelligence panel without broadening work-order mutation permissions.
 
 Verification: service-intelligence target suite 3 passed, full backend suite 92 passed, ESLint passed, and the Next.js 16.2.12 production build generated all 28 static routes. Schema head remains `20260728_0026`.
+
+## 20260728_0027 - External integration foundation
+
+- Adds tenant-scoped external integrations with provider label, field mapping, active state, optimistic version, actors, and last-used time.
+- Stores only a globally unique API key prefix and SHA-256 hash; raw keys are shown once on create or rotation.
+- Adds stable per-integration external-row-to-work-order links.
+- Adds inbound/outbound-ready sync logs with idempotency key, request hash, status, attempts, changed fields, safe error, linked work order, and processing timestamps.
+- Adds database constraints for supported providers, integration versions, sync direction/status/attempts, and per-integration source/idempotency uniqueness.
+- Adds the idempotent AppSheet/REST inbound work-order endpoint and blocks external updates after claim or evidence freeze.
+
+Verification: external integration target suite 4 passed, full backend suite 96 passed, fresh base-to-`0027` plus `0027 -> 0026 -> 0027` passed on SQLite, and the Next.js 16.2.12 production build generated all 29 static routes.

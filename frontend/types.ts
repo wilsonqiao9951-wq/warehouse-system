@@ -30,6 +30,53 @@ export interface Organization {
   created_at: string;
 }
 
+export type ExternalIntegrationProvider =
+  | "appsheet"
+  | "generic"
+  | "google_sheets"
+  | "crm"
+  | "erp"
+  | "wms";
+
+export interface ExternalIntegration {
+  id: number;
+  organization_id: number;
+  name: string;
+  provider: ExternalIntegrationProvider;
+  key_prefix: string;
+  masked_api_key: string;
+  field_mapping: Record<string, string>;
+  is_active: boolean;
+  version: number;
+  last_used_at?: string | null;
+  created_by?: number | null;
+  updated_by?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExternalIntegrationSecret {
+  integration: ExternalIntegration;
+  api_key: string;
+}
+
+export interface ExternalSyncLog {
+  id: number;
+  integration_id: number;
+  direction: "inbound" | "outbound";
+  event_type: string;
+  external_id: string;
+  idempotency_key: string;
+  status: "processing" | "processed" | "failed";
+  attempt_count: number;
+  work_order_id?: number | null;
+  changed_fields: string[];
+  error_message?: string | null;
+  processed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ImportBatch {
   id: number;
   organization_id: number;

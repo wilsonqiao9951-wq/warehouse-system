@@ -95,6 +95,22 @@ Claim, release, execution, approval, rejection, and completion actions record th
 - Administrators can correct unlocked records with their own audit attribution; managers cannot impersonate the field owner.
 - Releasing a claim invalidates the prior user's device and queued claim generation.
 
+## External integration access model
+
+| Operation | Engineer | Manager | Admin | External API key |
+| --- | --- | --- | --- | --- |
+| View integrations and sync logs | Deny | Allow | Allow | Deny |
+| Create/edit/deactivate integration | Deny | Deny | Allow | Deny |
+| Rotate and reveal a new key once | Deny | Deny | Allow | Deny |
+| Create an inbound work order | Deny | Deny | Existing user API only | Allow |
+| Update linked unclaimed intake data | Deny | Deny | Existing user API only | Allow |
+| Update claimed/frozen field evidence | Owner workflow only | Deny | Audited correction routes only | Deny |
+| Claim/start/complete/use parts/change inventory | Existing role rules | Existing role rules | Existing role rules | Deny |
+
+External keys establish the owning organization before any source link, log, or work-order query occurs. Only the key hash is stored. The raw key appears once at creation or rotation, and a deactivated or rotated key returns `401`.
+
+`POST /api/external/v1/work-orders` requires a unique `X-Idempotency-Key`. Successful replay is read-only, changed payload reuse returns `409`, and failed events can retry with an incremented attempt count. Allowed field mappings are limited to administrative intake data and `open`/`scheduled` status.
+
 ## Replenishment custody access model
 
 The replenishment workflow separates request supervision, physical warehouse custody, and vehicle receipt. Response capability flags drive the UI, but the API independently validates role, current status, workflow version, target vehicle owner, device, and password.

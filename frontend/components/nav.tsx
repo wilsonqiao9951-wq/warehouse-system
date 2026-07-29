@@ -20,6 +20,7 @@ const links = [
   { href: "/reports", label: "Reports", roles: ["manager", "admin"] },
   { href: "/pilot-checklist", label: "Pilot Checklist", roles: ["manager", "admin"] },
   { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
+  { href: "/integrations", label: "Integrations", roles: ["manager", "admin"] },
   { href: "/platform", label: "Customers", roles: ["admin"] },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },
   { href: "/parts-import", label: "Parts Import", roles: ["warehouse", "manager", "admin"] },

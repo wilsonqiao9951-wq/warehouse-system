@@ -16,6 +16,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Governed machine service knowledge with published faults, repair steps, tools, cautions, media, and verified field evidence
 - Idempotent knowledge drafts generated from completed jobs plus tenant-protected field photo/video storage
 - Explainable same-model fault analysis, published-guidance ranking, and similar completed-job retrieval on the mobile work-order screen
+- Tenant-scoped AppSheet/REST API keys, configurable inbound work-order mapping, idempotent Webhooks, and synchronization logs
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
 - Manager/administrator replenishment approval with rejection evidence before warehouse picking
 - Reserved picking stock with separate shipment OUTBOUND and receipt INBOUND inventory movements
@@ -96,6 +97,7 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 - `POST /api/machine-knowledge/{id}/drafts/from-work-order` creates review-only fault, repair, and used-part drafts without duplicating prior captures.
 - `POST /api/machine-knowledge/{id}/media` stores validated field photos/videos outside the public upload mount; `GET /api/machine-knowledge/media/{entry_id}` enforces tenant, role, profile, and publication state.
 - `GET /api/work-orders/{id}/service-intelligence` returns read-only, tenant-scoped fault metrics, ranked published exact-model guidance, and explained similar completed jobs. See [`docs/SERVICE_INTELLIGENCE.md`](docs/SERVICE_INTELLIGENCE.md).
+- `POST /api/external/v1/work-orders` accepts API-key-authenticated, idempotent AppSheet/REST work-order intake. Administrators manage credentials and mappings under `/api/integrations`; see [`docs/EXTERNAL_INTEGRATIONS.md`](docs/EXTERNAL_INTEGRATIONS.md).
 - `POST /api/work-order-parts` is still available for backward compatibility but marked deprecated.
 - `GET /api/inventory/replenishment-requests` returns the role-scoped replenishment queue and server-calculated action capabilities.
 - `POST /api/inventory/replenishment-requests` creates a manual vehicle request with a required business reason and client-generated idempotency key.
@@ -158,7 +160,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260728_0026` (governed work-order and media knowledge capture).
+- Current schema head: `20260728_0027` (external integration credentials, source links, and sync logs).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

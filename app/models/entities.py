@@ -542,6 +542,161 @@ class WorkOrder(Base):
     completed_device = relationship("UserDevice", foreign_keys=[completed_device_id])
 
 
+class ExternalIntegration(Base):
+    __tablename__ = "external_integrations"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "name",
+            name="uq_external_integration_org_name",
+        ),
+        UniqueConstraint("key_prefix", name="uq_external_integration_key_prefix"),
+        UniqueConstraint("api_key_hash", name="uq_external_integration_api_key_hash"),
+        CheckConstraint(
+            "provider IN ('appsheet', 'generic', 'google_sheets', 'crm', 'erp', 'wms')",
+            name="ck_external_integration_provider",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_external_integration_version_non_negative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    key_prefix: Mapped[str] = mapped_column(String(24), nullable=False)
+    api_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    field_mapping_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    work_order_links = relationship(
+        "ExternalWorkOrderLink",
+        back_populates="integration",
+        cascade="all, delete-orphan",
+    )
+    sync_logs = relationship(
+        "ExternalSyncLog",
+        back_populates="integration",
+        cascade="all, delete-orphan",
+    )
+
+
+class ExternalWorkOrderLink(Base):
+    __tablename__ = "external_work_order_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id",
+            "external_id",
+            name="uq_external_work_order_integration_external",
+        ),
+        UniqueConstraint(
+            "integration_id",
+            "work_order_id",
+            name="uq_external_work_order_integration_work_order",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    integration_id: Mapped[int] = mapped_column(
+        ForeignKey("external_integrations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    work_order_id: Mapped[int] = mapped_column(
+        ForeignKey("work_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    last_inbound_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    integration = relationship("ExternalIntegration", back_populates="work_order_links")
+    work_order = relationship("WorkOrder")
+
+
+class ExternalSyncLog(Base):
+    __tablename__ = "external_sync_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id",
+            "idempotency_key",
+            name="uq_external_sync_integration_idempotency",
+        ),
+        CheckConstraint(
+            "direction IN ('inbound', 'outbound')",
+            name="ck_external_sync_direction",
+        ),
+        CheckConstraint(
+            "status IN ('processing', 'processed', 'failed')",
+            name="ck_external_sync_status",
+        ),
+        CheckConstraint(
+            "attempt_count > 0",
+            name="ck_external_sync_attempt_positive",
+        ),
+        Index(
+            "ix_external_sync_org_integration_created",
+            "organization_id",
+            "integration_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    integration_id: Mapped[int] = mapped_column(
+        ForeignKey("external_integrations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="processing", nullable=False, index=True
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    work_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    changed_fields_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    integration = relationship("ExternalIntegration", back_populates="sync_logs")
+    work_order = relationship("WorkOrder")
+
+
 class InventoryTransaction(Base):
     __tablename__ = "inventory_transactions"
     __table_args__ = (
