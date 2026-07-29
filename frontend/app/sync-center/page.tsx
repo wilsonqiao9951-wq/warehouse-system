@@ -2,15 +2,26 @@
 
 import { useEffect, useState } from "react";
 import ManagerShell from "@/components/manager-shell";
-import { getOfflineQueue, retryOfflineQueueItem, syncOfflineQueue } from "@/lib/api";
+import {
+  discardUnreferencedOfflineMedia,
+  getOfflineMediaQueue,
+  getOfflineQueue,
+  retryOfflineQueueItem,
+  syncOfflineQueue
+} from "@/lib/api";
 
 type VisibleQueueItem = ReturnType<typeof getOfflineQueue>[number];
+type VisibleMediaItem = Awaited<ReturnType<typeof getOfflineMediaQueue>>[number];
 
 export default function SyncCenterPage() {
   const [queue, setQueue] = useState<VisibleQueueItem[]>([]);
   const [online, setOnline] = useState(true);
-  const [message, setMessage] = useState("");
-  const refresh = () => setQueue(getOfflineQueue());
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [media, setMedia] = useState<VisibleMediaItem[]>([]);
+  const refresh = () => {
+    setQueue(getOfflineQueue());
+    void getOfflineMediaQueue().then(setMedia).catch(() => setMedia([]));
+  };
 
   useEffect(() => {
     refresh();
@@ -20,27 +31,51 @@ export default function SyncCenterPage() {
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     window.addEventListener("opf-offline-queued", refresh);
+    window.addEventListener("opf-offline-media", refresh);
     return () => {
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
       window.removeEventListener("opf-offline-queued", refresh);
+      window.removeEventListener("opf-offline-media", refresh);
     };
   }, []);
 
   const sync = async () => {
     if (!online) {
-      setMessage("You are offline. Reconnect before syncing.");
+      setMessage({ type: "error", text: "You are offline. Reconnect before syncing." });
       return;
     }
     const count = await syncOfflineQueue();
     refresh();
-    setMessage(count ? `Synchronized ${count} operation${count === 1 ? "" : "s"}.` : "No eligible operations were synchronized.");
+    setMessage({
+      type: "success",
+      text: count
+        ? `Synchronized ${count} operation${count === 1 ? "" : "s"}.`
+        : "No eligible operations were synchronized."
+    });
   };
 
   const retry = (id: string) => {
     retryOfflineQueueItem(id);
     refresh();
-    setMessage("The retained operation is pending another explicit sync attempt.");
+    setMessage({ type: "success", text: "The retained operation is pending another explicit sync attempt." });
+  };
+
+  const discardMedia = async (item: VisibleMediaItem) => {
+    try {
+      await discardUnreferencedOfflineMedia(
+        item.marker,
+        item.workOrderId,
+        item.claimVersion
+      );
+      refresh();
+      setMessage({ type: "success", text: "Unattached offline photo discarded from this device." });
+    } catch (error) {
+      setMessage({
+        type: "error",
+        text: error instanceof Error ? error.message : "Offline photo could not be discarded."
+      });
+    }
   };
 
   const conflictCount = queue.filter((item) => item.syncState === "conflict").length;
@@ -53,6 +88,7 @@ export default function SyncCenterPage() {
       metrics={[
         { label: "Pending", value: queue.length },
         { label: "Connection", value: online ? "Online" : "Offline" },
+        { label: "Retained photos", value: media.length },
         { label: "Conflicts", value: conflictCount },
         { label: "Ownership blocked", value: blockedCount }
       ]}
@@ -64,7 +100,11 @@ export default function SyncCenterPage() {
         </div>
         <p className="muted">Configured form values and eligible evidence can be queued. Claiming, work-order status changes, completion, replenishment custody, vehicle return approval/handover/receipt, vehicle inventory posting, and historical reconciliation always require a live connection.</p>
         <p className="muted">Every queued form is isolated to the signed-in account, this registered device, and its claim generation. Version conflicts retain the local record and never overwrite server data silently.</p>
-        {message && <div className="notice notice-success">{message}</div>}
+        {message && (
+          <div className={`notice ${message.type === "success" ? "notice-success" : "notice-error"}`}>
+            {message.text}
+          </div>
+        )}
         {queue.length === 0 ? (
           <div className="empty-state">All eligible operations are synchronized.</div>
         ) : (
@@ -96,6 +136,37 @@ export default function SyncCenterPage() {
                 {!item.stale && ["failed", "blocked"].includes(item.syncState) && (
                   <button type="button" style={{ marginTop: 8 }} onClick={() => retry(item.id)}>
                     Retry after review
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="card">
+        <h3 style={{ marginTop: 0 }}>Retained photos</h3>
+        <p className="muted">
+          Photo bytes stay inside this browser and are isolated to the originating account, device, work order, and claim generation. Attached photos are uploaded before their JSON operation.
+        </p>
+        {media.length === 0 ? (
+          <div className="empty-state">No photos are retained in offline device storage.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {media.map((item) => (
+              <div className="job-card" key={item.marker}>
+                <strong>{item.purpose === "configured_form_photo" ? "Configured-form photo" : "QC photo"}</strong>
+                <div>Work order #{item.workOrderId}</div>
+                <div className="muted">
+                  Retained {new Date(item.createdAt).toLocaleString()}
+                  {` · ${(item.byteSize / 1024 / 1024).toFixed(1)} MiB · claim version ${item.claimVersion}`}
+                </div>
+                {item.referenced ? (
+                  <div className="notice notice-success" style={{ marginTop: 8 }}>
+                    Attached to a queued operation; automatic cleanup follows verified upload.
+                  </div>
+                ) : (
+                  <button type="button" style={{ marginTop: 8 }} onClick={() => void discardMedia(item)}>
+                    Discard unattached photo
                   </button>
                 )}
               </div>

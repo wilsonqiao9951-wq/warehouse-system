@@ -61,7 +61,7 @@ export default function PwaClient() {
     <>
       {offline && (
         <div className="offline-banner" role="status">
-          You are offline. Eligible configured-form changes stay on this account and device; verified state and inventory actions still require a connection.
+          You are offline. Eligible form, QC photo, and return-evidence changes stay on this account and device; verified state and inventory actions still require a connection.
         </div>
       )}
       {!offline && queued > 0 && <div className="sync-banner" role="status">Syncing {queued} offline change{queued === 1 ? "" : "s"}…</div>}

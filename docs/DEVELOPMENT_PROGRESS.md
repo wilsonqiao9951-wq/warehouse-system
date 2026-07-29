@@ -577,3 +577,28 @@ Verification:
 - Backend: all 111 tests passed in two bounded groups (45 plus 66).
 - Database: fresh base-to-`0031` and empty `0031 -> 0030 -> 0031` passed on SQLite.
 - Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 32 static routes.
+
+## 2026-07-29 - Phase 8 offline evidence safety and photo retention
+
+Status: implemented and verified.
+
+Delivered:
+
+- Replaced the offline mutation blacklist with a strict reviewed allowlist for configured forms, QC picture records, and return-equipment evidence.
+- Kept claims, workflow status, completion/approval, part usage, every inventory custody action, configuration, imports, integrations, and user administration online-only.
+- Migrated older queued operations outside the allowlist to a retained blocked state so they cannot replay after an upgrade.
+- Added IndexedDB photo retention for configured-form and QC photos when the phone is offline or the upload network fails while the browser still reports online.
+- Bound every retained photo to the originating account, registered device, work order, claim generation, and evidence purpose.
+- Limited device photo storage to 10 MiB per image, 12 images, and 50 MiB per account/device.
+- Kept binary bytes outside JSON/localStorage and replaced them with opaque local markers.
+- Added claim preflight, purpose validation, protected upload, marker replacement, normal server evidence validation, and post-upload device cleanup.
+- Prevented part-usage photos from entering offline storage because part usage changes the inventory ledger.
+- Added retained-photo visibility to `/sync-center`, including work order, claim generation, purpose, size, attachment state, and explicit discard for unattached files only.
+- Updated the PWA cache generation to `openpartsflow-static-v3`.
+- Added the offline sync security/operator guide and expanded mobile QA coverage.
+
+Verification:
+
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 32 static routes.
+- Production dependency audit: 0 vulnerabilities.
+- Backend remains on the fully verified `0031` / 111-test baseline; all replayed evidence uses the existing server ownership, device, claim-generation, frozen-state, type, size, and file-signature checks.

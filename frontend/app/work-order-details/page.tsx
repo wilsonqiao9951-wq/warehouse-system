@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from "rea
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
+import { isOfflineMediaMarker } from "@/lib/offline-media";
 import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderForm, WorkOrderFormAction, WorkOrderFormValue, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
 import { VoiceRecorder } from "@/components/voice-recorder";
@@ -360,12 +361,22 @@ export default function WorkOrderDetailsPage() {
     if (!file || !currentWorkOrderId || !dynamicForm?.can_edit) return;
     try {
       setDynamicPhotoBusy(fieldKey);
-      const uploaded = await api.uploadPartUsagePhoto(currentWorkOrderId, file, () => undefined);
+      const uploaded = await api.uploadPartUsagePhoto(
+        currentWorkOrderId,
+        file,
+        () => undefined,
+        "configured_form_photo"
+      );
       setDynamicFormValues((current) => ({
         ...current,
-        [fieldKey]: resolveUploadedImageUrl(uploaded.url)
+        [fieldKey]: uploaded.url
       }));
-      setNotice({ type: "success", text: "Photo uploaded. Save the configured form to record it." });
+      setNotice({
+        type: "success",
+        text: uploaded.queued_offline
+          ? "Photo retained on this account and device. Save the configured form to add it to the sync queue."
+          : "Photo uploaded. Save the configured form to record it."
+      });
     } catch (error) {
       setNotice({
         type: "error",
@@ -437,21 +448,30 @@ export default function WorkOrderDetailsPage() {
       setQcUploadPct(0);
       let imageUrl = manual;
       if (qcPhotoFile) {
-        const uploaded = await api.uploadPartUsagePhoto(currentWorkOrderId, qcPhotoFile, (p) => setQcUploadPct(p));
-        imageUrl = resolveUploadedImageUrl(uploaded.url);
-        setQcUploadPct(100);
+        const uploaded = await api.uploadPartUsagePhoto(
+          currentWorkOrderId,
+          qcPhotoFile,
+          (p) => setQcUploadPct(p),
+          "qc_photo"
+        );
+        imageUrl = uploaded.url;
+        if (!uploaded.queued_offline) setQcUploadPct(100);
       } else if (manual && !manual.startsWith("http://") && !manual.startsWith("https://")) {
         imageUrl = resolveUploadedImageUrl(manual);
       }
-      await api.createQCPicture({
+      const created = await api.createQCPicture({
         work_order_id: currentWorkOrderId,
         image_url: imageUrl
       });
       setQcForm({ image_url: "" });
       setQcPhotoFromFile(null);
       setQcUploadPct(0);
-      setNotice({ type: "success", text: "QC picture added." });
-      void reloadDetails();
+      if ("queued" in created) {
+        setNotice({ type: "success", text: "QC photo retained on this account and device for verified sync." });
+      } else {
+        setNotice({ type: "success", text: "QC picture added." });
+        void reloadDetails();
+      }
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "Failed to add QC picture." });
     } finally {
@@ -464,14 +484,18 @@ export default function WorkOrderDetailsPage() {
     e.preventDefault();
     if (!currentWorkOrderId || !retForm.equipment_type.trim() || !canEdit) return;
     try {
-      await api.createReturnEquipment({
+      const created = await api.createReturnEquipment({
         work_order_id: currentWorkOrderId,
         equipment_type: retForm.equipment_type.trim(),
         quantity: Number(retForm.quantity) || 1
       });
       setRetForm({ equipment_type: "", quantity: "1" });
-      setNotice({ type: "success", text: "Return equipment added." });
-      void reloadDetails();
+      if ("queued" in created) {
+        setNotice({ type: "success", text: "Return-equipment evidence retained for verified sync." });
+      } else {
+        setNotice({ type: "success", text: "Return equipment added." });
+        void reloadDetails();
+      }
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "Failed to add return equipment." });
     }
@@ -812,7 +836,12 @@ export default function WorkOrderDetailsPage() {
                             event.target.files?.[0] || null
                           )}
                         />
-                        {typeof value === "string" && value && (
+                        {isOfflineMediaMarker(value) && (
+                          <span className="notice notice-success" style={{ marginTop: 6, display: "block" }}>
+                            Photo retained offline on this account and device.
+                          </span>
+                        )}
+                        {typeof value === "string" && value && !isOfflineMediaMarker(value) && (
                           <a
                             className="nav-item"
                             href={resolveUploadedImageUrl(value)}

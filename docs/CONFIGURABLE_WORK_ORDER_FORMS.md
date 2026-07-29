@@ -139,7 +139,7 @@ When a stale form version is confirmed, the claiming engineer's authenticated ph
 
 The sync center shows pending, failed, blocked, and conflicting records without exposing submitted field or signature values. It supports an explicit retry after an ownership or connectivity problem has been reviewed. Registered conflicts remain locked for administrator resolution. Eligible operations retry when the application starts online and when network connectivity returns. After an administrator resolves a registered conflict, only the originating account and registered device can observe its receipt and remove the local copy.
 
-Configured-form values are the first supported offline write. Verified status transitions, claiming/releasing, completion and approval, inventory custody, and photo-file uploads remain online-only. The API repeats all ownership, device, claim-generation, type, size, form-version, and frozen-evidence checks during replay.
+Configured-form values, configured-form photos, QC photo evidence, and return-equipment evidence are the reviewed offline writes. Verified status transitions, claiming/releasing, completion and approval, inventory custody, part usage and its photos, and voice notes remain online-only. The API repeats all ownership, device, claim-generation, file-signature, type, size, form-version, and frozen-evidence checks during replay. The complete allowlist and photo lifecycle are documented in `OFFLINE_SYNC_SECURITY.md`.
 
 ## Offline conflict APIs
 
