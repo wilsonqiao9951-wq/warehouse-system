@@ -577,6 +577,12 @@ export type WorkOrderFormFieldType =
 
 export type WorkOrderFormValue = string | number | boolean | null;
 
+export interface OfflineQueuedResult {
+  queued: true;
+  queue_id: string;
+  queued_at: string;
+}
+
 export interface WorkOrderFormField {
   id?: number | null;
   field_key: string;

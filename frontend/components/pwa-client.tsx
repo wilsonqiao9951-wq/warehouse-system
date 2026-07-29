@@ -31,7 +31,11 @@ export default function PwaClient() {
     setOffline(!navigator.onLine);
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !("standalone" in window.navigator && (window.navigator as Navigator & { standalone?: boolean }).standalone);
     setIosInstallHint(ios);
-    updateQueue();
+    if (navigator.onLine) {
+      void syncOfflineQueue().then(updateQueue);
+    } else {
+      updateQueue();
+    }
 
     window.addEventListener("beforeinstallprompt", handleBeforeInstall);
     window.addEventListener("online", onOnline);
@@ -57,7 +61,7 @@ export default function PwaClient() {
     <>
       {offline && (
         <div className="offline-banner" role="status">
-          You are offline. Cached pages may open, but saving data requires a connection.
+          You are offline. Eligible configured-form changes stay on this account and device; verified state and inventory actions still require a connection.
         </div>
       )}
       {!offline && queued > 0 && <div className="sync-banner" role="status">Syncing {queued} offline change{queued === 1 ? "" : "s"}…</div>}

@@ -524,3 +524,29 @@ Verification:
 - Frontend: TypeScript and Next.js 16.2.12 production build passed for all 31 static routes.
 - Frontend ESLint passed; production dependency audit reports 0 vulnerabilities.
 - Python dependency consistency check and source hygiene passed.
+
+## 2026-07-29 - Phase 8 secure offline configured-form sync
+
+Status: implemented and verified.
+
+Delivered:
+
+- Enabled offline configured-form saves from the engineer mobile workbench while keeping verified workflow and inventory mutations online-only.
+- Bound every retained operation to the originating account, registered device, work order, and exact claim generation.
+- Added stable queue identifiers, operation classification, pending/failed/conflict/blocked states, attempt evidence, and last-error evidence.
+- Merged repeated offline saves only when their account, device, work order, claim generation, endpoint, and expected server form version match.
+- Preserved unsynchronized work across sign-out while keeping it invisible and unreplayable to another account or device.
+- Refreshed authoritative work-order claim generations before replay and blocked released or reclaimed work without discarding it.
+- Retained server form-version conflicts locally and prevented stale offline values from silently overwriting current server data.
+- Classified authentication, authorization, and missing-claim failures as blocked while retaining transient network/server failures for retry.
+- Added startup and network-restoration sync attempts.
+- Expanded `/sync-center` with operation type, work order, timestamps, claim generation, attempt counts, blocked ownership, conflict status, explicit retry for recoverable failures, and locked conflicts for administrator resolution.
+- Kept queued field and signature values out of sync-center display and application messages.
+- Added the offline-form security and operating rules to the configurable-form guide.
+
+Verification:
+
+- Configured-form ownership, claim generation, versioning, completion, action automation, and role target suite: 8 passed.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 31 static routes.
+- Production dependency audit: 0 vulnerabilities.
+- Backend schema and API behavior remain on the verified `0030` / 109-test baseline; replay uses the existing server ownership, device, claim-generation, form-version, frozen-evidence, type, and size checks.

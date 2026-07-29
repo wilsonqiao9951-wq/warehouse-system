@@ -121,12 +121,31 @@ Engineers cannot open or mutate the global inbox, but every same-organization en
 
 Re-saving identical form values is a no-op: it does not advance the form version or create duplicate tasks. A later real change creates new tasks keyed to the new form revision.
 
+## Offline configured-form saves
+
+The mobile workbench can retain configured-form edits while the browser reports that it is offline. Each queue record is bound to:
+
+- the authenticated user account that created it
+- the registered device identifier
+- the work order
+- the exact claim generation
+- the server form version the engineer originally edited
+
+Repeated offline saves for the same account, device, work order, claim generation, and form version are merged into one retained operation. Signing out does not discard pending work, but a different account or device cannot list or replay it.
+
+The client refreshes visible work-order claim generations before replay. A released or reclaimed work order is marked blocked and its local record is retained. A server form-version conflict is marked as a conflict and retained without overwriting either server data or the local queue record. Authentication, authorization, and claim-generation failures are also retained as blocked operations.
+
+The sync center shows pending, failed, blocked, and conflicting records without exposing submitted field or signature values. It supports an explicit retry after an ownership or connectivity problem has been reviewed. Conflicts remain locked for administrator resolution. Eligible operations retry when the application starts online and when network connectivity returns.
+
+Configured-form values are the first supported offline write. Verified status transitions, claiming/releasing, completion and approval, inventory custody, and photo-file uploads remain online-only. The API repeats all ownership, device, claim-generation, type, size, form-version, and frozen-evidence checks during replay.
+
 ## User interfaces
 
 - `/work-order-templates`: administrator visual form builder and manager read-only review.
 - `/work-orders`: template selection plus job-type and machine-type assignment during work-order creation.
 - `/work-order-details`: dynamic mobile controls, camera upload, drawn signature, required-field status, verified save, and read-only visibility for non-owners.
 - `/form-actions`: role-scoped notification/inventory-review inbox with acknowledgment, resolution, and links back to the source job.
+- `/sync-center`: account/device-isolated retained operations, claim-generation blocks, form-version conflicts, attempts, and explicit retry.
 
 ## Migration
 

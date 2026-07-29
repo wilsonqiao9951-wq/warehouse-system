@@ -317,6 +317,31 @@ export default function WorkOrderDetailsPage() {
         dynamicForm.form_version,
         dynamicFormValues
       );
+      if ("queued" in result) {
+        const missingRequiredFields = dynamicForm.fields
+          .filter((field) => (
+            field.required_at_completion
+            || field.requires_photo
+            || field.requires_signature
+          ))
+          .filter((field) => {
+            const value = dynamicFormValues[field.field_key];
+            return value === null
+              || value === undefined
+              || (typeof value === "string" && !value.trim());
+          })
+          .map((field) => field.field_key);
+        setDynamicForm({
+          ...dynamicForm,
+          values: dynamicFormValues,
+          missing_required_fields: missingRequiredFields
+        });
+        setNotice({
+          type: "success",
+          text: "Offline form changes are saved on this account and device. They will sync only while this claim remains current."
+        });
+        return;
+      }
       setDynamicForm(result);
       setDynamicFormValues(result.values);
       setFormActions(await api.listWorkOrderFormActionProgress(currentWorkOrderId));

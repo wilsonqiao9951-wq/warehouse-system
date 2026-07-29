@@ -47,7 +47,8 @@ import {
   WorkOrderFormAction,
   WorkOrderFormField,
   WorkOrderFormTemplate,
-  WorkOrderFormValue
+  WorkOrderFormValue,
+  OfflineQueuedResult
 } from "@/types";
 import { ensureDeviceCredentials, getCurrentDeviceId, getCurrentDeviceToken } from "@/lib/device";
 
@@ -56,15 +57,44 @@ const OFFLINE_QUEUE_KEY = "opf_offline_queue";
 const CLAIM_VERSIONS_KEY = "opf_claim_versions";
 
 interface OfflineQueueItem {
+  id: string;
   path: string;
   method: string;
   body: string;
   queuedAt: string;
+  updatedAt: string;
   userId: string;
   deviceId: string;
   workOrderId?: number;
   claimVersion?: number;
+  operationType: "work_order_form" | "work_order_evidence" | "other";
+  syncState: "pending" | "failed" | "conflict" | "blocked";
+  attemptCount: number;
+  lastAttemptAt?: string;
   blockedReason?: string;
+}
+
+class ApiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
+function queueId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function operationTypeForPath(path: string): OfflineQueueItem["operationType"] {
+  if (/^\/work-orders\/\d+\/form(?:\?|$)/.test(path)) return "work_order_form";
+  if (/^\/(qc-pictures|return-equipments|work-order-voice-notes)/.test(path)) return "work_order_evidence";
+  return "other";
 }
 
 function readJsonStorage<T>(key: string, fallback: T): T {
@@ -120,7 +150,6 @@ function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (path === "/integrations" || path.startsWith("/integrations/")) return true;
   if (path === "/work-order-form-templates" || path.startsWith("/work-order-form-templates/")) return true;
   if (path === "/work-order-form-actions" || path.startsWith("/work-order-form-actions/")) return true;
-  if (/^\/work-orders\/\d+\/form(?:\?|$)/.test(path)) return true;
   if (path === "/machine-knowledge" || path.startsWith("/machine-knowledge/")) return true;
   if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
   if (path === "/inventory/vehicle-returns" || path.startsWith("/inventory/vehicle-returns/")) return true;
@@ -131,7 +160,31 @@ function isOnlineOnlyMutation(path: string, method: string): boolean {
 }
 
 function readOfflineQueue(): OfflineQueueItem[] {
-  return readJsonStorage<OfflineQueueItem[]>(OFFLINE_QUEUE_KEY, []);
+  const raw = readJsonStorage<OfflineQueueItem[]>(OFFLINE_QUEUE_KEY, []);
+  let migrated = false;
+  const normalized = raw.map((item) => {
+    if (
+      !item.id
+      || !item.updatedAt
+      || !item.operationType
+      || !item.syncState
+      || item.attemptCount === undefined
+    ) {
+      migrated = true;
+    }
+    return {
+      ...item,
+      id: item.id || queueId(),
+      updatedAt: item.updatedAt || item.queuedAt,
+      operationType: item.operationType || operationTypeForPath(item.path),
+      syncState: item.syncState || (item.blockedReason ? "failed" : "pending"),
+      attemptCount: item.attemptCount || 0
+    };
+  });
+  if (migrated && typeof window !== "undefined") {
+    window.localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(normalized));
+  }
+  return normalized;
 }
 
 function writeOfflineQueue(queue: OfflineQueueItem[]): void {
@@ -141,9 +194,94 @@ function writeOfflineQueue(queue: OfflineQueueItem[]): void {
   window.dispatchEvent(new Event("opf-offline-queued"));
 }
 
+function queueOfflineMutation<T>(
+  path: string,
+  method: string,
+  body: string,
+  workOrderId?: number
+): T {
+  if (typeof window === "undefined") {
+    throw new Error("Offline storage is not available.");
+  }
+  const userId = window.localStorage.getItem("opf_user_id");
+  const deviceId = getCurrentDeviceId();
+  if (!userId || !deviceId) {
+    throw new Error("Sign in on this registered device before saving offline work.");
+  }
+  const claimVersion = workOrderId === undefined ? undefined : readClaimVersions()[String(workOrderId)];
+  if (workOrderId !== undefined && !Number.isInteger(claimVersion)) {
+    throw new Error("Open and claim this work order online before saving offline work.");
+  }
+  const queue = readOfflineQueue();
+  const now = new Date().toISOString();
+  const operationType = operationTypeForPath(path);
+  let queuedItem: OfflineQueueItem | undefined;
+  if (operationType === "work_order_form") {
+    queuedItem = queue.find((item) => (
+      item.path === path
+      && item.method === method
+      && item.userId === userId
+      && item.deviceId === deviceId
+      && item.claimVersion === claimVersion
+      && item.syncState !== "conflict"
+      && item.syncState !== "blocked"
+    ));
+    if (queuedItem) {
+      try {
+        const existing = JSON.parse(queuedItem.body) as {
+          expected_version: number;
+          values: Record<string, WorkOrderFormValue>;
+        };
+        const incoming = JSON.parse(body) as {
+          expected_version: number;
+          values: Record<string, WorkOrderFormValue>;
+        };
+        if (existing.expected_version === incoming.expected_version) {
+          queuedItem.body = JSON.stringify({
+            expected_version: existing.expected_version,
+            values: { ...existing.values, ...incoming.values }
+          });
+          queuedItem.updatedAt = now;
+          queuedItem.syncState = "pending";
+          queuedItem.blockedReason = undefined;
+        } else {
+          queuedItem = undefined;
+        }
+      } catch {
+        queuedItem = undefined;
+      }
+    }
+  }
+  if (!queuedItem) {
+    queuedItem = {
+      id: queueId(),
+      path,
+      method,
+      body,
+      queuedAt: now,
+      updatedAt: now,
+      userId,
+      deviceId,
+      workOrderId,
+      claimVersion,
+      operationType,
+      syncState: "pending",
+      attemptCount: 0
+    };
+    queue.push(queuedItem);
+  }
+  writeOfflineQueue(queue);
+  return {
+    queued: true,
+    queue_id: queuedItem.id,
+    queued_at: queuedItem.queuedAt
+  } as T;
+}
+
 export function clearOfflineSession(): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(OFFLINE_QUEUE_KEY);
+  // Retain unsynchronized work across sign-out. Queue reads and replays remain
+  // isolated by the original user id and registered device id.
   window.localStorage.removeItem(CLAIM_VERSIONS_KEY);
   window.dispatchEvent(new Event("opf-offline-queued"));
 }
@@ -220,37 +358,22 @@ async function xhrUploadPartPhoto(
   });
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQueue = true): Promise<T> {
   const method = (init?.method || "GET").toUpperCase();
   const workOrderId = workOrderIdForRequest(path, init);
+  const bodyContainsPassword = typeof init?.body === "string" && /password/i.test(init.body);
+  const canQueueMutation = (
+    method !== "GET"
+    && typeof init?.body === "string"
+    && !isOnlineOnlyMutation(path, method)
+    && !bodyContainsPassword
+  );
   if (typeof navigator !== "undefined" && !navigator.onLine) {
-    const bodyContainsPassword = typeof init?.body === "string" && /password/i.test(init.body);
     if (isOnlineOnlyMutation(path, method) || bodyContainsPassword) {
       throw new Error("This verified action requires a network connection.");
     }
-    if (method !== "GET" && typeof window !== "undefined" && typeof init?.body === "string") {
-      const userId = window.localStorage.getItem("opf_user_id");
-      const deviceId = getCurrentDeviceId();
-      if (!userId || !deviceId) {
-        throw new Error("Sign in on this registered device before saving offline work.");
-      }
-      const claimVersion = workOrderId === undefined ? undefined : readClaimVersions()[String(workOrderId)];
-      if (workOrderId !== undefined && !Number.isInteger(claimVersion)) {
-        throw new Error("Open and claim this work order online before saving offline work.");
-      }
-      const queue = readOfflineQueue();
-      queue.push({
-        path,
-        method,
-        body: init.body,
-        queuedAt: new Date().toISOString(),
-        userId,
-        deviceId,
-        workOrderId,
-        claimVersion
-      });
-      writeOfflineQueue(queue);
-      return { queued: true } as T;
+    if (canQueueMutation) {
+      return queueOfflineMutation<T>(path, method, init.body as string, workOrderId);
     }
     throw new Error("You are offline. This action will be available when connection returns.");
   }
@@ -281,8 +404,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
+    if (
+      allowNetworkFailureQueue
+      && canQueueMutation
+      && (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed"))
+    ) {
+      return queueOfflineMutation<T>(path, method, init?.body as string, workOrderId);
+    }
     throw new Error(
-      msg.includes("Failed to fetch") || msg.includes("NetworkError")
+      msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed")
         ? "Network unavailable. Check VPN or server URL (NEXT_PUBLIC_API_BASE_URL)."
         : msg
     );
@@ -299,7 +429,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // ignore parse failure
     }
-    throw new Error(detail);
+    throw new ApiRequestError(detail, res.status);
   }
   const payload = (await res.json()) as T;
   rememberClaimVersionsFromPayload(payload);
@@ -324,39 +454,84 @@ export async function syncOfflineQueue(): Promise<number> {
   let remaining = [...queue];
   let synced = 0;
   for (const item of currentQueue) {
+    if (item.syncState === "conflict" || item.syncState === "blocked") {
+      continue;
+    }
     if (item.workOrderId !== undefined) {
       const currentVersion = readClaimVersions()[String(item.workOrderId)];
-      if (!Number.isInteger(item.claimVersion) || currentVersion !== item.claimVersion) break;
+      if (!Number.isInteger(item.claimVersion) || currentVersion !== item.claimVersion) {
+        item.syncState = "blocked";
+        item.blockedReason = "Work order was released, reclaimed, or moved to a new claim generation.";
+        continue;
+      }
     }
     try {
+      item.attemptCount += 1;
+      item.lastAttemptAt = new Date().toISOString();
       await request(item.path, {
         method: item.method,
         body: item.body,
         headers: item.claimVersion === undefined ? undefined : { "X-Claim-Version": String(item.claimVersion) }
-      });
+      }, false);
       remaining = remaining.filter((row) => row !== item);
       synced += 1;
     } catch (error) {
       item.blockedReason = error instanceof Error ? error.message : "Sync failed";
-      break;
+      item.syncState = (
+        error instanceof ApiRequestError && error.status === 409
+          ? "conflict"
+          : error instanceof ApiRequestError && [401, 403, 428].includes(error.status)
+            ? "blocked"
+            : "failed"
+      );
     }
   }
   writeOfflineQueue(remaining);
   return synced;
 }
 
-export function getOfflineQueue(): Array<{ path: string; method: string; queuedAt: string; claimVersion?: number; stale: boolean; blockedReason?: string }> {
+export function retryOfflineQueueItem(id: string): void {
+  const queue = readOfflineQueue();
+  const item = queue.find((row) => row.id === id);
+  if (!item) return;
+  item.syncState = "pending";
+  item.blockedReason = undefined;
+  writeOfflineQueue(queue);
+}
+
+export function getOfflineQueue(): Array<{
+  id: string;
+  path: string;
+  method: string;
+  queuedAt: string;
+  updatedAt: string;
+  workOrderId?: number;
+  claimVersion?: number;
+  operationType: OfflineQueueItem["operationType"];
+  syncState: OfflineQueueItem["syncState"];
+  attemptCount: number;
+  lastAttemptAt?: string;
+  stale: boolean;
+  blockedReason?: string;
+}> {
   if (typeof window === "undefined") return [];
   const userId = window.localStorage.getItem("opf_user_id");
   const deviceId = getCurrentDeviceId();
   const versions = readClaimVersions();
   return readOfflineQueue()
     .filter((row) => row.userId === userId && row.deviceId === deviceId)
-    .map(({ path, method, queuedAt, workOrderId, claimVersion, blockedReason }) => ({
+    .map(({ id, path, method, queuedAt, updatedAt, workOrderId, claimVersion, operationType, syncState, attemptCount, lastAttemptAt, blockedReason }) => ({
+      id,
       path,
       method,
       queuedAt,
+      updatedAt,
+      workOrderId,
       claimVersion,
+      operationType,
+      syncState,
+      attemptCount,
+      lastAttemptAt,
       stale: workOrderId !== undefined && versions[String(workOrderId)] !== claimVersion,
       blockedReason
     }));
@@ -526,7 +701,7 @@ export const api = {
     expectedVersion: number,
     values: Record<string, WorkOrderFormValue>
   ) =>
-    request<WorkOrderForm>(`/work-orders/${workOrderId}/form`, {
+    request<WorkOrderForm | OfflineQueuedResult>(`/work-orders/${workOrderId}/form`, {
       method: "PATCH",
       body: JSON.stringify({ expected_version: expectedVersion, values })
     }),
