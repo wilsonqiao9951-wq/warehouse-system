@@ -21,6 +21,7 @@ const links = [
   { href: "/pilot-checklist", label: "Pilot Checklist", roles: ["manager", "admin"] },
   { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
   { href: "/work-order-templates", label: "Job Forms", roles: ["manager", "admin"] },
+  { href: "/form-actions", label: "Form Actions", roles: ["warehouse", "manager", "admin"] },
   { href: "/integrations", label: "Integrations", roles: ["manager", "admin"] },
   { href: "/platform", label: "Customers", roles: ["admin"] },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },

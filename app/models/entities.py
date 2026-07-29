@@ -582,6 +582,85 @@ class WorkOrderFormField(Base):
     organization = relationship("Organization")
 
 
+class WorkOrderFormAction(Base):
+    __tablename__ = "work_order_form_actions"
+    __table_args__ = (
+        UniqueConstraint(
+            "work_order_id",
+            "triggered_form_version",
+            "field_key",
+            "action_type",
+            name="uq_work_order_form_action_trigger",
+        ),
+        CheckConstraint(
+            "action_type IN ('notification', 'inventory_review')",
+            name="ck_work_order_form_action_type",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'acknowledged', 'resolved')",
+            name="ck_work_order_form_action_status",
+        ),
+        CheckConstraint(
+            "triggered_form_version >= 1",
+            name="ck_work_order_form_action_trigger_version_positive",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_work_order_form_action_version_non_negative",
+        ),
+        Index(
+            "ix_work_order_form_actions_org_status_type",
+            "organization_id",
+            "status",
+            "action_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    work_order_id: Mapped[int] = mapped_column(
+        ForeignKey("work_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_order_form_templates.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    field_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    field_label: Mapped[str] = mapped_column(String(160), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="pending", nullable=False, index=True
+    )
+    triggered_form_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    acknowledged_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolution_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    work_order = relationship("WorkOrder")
+    template = relationship("WorkOrderFormTemplate")
+    creator = relationship("User", foreign_keys=[created_by])
+    acknowledger = relationship("User", foreign_keys=[acknowledged_by])
+    resolver = relationship("User", foreign_keys=[resolved_by])
+    organization = relationship("Organization")
+
+
 class WorkOrder(Base):
     __tablename__ = "work_orders"
     __table_args__ = (

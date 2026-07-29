@@ -628,6 +628,34 @@ export interface WorkOrderForm {
   is_frozen: boolean;
 }
 
+export interface WorkOrderFormAction {
+  id: number;
+  organization_id: number;
+  work_order_id: number;
+  work_order_ticket_number: string;
+  template_id?: number | null;
+  template_name?: string | null;
+  field_key: string;
+  field_label: string;
+  action_type: "notification" | "inventory_review";
+  status: "pending" | "acknowledged" | "resolved";
+  triggered_form_version: number;
+  version: number;
+  created_by?: number | null;
+  created_by_name?: string | null;
+  acknowledged_by?: number | null;
+  acknowledged_by_name?: string | null;
+  acknowledged_at?: string | null;
+  resolved_by?: number | null;
+  resolved_by_name?: string | null;
+  resolved_at?: string | null;
+  resolution_notes?: string | null;
+  can_acknowledge: boolean;
+  can_resolve: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CompletionPolicy {
   id?: number | null;
   organization_id: number;

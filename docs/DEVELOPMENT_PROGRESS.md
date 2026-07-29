@@ -497,3 +497,30 @@ Verification:
 - Frontend: TypeScript and Next.js 16.2.12 production build passed for all 30 static routes.
 - Production dependency audit: 0 vulnerabilities; Python dependency consistency check passed.
 - Source hygiene: `git diff --check` passed.
+
+## 2026-07-29 - Phase 7 configured-form action automation
+
+Status: implemented and verified.
+
+Delivered:
+
+- Upgraded notification and inventory-impact field flags from audit metadata into durable, tenant-scoped follow-up tasks.
+- Generated tasks only for real field changes and keyed them by work order, form revision, field, and action type for retry safety.
+- Kept submitted values and signatures out of the task queue while preserving the source field, template, job, actor, and revision.
+- Added strict pending, acknowledged, and resolved states with optimistic versions and immutable actor/timestamp evidence.
+- Limited notification processing to managers/administrators and inventory-review processing to warehouse staff/administrators.
+- Required resolution notes for inventory reviews and kept every actual stock change inside the dedicated custody workflows.
+- Added read-only task progress for all engineers viewing a shared work order without granting global queue or mutation access.
+- Added the `/form-actions` role-scoped inbox and linked it to mobile work-order details and warehouse workflows.
+- Added Alembic revision `20260729_0030`.
+- Protected downgrade while any configured-form action evidence exists.
+
+Verification:
+
+- Form-action generation, no-op/idempotency, role, transition, optimistic-version, shared-progress, and tenant-isolation target suite: 3 passed.
+- Combined configured-form, action, and tenant regression suite: 12 passed.
+- Backend: all 109 tests passed in two bounded modules (37 plus 72) after the desktop shell's aggregate child-process timeout was isolated from test results.
+- Database: fresh base-to-`0030` and empty `0030 -> 0029 -> 0030` passed on SQLite.
+- Frontend: TypeScript and Next.js 16.2.12 production build passed for all 31 static routes.
+- Frontend ESLint passed; production dependency audit reports 0 vulnerabilities.
+- Python dependency consistency check and source hygiene passed.

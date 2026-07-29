@@ -1,6 +1,6 @@
 # Configurable work-order forms
 
-Schema head `20260729_0029` introduces organization-owned form templates and immutable per-work-order snapshots.
+Schema heads `20260729_0029` and `20260729_0030` introduce organization-owned form templates, immutable per-work-order snapshots, and durable follow-up actions.
 
 ## Operational model
 
@@ -38,7 +38,7 @@ Each field has a stable lowercase key, label, optional help and placeholder text
 
 Photo and signature requirement flags are accepted only for their matching field type. Select fields require at least one unique option. Defaults are validated using the same server-side type and option rules as field submissions.
 
-`affects_inventory` is governance metadata only. A form value never creates or changes an inventory transaction; physical custody remains in the dedicated stock workflows. Notification and AI-learning flags are recorded in tenant audit evidence without disclosing form data across organizations.
+`affects_inventory` never directly changes an inventory transaction; physical custody remains in the dedicated stock workflows. A changed field with `triggers_notification` creates an operational-notification task. A changed field with `affects_inventory` creates an inventory-review task that warehouse staff must resolve with notes after using the appropriate replenishment, transfer, return, or count workflow. Task records contain the field identity and form revision, not the submitted value. AI-learning field identities and task creation are also recorded in tenant audit evidence.
 
 ## Template APIs
 
@@ -107,11 +107,26 @@ The read response returns ordered snapshot fields, current values, `missing_requ
 
 Signature values must be valid bounded PNG data URLs. As with the standard customer signature, the dynamic signature payload is redacted from non-owner engineers and warehouse readers; administrators, managers reviewing approval evidence, and the verified owner retain access.
 
+## Form action APIs
+
+```text
+GET   /api/work-order-form-actions
+GET   /api/work-orders/{work_order_id}/form-actions
+PATCH /api/work-order-form-actions/{task_id}
+```
+
+The global inbox is available to administrators, managers, and warehouse users. Warehouse users receive inventory-review tasks only. Managers acknowledge and resolve notification tasks, warehouse users acknowledge and resolve inventory-review tasks, and administrators can process either type. Inventory resolution requires notes. Every transition uses `expected_version`, actor/timestamp attribution, and a tenant audit record.
+
+Engineers cannot open or mutate the global inbox, but every same-organization engineer can see read-only action progress on a work order. Cross-organization task reads and mutations remain hidden by the automatic tenant scope.
+
+Re-saving identical form values is a no-op: it does not advance the form version or create duplicate tasks. A later real change creates new tasks keyed to the new form revision.
+
 ## User interfaces
 
 - `/work-order-templates`: administrator visual form builder and manager read-only review.
 - `/work-orders`: template selection plus job-type and machine-type assignment during work-order creation.
 - `/work-order-details`: dynamic mobile controls, camera upload, drawn signature, required-field status, verified save, and read-only visibility for non-owners.
+- `/form-actions`: role-scoped notification/inventory-review inbox with acknowledgment, resolution, and links back to the source job.
 
 ## Migration
 
@@ -120,6 +135,8 @@ Revision `20260729_0029` creates:
 - `work_order_form_templates`
 - `work_order_form_fields`
 - the template link, template version, form version, schema snapshot, and value snapshot on `work_orders`
+
+Revision `20260729_0030` creates `work_order_form_actions` with trigger uniqueness, status/type/version constraints, actor attribution, resolution evidence, and organization/status/type indexes. Downgrade is blocked while action evidence exists so acknowledged or resolved workflow history cannot be silently discarded.
 
 Apply with:
 

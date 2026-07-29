@@ -12,7 +12,12 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import WorkOrder, WorkOrderFormField, WorkOrderFormTemplate
+from app.models import (
+    WorkOrder,
+    WorkOrderFormAction,
+    WorkOrderFormField,
+    WorkOrderFormTemplate,
+)
 from app.schemas import (
     WorkOrderFormFieldCreate,
     WorkOrderFormFieldRead,
@@ -354,6 +359,40 @@ def merge_work_order_form_values(
     if len(encoded.encode("utf-8")) > 262_144:
         raise HTTPException(status_code=422, detail="Form values cannot exceed 256 KiB")
     return merged
+
+
+def create_form_action_tasks(
+    db: Session,
+    work_order: WorkOrder,
+    *,
+    changed_fields: list[str],
+    fields: dict[str, WorkOrderFormFieldRead],
+    created_by: int | None,
+) -> list[WorkOrderFormAction]:
+    tasks: list[WorkOrderFormAction] = []
+    for field_key in changed_fields:
+        field = fields[field_key]
+        action_types: list[str] = []
+        if field.triggers_notification:
+            action_types.append("notification")
+        if field.affects_inventory:
+            action_types.append("inventory_review")
+        for action_type in action_types:
+            task = WorkOrderFormAction(
+                organization_id=work_order.organization_id,
+                work_order_id=work_order.id,
+                template_id=work_order.form_template_id,
+                field_key=field.field_key,
+                field_label=field.label,
+                action_type=action_type,
+                triggered_form_version=work_order.form_version,
+                created_by=created_by,
+            )
+            db.add(task)
+            tasks.append(task)
+    if tasks:
+        db.flush()
+    return tasks
 
 
 def work_order_form_read(

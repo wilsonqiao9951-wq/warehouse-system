@@ -44,6 +44,7 @@ import {
   WorkOrderServiceIntelligence,
   CompletionPolicy,
   WorkOrderForm,
+  WorkOrderFormAction,
   WorkOrderFormField,
   WorkOrderFormTemplate,
   WorkOrderFormValue
@@ -118,6 +119,7 @@ function isOnlineOnlyMutation(path: string, method: string): boolean {
   if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
   if (path === "/integrations" || path.startsWith("/integrations/")) return true;
   if (path === "/work-order-form-templates" || path.startsWith("/work-order-form-templates/")) return true;
+  if (path === "/work-order-form-actions" || path.startsWith("/work-order-form-actions/")) return true;
   if (/^\/work-orders\/\d+\/form(?:\?|$)/.test(path)) return true;
   if (path === "/machine-knowledge" || path.startsWith("/machine-knowledge/")) return true;
   if (path === "/inventory/replenishment-requests" || path.startsWith("/inventory/replenishment-requests/")) return true;
@@ -527,6 +529,32 @@ export const api = {
     request<WorkOrderForm>(`/work-orders/${workOrderId}/form`, {
       method: "PATCH",
       body: JSON.stringify({ expected_version: expectedVersion, values })
+    }),
+  listWorkOrderFormActions: (params?: {
+    status?: "pending" | "acknowledged" | "resolved";
+    action_type?: "notification" | "inventory_review";
+    work_order_id?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.action_type) query.set("action_type", params.action_type);
+    if (params?.work_order_id) query.set("work_order_id", String(params.work_order_id));
+    query.set("limit", "200");
+    return request<WorkOrderFormAction[]>(`/work-order-form-actions?${query.toString()}`);
+  },
+  listWorkOrderFormActionProgress: (workOrderId: number) =>
+    request<WorkOrderFormAction[]>(`/work-orders/${workOrderId}/form-actions`),
+  updateWorkOrderFormAction: (
+    taskId: number,
+    payload: {
+      expected_version: number;
+      action: "acknowledge" | "resolve";
+      resolution_notes?: string | null;
+    }
+  ) =>
+    request<WorkOrderFormAction>(`/work-order-form-actions/${taskId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
     }),
   claimWorkOrder: (workOrderId: number) =>
     request<WorkOrder>(`/work-orders/${workOrderId}/claim`, { method: "POST", body: JSON.stringify({}) }),

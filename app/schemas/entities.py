@@ -614,6 +614,47 @@ class WorkOrderFormUpdate(BaseModel):
         return values
 
 
+class WorkOrderFormActionRead(BaseModel):
+    id: int
+    organization_id: int
+    work_order_id: int
+    work_order_ticket_number: str
+    template_id: int | None = None
+    template_name: str | None = None
+    field_key: str
+    field_label: str
+    action_type: Literal["notification", "inventory_review"]
+    status: Literal["pending", "acknowledged", "resolved"]
+    triggered_form_version: int = Field(ge=1)
+    version: int = Field(ge=0)
+    created_by: int | None = None
+    created_by_name: str | None = None
+    acknowledged_by: int | None = None
+    acknowledged_by_name: str | None = None
+    acknowledged_at: datetime | None = None
+    resolved_by: int | None = None
+    resolved_by_name: str | None = None
+    resolved_at: datetime | None = None
+    resolution_notes: str | None = None
+    can_acknowledge: bool = False
+    can_resolve: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkOrderFormActionUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    action: Literal["acknowledge", "resolve"]
+    resolution_notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("resolution_notes")
+    @classmethod
+    def normalize_resolution_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
 class WorkOrderCreate(BaseModel):
     customer_id: int | None = None
     equipment_id: int | None = None

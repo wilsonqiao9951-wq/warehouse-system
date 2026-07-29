@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from "rea
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
-import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderForm, WorkOrderFormValue, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
+import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderForm, WorkOrderFormAction, WorkOrderFormValue, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
 import { VoiceRecorder } from "@/components/voice-recorder";
 
@@ -26,6 +26,7 @@ export default function WorkOrderDetailsPage() {
   const [serviceIntelligenceLoaded, setServiceIntelligenceLoaded] = useState(false);
   const [completionPolicy, setCompletionPolicy] = useState<CompletionPolicy | null>(null);
   const [dynamicForm, setDynamicForm] = useState<WorkOrderForm | null>(null);
+  const [formActions, setFormActions] = useState<WorkOrderFormAction[]>([]);
   const [dynamicFormValues, setDynamicFormValues] = useState<Record<string, WorkOrderFormValue>>({});
   const [dynamicFormSaving, setDynamicFormSaving] = useState(false);
   const [dynamicPhotoBusy, setDynamicPhotoBusy] = useState("");
@@ -168,6 +169,7 @@ export default function WorkOrderDetailsPage() {
     setServiceIntelligenceLoaded(false);
     setDynamicForm(null);
     setDynamicFormValues({});
+    setFormActions([]);
     api.getWorkOrderServiceContext(currentWorkOrderId, 5)
       .then(setServiceContext)
       .catch(() => setServiceContext({ history: [] }));
@@ -196,6 +198,13 @@ export default function WorkOrderDetailsPage() {
           setDynamicForm(null);
           setDynamicFormValues({});
         }
+      });
+    api.listWorkOrderFormActionProgress(currentWorkOrderId)
+      .then((result) => {
+        if (active) setFormActions(result);
+      })
+      .catch(() => {
+        if (active) setFormActions([]);
       });
     return () => {
       active = false;
@@ -310,6 +319,7 @@ export default function WorkOrderDetailsPage() {
       );
       setDynamicForm(result);
       setDynamicFormValues(result.values);
+      setFormActions(await api.listWorkOrderFormActionProgress(currentWorkOrderId));
       setNotice({ type: "success", text: "Configured job form saved with verified ownership." });
     } catch (error) {
       setNotice({
@@ -854,6 +864,36 @@ export default function WorkOrderDetailsPage() {
                 <button type="button" disabled={dynamicFormSaving} onClick={() => void onSaveDynamicForm()}>
                   {dynamicFormSaving ? "Saving…" : "Save configured form"}
                 </button>
+              )}
+            </div>
+          )}
+
+          {formActions.length > 0 && (
+            <div className="card">
+              <h3 className="section-title">Configured form action progress</h3>
+              <p className="muted">
+                Everyone on the work order can see progress. Only the authorized manager, warehouse role, or administrator can process each action.
+              </p>
+              <div style={{ display: "grid", gap: 8 }}>
+                {formActions.map((task) => (
+                  <div key={task.id} style={{ borderBottom: "1px solid #e2e8f0", paddingBottom: 8 }}>
+                    <strong>{task.field_label}</strong>
+                    <span className="muted">
+                      {" "}· {task.action_type === "inventory_review" ? "inventory review" : "notification"} · {task.status}
+                    </span>
+                    <span className="muted" style={{ display: "block" }}>
+                      Triggered from form revision {task.triggered_form_version}
+                      {task.acknowledged_by_name ? ` · acknowledged by ${task.acknowledged_by_name}` : ""}
+                      {task.resolved_by_name ? ` · resolved by ${task.resolved_by_name}` : ""}
+                    </span>
+                    {task.resolution_notes && <span className="muted">{task.resolution_notes}</span>}
+                  </div>
+                ))}
+              </div>
+              {["admin", "manager", "warehouse"].includes(role) && (
+                <Link className="nav-item" href="/form-actions" style={{ marginTop: 10, display: "inline-block" }}>
+                  Open action inbox
+                </Link>
               )}
             </div>
           )}

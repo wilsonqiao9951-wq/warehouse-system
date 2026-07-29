@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -18,11 +18,15 @@ from app.core.rbac import (
 )
 from app.models import (
     AuditLog,
+    User,
     UserRole,
     WorkOrder,
+    WorkOrderFormAction,
     WorkOrderFormTemplate,
 )
 from app.schemas import (
+    WorkOrderFormActionRead,
+    WorkOrderFormActionUpdate,
     WorkOrderFormRead,
     WorkOrderFormTemplateCreate,
     WorkOrderFormTemplateRead,
@@ -30,6 +34,7 @@ from app.schemas import (
     WorkOrderFormUpdate,
 )
 from app.services.work_order_forms import (
+    create_form_action_tasks,
     merge_work_order_form_values,
     replace_template_fields,
     template_read,
@@ -74,6 +79,76 @@ def _audit(
             ),
             timestamp=datetime.utcnow(),
         )
+    )
+
+
+def _task_capabilities(
+    actor: Actor,
+    task: WorkOrderFormAction,
+) -> tuple[bool, bool]:
+    if task.status == "resolved":
+        return False, False
+    allowed = bool(
+        actor.role == UserRole.ADMIN
+        or (
+            task.action_type == "notification"
+            and actor.role == UserRole.MANAGER
+        )
+        or (
+            task.action_type == "inventory_review"
+            and actor.role == UserRole.WAREHOUSE
+        )
+    )
+    return allowed and task.status == "pending", allowed
+
+
+def _user_name(db: Session, user_id: int | None) -> str | None:
+    if not user_id:
+        return None
+    user = db.get(User, user_id)
+    return user.name if user else None
+
+
+def _form_action_read(
+    db: Session,
+    actor: Actor,
+    task: WorkOrderFormAction,
+) -> WorkOrderFormActionRead:
+    work_order = db.get(WorkOrder, task.work_order_id)
+    template = (
+        db.get(WorkOrderFormTemplate, task.template_id)
+        if task.template_id
+        else None
+    )
+    can_acknowledge, can_resolve = _task_capabilities(actor, task)
+    return WorkOrderFormActionRead(
+        id=task.id,
+        organization_id=task.organization_id,
+        work_order_id=task.work_order_id,
+        work_order_ticket_number=(
+            work_order.ticket_number if work_order else f"#{task.work_order_id}"
+        ),
+        template_id=task.template_id,
+        template_name=template.name if template else None,
+        field_key=task.field_key,
+        field_label=task.field_label,
+        action_type=task.action_type,
+        status=task.status,
+        triggered_form_version=task.triggered_form_version,
+        version=task.version,
+        created_by=task.created_by,
+        created_by_name=_user_name(db, task.created_by),
+        acknowledged_by=task.acknowledged_by,
+        acknowledged_by_name=_user_name(db, task.acknowledged_by),
+        acknowledged_at=task.acknowledged_at,
+        resolved_by=task.resolved_by,
+        resolved_by_name=_user_name(db, task.resolved_by),
+        resolved_at=task.resolved_at,
+        resolution_notes=task.resolution_notes,
+        can_acknowledge=can_acknowledge,
+        can_resolve=can_resolve,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
     )
 
 
@@ -295,6 +370,8 @@ def update_work_order_form(
         for key, value in payload.values.items()
         if value != previous_values.get(key)
     )
+    if not changed_fields:
+        return work_order_form_read(db, work_order, can_edit=True)
     work_order.form_data_json = json.dumps(
         merged,
         separators=(",", ":"),
@@ -302,6 +379,13 @@ def update_work_order_form(
     )
     work_order.form_version += 1
     db.add(work_order)
+    action_tasks = create_form_action_tasks(
+        db,
+        work_order,
+        changed_fields=changed_fields,
+        fields=fields,
+        created_by=actor.user_id,
+    )
     _audit(
         db,
         actor,
@@ -319,20 +403,150 @@ def update_work_order_form(
             "inventory_declared_fields": [
                 key for key in changed_fields if fields[key].affects_inventory
             ],
+            "action_task_ids": [task.id for task in action_tasks],
         },
     )
-    notification_fields = [
-        key for key in changed_fields if fields[key].triggers_notification
-    ]
-    if notification_fields:
+    if action_tasks:
         _audit(
             db,
             actor,
-            "work_order_form_notification_triggered",
+            "work_order_form_actions_created",
             "work_order",
             work_order.id,
-            {"field_keys": notification_fields},
+            {
+                "tasks": [
+                    {
+                        "id": task.id,
+                        "field_key": task.field_key,
+                        "action_type": task.action_type,
+                    }
+                    for task in action_tasks
+                ]
+            },
         )
     db.commit()
     db.refresh(work_order)
     return work_order_form_read(db, work_order, can_edit=True)
+
+
+@router.get(
+    "/work-order-form-actions",
+    response_model=list[WorkOrderFormActionRead],
+)
+def list_form_action_tasks(
+    status: str | None = Query(
+        default=None,
+        pattern="^(pending|acknowledged|resolved)$",
+    ),
+    action_type: str | None = Query(
+        default=None,
+        pattern="^(notification|inventory_review)$",
+    ),
+    work_order_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    stmt = select(WorkOrderFormAction)
+    if actor.role == UserRole.WAREHOUSE:
+        stmt = stmt.where(
+            WorkOrderFormAction.action_type == "inventory_review"
+        )
+    if status:
+        stmt = stmt.where(WorkOrderFormAction.status == status)
+    if action_type:
+        stmt = stmt.where(WorkOrderFormAction.action_type == action_type)
+    if work_order_id:
+        stmt = stmt.where(WorkOrderFormAction.work_order_id == work_order_id)
+    tasks = db.scalars(
+        stmt.order_by(WorkOrderFormAction.id.desc()).limit(limit)
+    ).all()
+    return [_form_action_read(db, actor, task) for task in tasks]
+
+
+@router.get(
+    "/work-orders/{work_order_id}/form-actions",
+    response_model=list[WorkOrderFormActionRead],
+)
+def list_work_order_form_action_tasks(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    tasks = db.scalars(
+        select(WorkOrderFormAction)
+        .where(WorkOrderFormAction.work_order_id == work_order_id)
+        .order_by(WorkOrderFormAction.id.desc())
+    ).all()
+    return [_form_action_read(db, actor, task) for task in tasks]
+
+
+@router.patch(
+    "/work-order-form-actions/{task_id}",
+    response_model=WorkOrderFormActionRead,
+)
+def update_form_action_task(
+    task_id: int,
+    payload: WorkOrderFormActionUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    task = db.scalar(
+        select(WorkOrderFormAction)
+        .where(WorkOrderFormAction.id == task_id)
+        .with_for_update()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Form action task not found")
+    if task.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Form action task version is stale")
+    can_acknowledge, can_resolve = _task_capabilities(actor, task)
+    if payload.action == "acknowledge":
+        if not can_acknowledge:
+            raise HTTPException(
+                status_code=403,
+                detail="Role cannot acknowledge this form action task",
+            )
+        task.status = "acknowledged"
+        task.acknowledged_by = actor.user_id
+        task.acknowledged_at = datetime.utcnow()
+    else:
+        if not can_resolve:
+            raise HTTPException(
+                status_code=403,
+                detail="Role cannot resolve this form action task",
+            )
+        if (
+            task.action_type == "inventory_review"
+            and len(payload.resolution_notes or "") < 3
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Inventory review resolution requires notes",
+            )
+        task.status = "resolved"
+        task.resolved_by = actor.user_id
+        task.resolved_at = datetime.utcnow()
+        task.resolution_notes = payload.resolution_notes
+    task.version += 1
+    db.add(task)
+    _audit(
+        db,
+        actor,
+        f"{payload.action}_work_order_form_action",
+        "work_order_form_action",
+        task.id,
+        {
+            "action_type": task.action_type,
+            "field_key": task.field_key,
+            "work_order_id": task.work_order_id,
+            "new_status": task.status,
+            "new_version": task.version,
+        },
+    )
+    db.commit()
+    db.refresh(task)
+    return _form_action_read(db, actor, task)

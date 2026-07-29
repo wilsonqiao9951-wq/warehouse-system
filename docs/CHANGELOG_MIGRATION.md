@@ -378,3 +378,16 @@ Verification: external delivery target suite 5 passed, full backend suite 101 pa
 - Treats inventory-impact flags as governed metadata; dynamic form submissions never mutate physical inventory.
 
 Verification: configurable-form target suite 5 passed, full backend suite 106 passed, fresh base-to-`0029` plus `0029 -> 0028 -> 0029` passed on SQLite, and the Next.js 16.2.12 production build generated all 30 static routes.
+
+## 20260729_0030 - Configured-form action workflow
+
+- Adds tenant-scoped durable notification and inventory-review tasks created only when a flagged configured field actually changes.
+- Keys every task to the work order, field, action type, and exact form revision so retries and identical-value submissions cannot duplicate follow-up work.
+- Stores field identity and workflow evidence without copying submitted form values into the action queue.
+- Adds strict `pending -> acknowledged -> resolved` handling with optimistic versions, actor/timestamp attribution, and audit records.
+- Allows managers to process notifications, warehouse staff to process inventory reviews, and administrators to process either; inventory resolution requires notes.
+- Gives engineers read-only action progress on shared work orders without global queue or mutation access.
+- Keeps inventory changes in the dedicated replenishment, transfer, return, and count workflows; resolving a form action never posts a stock transaction.
+- Blocks downgrade while any action evidence exists.
+
+Verification: form-action target suite 3 passed, all 109 backend tests passed in two bounded modules, fresh base-to-`0030` plus `0030 -> 0029 -> 0030` passed on SQLite, and the Next.js 16.2.12 production build generated all 31 static routes.
