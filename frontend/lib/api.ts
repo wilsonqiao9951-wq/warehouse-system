@@ -63,6 +63,12 @@ import {
   queueOfflineImage,
   readOfflineImage
 } from "@/lib/offline-media";
+import {
+  listOfflineReadResponses,
+  OfflineReadCacheSummary,
+  readOfflineReadResponse,
+  saveOfflineReadResponse
+} from "@/lib/offline-read-cache";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
 const OFFLINE_QUEUE_KEY = "opf_offline_queue";
@@ -168,6 +174,45 @@ function isOfflineQueueableMutation(path: string, method: string): boolean {
       || /^\/return-equipments(?:\?|$)/.test(path)
     )
   );
+}
+
+function isOfflineReadableRequest(path: string): boolean {
+  const workOrderPath = path.split("?")[0];
+  const reviewedWorkOrderPath = (
+    /^\/work-orders\/\d+$/.test(workOrderPath)
+    || /^\/work-orders\/\d+\/(form|form-actions|service-context|service-intelligence|completion-policy|part-recommendations|voice-notes)$/.test(workOrderPath)
+  );
+  return (
+    path === "/auth/me"
+    || /^\/work-orders(?:\?|$)/.test(path)
+    || reviewedWorkOrderPath
+    || /^\/(parts|warehouses|job-status|qc-pictures|return-equipments|work-order-parts)(?:\?|$)/.test(path)
+    || /^\/employees\/\d+\/van-inventory(?:\?|$)/.test(path)
+    || /^\/inventory\/(my-van|replenishment-requests|vehicle-returns|vehicle-return-destinations)(?:\?|$)/.test(path)
+  );
+}
+
+function offlineReadIdentity(): { userId: string; deviceId: string } | null {
+  if (typeof window === "undefined") return null;
+  const userId = window.localStorage.getItem("opf_user_id");
+  const deviceId = getCurrentDeviceId();
+  return userId && deviceId ? { userId, deviceId } : null;
+}
+
+async function readRetainedResponse<T>(path: string): Promise<T> {
+  const identity = offlineReadIdentity();
+  if (!identity) {
+    throw new Error("Sign in on this registered device before opening retained data.");
+  }
+  const cached = await readOfflineReadResponse<T>(
+    identity.userId,
+    identity.deviceId,
+    path
+  );
+  window.dispatchEvent(new CustomEvent("opf-offline-cache-hit", {
+    detail: { path, storedAt: cached.storedAt }
+  }));
+  return cached.payload;
 }
 
 function readOfflineQueue(): OfflineQueueItem[] {
@@ -390,6 +435,12 @@ async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQ
     && !bodyContainsPassword
   );
   if (typeof navigator !== "undefined" && !navigator.onLine) {
+    if (method === "GET" && isOfflineReadableRequest(path)) {
+      return readRetainedResponse<T>(path);
+    }
+    if (method === "GET") {
+      throw new Error("This information is not available in the reviewed offline read cache.");
+    }
     if (!isOfflineQueueableMutation(path, method) || bodyContainsPassword) {
       throw new Error("This verified action requires a network connection.");
     }
@@ -426,6 +477,20 @@ async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQ
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
     if (
+      method === "GET"
+      && isOfflineReadableRequest(path)
+      && (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed"))
+    ) {
+      try {
+        return await readRetainedResponse<T>(path);
+      } catch (cacheError) {
+        const cacheMessage = cacheError instanceof Error
+          ? cacheError.message
+          : "No retained snapshot is available.";
+        throw new Error(`Network unavailable. ${cacheMessage}`);
+      }
+    }
+    if (
       allowNetworkFailureQueue
       && canQueueMutation
       && (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed"))
@@ -437,6 +502,23 @@ async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQ
         ? "Network unavailable. Check VPN or server URL (NEXT_PUBLIC_API_BASE_URL)."
         : msg
     );
+  }
+  const upstreamUnavailable = [502, 503, 504].includes(res.status);
+  if (method === "GET" && isOfflineReadableRequest(path) && upstreamUnavailable) {
+    try {
+      return await readRetainedResponse<T>(path);
+    } catch (cacheError) {
+      const cacheMessage = cacheError instanceof Error
+        ? cacheError.message
+        : "No retained snapshot is available.";
+      throw new Error(`API unavailable. ${cacheMessage}`);
+    }
+  }
+  if (allowNetworkFailureQueue && canQueueMutation && upstreamUnavailable) {
+    return queueOfflineMutation<T>(path, method, init?.body as string, workOrderId);
+  }
+  if (typeof window !== "undefined" && !upstreamUnavailable) {
+    window.dispatchEvent(new Event("opf-api-online"));
   }
   if (!res.ok) {
     let detail = `API error ${res.status}`;
@@ -454,6 +536,17 @@ async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQ
   }
   const payload = (await res.json()) as T;
   rememberClaimVersionsFromPayload(payload);
+  if (method === "GET" && isOfflineReadableRequest(path)) {
+    const identity = offlineReadIdentity();
+    if (identity) {
+      void saveOfflineReadResponse(
+        identity.userId,
+        identity.deviceId,
+        path,
+        payload
+      ).catch(() => undefined);
+    }
+  }
   return payload;
 }
 
@@ -612,6 +705,18 @@ export async function syncOfflineQueue(): Promise<number> {
       }, false);
       remaining = remaining.filter((row) => row !== item);
       synced += 1;
+      try {
+        if (item.operationType === "work_order_form" && item.workOrderId !== undefined) {
+          await request<WorkOrderForm>(`/work-orders/${item.workOrderId}/form`);
+        } else if (item.path === "/qc-pictures" && item.workOrderId !== undefined) {
+          await request<QCPicture[]>(`/qc-pictures?work_order_id=${item.workOrderId}`);
+        } else if (item.path === "/return-equipments" && item.workOrderId !== undefined) {
+          await request<ReturnEquipment[]>(`/return-equipments?work_order_id=${item.workOrderId}`);
+        }
+      } catch {
+        // The authoritative mutation already succeeded. A later online read can
+        // refresh its optional offline snapshot without replaying the write.
+      }
     } catch (error) {
       item.blockedReason = error instanceof Error ? error.message : "Sync failed";
       if (
@@ -762,6 +867,12 @@ export async function discardUnreferencedOfflineMedia(
     workOrderId,
     claimVersion
   });
+}
+
+export async function getOfflineReadCacheSummary(): Promise<OfflineReadCacheSummary[]> {
+  const identity = offlineReadIdentity();
+  if (!identity) return [];
+  return listOfflineReadResponses(identity.userId, identity.deviceId);
 }
 
 function requestWithOfflineMediaQueue<T>(

@@ -57,6 +57,10 @@ export default function Nav() {
       setRole(saved);
     }
     if (token) {
+      if (!navigator.onLine) {
+        setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
+        return;
+      }
       api.getMe()
         .then((user) => {
           setAuthenticated(true);
@@ -65,9 +69,18 @@ export default function Nav() {
           window.localStorage.setItem("opf_role", user.role);
           window.localStorage.setItem("opf_user_id", String(user.id));
         })
-        .catch(() => {
-          window.localStorage.removeItem("opf_access_token");
-          setAuthenticated(false);
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "";
+          const networkUnavailable = (
+            message.includes("Network unavailable")
+            || message.includes("API unavailable")
+          );
+          if (navigator.onLine && !networkUnavailable) {
+            window.localStorage.removeItem("opf_access_token");
+            setAuthenticated(false);
+          } else {
+            setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
+          }
         });
     }
   }, []);

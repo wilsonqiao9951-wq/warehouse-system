@@ -5,6 +5,7 @@ import ManagerShell from "@/components/manager-shell";
 import {
   discardUnreferencedOfflineMedia,
   getOfflineMediaQueue,
+  getOfflineReadCacheSummary,
   getOfflineQueue,
   retryOfflineQueueItem,
   syncOfflineQueue
@@ -12,15 +13,18 @@ import {
 
 type VisibleQueueItem = ReturnType<typeof getOfflineQueue>[number];
 type VisibleMediaItem = Awaited<ReturnType<typeof getOfflineMediaQueue>>[number];
+type VisibleReadCacheItem = Awaited<ReturnType<typeof getOfflineReadCacheSummary>>[number];
 
 export default function SyncCenterPage() {
   const [queue, setQueue] = useState<VisibleQueueItem[]>([]);
   const [online, setOnline] = useState(true);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [media, setMedia] = useState<VisibleMediaItem[]>([]);
+  const [readCache, setReadCache] = useState<VisibleReadCacheItem[]>([]);
   const refresh = () => {
     setQueue(getOfflineQueue());
     void getOfflineMediaQueue().then(setMedia).catch(() => setMedia([]));
+    void getOfflineReadCacheSummary().then(setReadCache).catch(() => setReadCache([]));
   };
 
   useEffect(() => {
@@ -32,11 +36,13 @@ export default function SyncCenterPage() {
     window.addEventListener("offline", off);
     window.addEventListener("opf-offline-queued", refresh);
     window.addEventListener("opf-offline-media", refresh);
+    window.addEventListener("opf-offline-read-cache", refresh);
     return () => {
       window.removeEventListener("online", on);
       window.removeEventListener("offline", off);
       window.removeEventListener("opf-offline-queued", refresh);
       window.removeEventListener("opf-offline-media", refresh);
+      window.removeEventListener("opf-offline-read-cache", refresh);
     };
   }, []);
 
@@ -89,6 +95,7 @@ export default function SyncCenterPage() {
         { label: "Pending", value: queue.length },
         { label: "Connection", value: online ? "Online" : "Offline" },
         { label: "Retained photos", value: media.length },
+        { label: "Read snapshots", value: readCache.length },
         { label: "Conflicts", value: conflictCount },
         { label: "Ownership blocked", value: blockedCount }
       ]}
@@ -171,6 +178,30 @@ export default function SyncCenterPage() {
                 )}
               </div>
             ))}
+          </div>
+        )}
+      </section>
+      <section className="card">
+        <h3 style={{ marginTop: 0 }}>Offline read snapshots</h3>
+        <p className="muted">
+          Successful, reviewed GET responses are retained only for this account and registered device. They are read-only and never grant mutation permission.
+        </p>
+        {readCache.length === 0 ? (
+          <div className="empty-state">Open work orders online once to prepare this device for offline viewing.</div>
+        ) : (
+          <div style={{ display: "grid", gap: 8 }}>
+            {readCache.slice(0, 20).map((item) => (
+              <div className="job-card" key={item.path}>
+                <strong>{item.path.split("?")[0]}</strong>
+                <div className="muted">
+                  Saved {new Date(item.storedAt).toLocaleString()}
+                  {` · ${(item.byteSize / 1024).toFixed(0)} KiB`}
+                </div>
+              </div>
+            ))}
+            {readCache.length > 20 && (
+              <p className="muted">{readCache.length - 20} additional snapshots are retained.</p>
+            )}
           </div>
         )}
       </section>

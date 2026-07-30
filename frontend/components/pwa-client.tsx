@@ -13,6 +13,7 @@ export default function PwaClient() {
   const [offline, setOffline] = useState(false);
   const [iosInstallHint, setIosInstallHint] = useState(false);
   const [queued, setQueued] = useState(0);
+  const [retainedDataAt, setRetainedDataAt] = useState("");
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -26,8 +27,16 @@ export default function PwaClient() {
     };
 
     const updateQueue = () => setQueued(getOfflineQueue().length);
-    const onOnline = () => { setOffline(false); void syncOfflineQueue().then(updateQueue); };
+    const onOnline = () => {
+      setOffline(false);
+      void syncOfflineQueue().then(updateQueue);
+    };
     const onOffline = () => setOffline(true);
+    const onApiOnline = () => setRetainedDataAt("");
+    const onCacheHit = (event: Event) => {
+      const detail = (event as CustomEvent<{ storedAt?: string }>).detail;
+      if (detail?.storedAt) setRetainedDataAt(detail.storedAt);
+    };
     setOffline(!navigator.onLine);
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) && !("standalone" in window.navigator && (window.navigator as Navigator & { standalone?: boolean }).standalone);
     setIosInstallHint(ios);
@@ -41,12 +50,16 @@ export default function PwaClient() {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     window.addEventListener("opf-offline-queued", updateQueue);
+    window.addEventListener("opf-offline-cache-hit", onCacheHit);
+    window.addEventListener("opf-api-online", onApiOnline);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
       window.removeEventListener("opf-offline-queued", updateQueue);
+      window.removeEventListener("opf-offline-cache-hit", onCacheHit);
+      window.removeEventListener("opf-api-online", onApiOnline);
     };
   }, []);
 
@@ -62,6 +75,12 @@ export default function PwaClient() {
       {offline && (
         <div className="offline-banner" role="status">
           You are offline. Eligible form, QC photo, and return-evidence changes stay on this account and device; verified state and inventory actions still require a connection.
+          {retainedDataAt ? ` Showing retained data saved ${new Date(retainedDataAt).toLocaleString()}.` : ""}
+        </div>
+      )}
+      {!offline && retainedDataAt && (
+        <div className="offline-banner" role="status">
+          The API is unavailable. Showing retained data saved {new Date(retainedDataAt).toLocaleString()}.
         </div>
       )}
       {!offline && queued > 0 && <div className="sync-banner" role="status">Syncing {queued} offline change{queued === 1 ? "" : "s"}…</div>}

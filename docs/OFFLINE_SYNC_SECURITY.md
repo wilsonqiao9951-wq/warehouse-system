@@ -2,6 +2,27 @@
 
 OpenPartsFlow treats offline storage as delayed, authenticated work rather than as permission to bypass the server. Every replay repeats the same server authorization and validation as an online request.
 
+## Read-only snapshots
+
+Successful reviewed GET responses are retained in a separate IndexedDB store so an engineer can reopen previously viewed work while disconnected. Snapshots are keyed by the exact request path plus the authenticated user account and registered device. A different account or device cannot list or read them.
+
+Reviewed snapshots cover:
+
+- current user identity needed to restore the offline shell
+- work-order pools and exact work-order records
+- configured forms, completion policy, service context/intelligence, recommendations, and form-action progress
+- job-status, QC-picture, return-equipment, voice-note metadata, and work-order part records
+- part and warehouse reference lists
+- the engineer's vehicle stock, replenishment status, vehicle-return status, and approved return destinations
+
+Profit, administration, imports, integration configuration, and arbitrary GET endpoints are not in the offline read allowlist. API responses are not stored in the Service Worker cache; the account/device-scoped IndexedDB store is used instead.
+
+Each snapshot is limited to 1.5 MB. The store retains at most 120 responses and 12 MB per account/device, pruning the oldest snapshots only when a newer successful online response needs space. `/sync-center` shows paths, sizes, and timestamps without expanding the retained payload. The offline banner displays the timestamp whenever retained data is used.
+
+If the browser still reports online while the API is unreachable, reviewed reads fall back to the same snapshots. This includes direct fetch failures and 502/503/504 responses returned by a gateway or the Service Worker after an upstream failure. Eligible queued writes use the same upstream-unavailable classification, while every non-allowlisted mutation still fails closed. A network failure does not erase the local login state. A real non-gateway API response clears the retained-data warning and refreshes the snapshot.
+
+Snapshots never authorize writes. Buttons for claiming, status, completion, inventory, approval, or configuration still execute the live-only request path and fail closed while disconnected.
+
 ## Reviewed write allowlist
 
 Only these JSON mutations can enter the browser queue:
@@ -60,7 +81,8 @@ After resolution, only the originating account and device can poll the receipt a
 
 - Apply migrations with `alembic upgrade head`.
 - Confirm the PWA service worker cache is `openpartsflow-static-v3`.
+- Open the job pool, one job detail, configured form, recommendations, and vehicle inventory online before testing offline views.
 - Test once with browser offline mode and once by stopping the API while the browser still reports online.
-- Verify `/sync-center` shows claim version, operation state, attempts, retained photos, and conflicts without submitted values.
+- Verify `/sync-center` shows claim version, operation state, attempts, retained photos, read-snapshot timestamps, and conflicts without submitted values.
 - Verify part usage and every inventory custody action return the live-connection requirement while offline.
 - Resolve a form conflict in `/sync-conflicts`, reconnect the originating phone, and confirm its local record clears.

@@ -602,3 +602,29 @@ Verification:
 - Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 32 static routes.
 - Production dependency audit: 0 vulnerabilities.
 - Backend remains on the fully verified `0031` / 111-test baseline; all replayed evidence uses the existing server ownership, device, claim-generation, frozen-state, type, size, and file-signature checks.
+
+## 2026-07-29 - Phase 8 account/device-isolated offline reading
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added a separate IndexedDB store for reviewed successful GET responses, keyed by exact request path, authenticated account, and registered device.
+- Added offline reads for work-order pools, exact work orders, configured forms, completion policies, service context/intelligence, recommendations, form-action progress, field evidence metadata, parts, warehouses, vehicle inventory, replenishment status, and vehicle-return status.
+- Kept profit, administration, imports, integrations, arbitrary endpoints, and all mutation authority outside the read cache.
+- Limited each response to 1.5 MB and each account/device store to 120 entries and 12 MB with oldest-snapshot pruning.
+- Added fallback both when the browser reports offline and when the API is unreachable while the browser still reports online.
+- Treated gateway/Service Worker 502, 503, and 504 responses as upstream unavailability: reviewed reads use retained snapshots, eligible writes queue, and every other mutation stays live-only.
+- Preserved the local authenticated shell during genuine network failure instead of deleting the device login state.
+- Added retained-data timestamps to the global offline/API-unavailable banner and cleared the warning after a real API response.
+- Refreshed relevant form/QC/return read snapshots after a successful queued mutation without replaying the write if the optional refresh fails.
+- Added read-snapshot count, paths, sizes, and timestamps to `/sync-center` without expanding or displaying cached payloads.
+- Kept API responses out of the Service Worker cache; only the account/device-scoped IndexedDB path can return retained application data.
+- Expanded the offline security guide and mobile QA checklist for identity isolation, missing snapshots, API-down fallback, and write denial.
+
+Verification:
+
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for all 32 static routes.
+- Production dependency audit: 0 vulnerabilities.
+- Real in-app browser regression passed with a seeded engineer and work order: 14 scoped snapshots were visible in `/sync-center`; after stopping the API, `/today` and the exact work-order detail reopened from retained data with timestamps, the authenticated mobile shell remained present, and an offline claim attempt failed with no state change.
+- Backend remains on the fully verified `0031` / 111-test baseline; offline snapshots never bypass server mutation authorization.
