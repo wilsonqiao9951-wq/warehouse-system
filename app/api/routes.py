@@ -167,6 +167,7 @@ from app.services.integration_delivery import enqueue_work_order_event
 from app.services.commercial import (
     PLAN_DEFAULTS,
     apply_plan_defaults,
+    consume_monthly_usage,
     enforce_user_capacity,
     enforce_warehouse_capacity,
     lock_organization,
@@ -2283,6 +2284,7 @@ async def create_part_recognition_candidates(
     extension = _image_extension(data)
     if not extension:
         raise HTTPException(status_code=400, detail="Unsupported or invalid image file")
+    consume_monthly_usage(db, actor.organization_id, ai_requests=1)
     target_dir = Path("uploads/part-recognition")
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4().hex}{extension}"
@@ -2896,7 +2898,10 @@ def get_work_order_service_intelligence(
     current = db.get(WorkOrder, work_order_id)
     if not current:
         raise HTTPException(status_code=404, detail="Work order not found")
-    return build_service_intelligence(db, current, actor.organization_id)
+    consume_monthly_usage(db, actor.organization_id, ai_requests=1)
+    result = build_service_intelligence(db, current, actor.organization_id)
+    db.commit()
+    return result
 
 
 @router.patch("/work-orders/{work_order_id}", response_model=WorkOrderRead)
@@ -5028,7 +5033,10 @@ def work_order_part_recommendations(
     work_order = db.get(WorkOrder, work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
-    return build_part_recommendations(db, work_order)
+    consume_monthly_usage(db, actor.organization_id, ai_requests=1)
+    result = build_part_recommendations(db, work_order)
+    db.commit()
+    return result
 
 
 @router.get("/work-order-parts", response_model=list[WorkOrderPartRead])

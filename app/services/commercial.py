@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.models import Organization, User, UserInvitation, Warehouse
+from app.models import Organization, OrganizationUsagePeriod, User, UserInvitation, Warehouse
 
 
 PLAN_DEFAULTS: dict[str, dict[str, int | None]] = {
@@ -32,6 +32,10 @@ PLAN_DEFAULTS: dict[str, dict[str, int | None]] = {
         "api_monthly_limit": None,
     },
 }
+
+
+def _utcnow_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def apply_plan_defaults(organization: Organization, plan_code: str) -> None:
@@ -109,8 +113,27 @@ def lock_organization(db: Session, organization_id: int) -> Organization:
     return organization
 
 
-def organization_usage(db: Session, organization_id: int) -> dict[str, int]:
-    now = datetime.utcnow()
+def current_usage_period(now: datetime | None = None) -> date:
+    current = now or _utcnow_naive()
+    if current.tzinfo is not None:
+        current = current.astimezone(timezone.utc).replace(tzinfo=None)
+    return date(current.year, current.month, 1)
+
+
+def next_usage_period(period_start: date) -> date:
+    if period_start.month == 12:
+        return date(period_start.year + 1, 1, 1)
+    return date(period_start.year, period_start.month + 1, 1)
+
+
+def organization_usage(
+    db: Session,
+    organization_id: int,
+    *,
+    now: datetime | None = None,
+) -> dict[str, int | date]:
+    now = now or _utcnow_naive()
+    period_start = current_usage_period(now)
     active_users = db.scalar(
         select(func.count(User.id)).where(
             User.organization_id == organization_id,
@@ -138,12 +161,87 @@ def organization_usage(db: Session, organization_id: int) -> dict[str, int]:
             Warehouse.warehouse_type == "van",
         )
     ) or 0
+    monthly_usage = db.scalar(
+        select(OrganizationUsagePeriod).where(
+            OrganizationUsagePeriod.organization_id == organization_id,
+            OrganizationUsagePeriod.period_start == period_start,
+        )
+    )
     return {
         "active_users": int(active_users),
         "pending_invitations": int(pending_invitations),
         "active_warehouses": int(active_main_warehouses),
         "active_vehicle_warehouses": int(active_vehicle_warehouses),
+        "usage_period_start": period_start,
+        "ai_monthly_used": monthly_usage.ai_requests if monthly_usage else 0,
+        "api_monthly_used": monthly_usage.api_requests if monthly_usage else 0,
     }
+
+
+def consume_monthly_usage(
+    db: Session,
+    organization_id: int,
+    *,
+    ai_requests: int = 0,
+    api_requests: int = 0,
+    now: datetime | None = None,
+) -> OrganizationUsagePeriod:
+    """Atomically reserve monthly AI/API capacity in the caller's transaction."""
+    if ai_requests < 0 or api_requests < 0 or not (ai_requests or api_requests):
+        raise ValueError("Usage increments must be non-negative and non-zero")
+
+    used_at = now or _utcnow_naive()
+    if used_at.tzinfo is not None:
+        used_at = used_at.astimezone(timezone.utc).replace(tzinfo=None)
+    period_start = current_usage_period(used_at)
+    organization = lock_organization(db, organization_id)
+    usage = db.scalar(
+        select(OrganizationUsagePeriod)
+        .where(
+            OrganizationUsagePeriod.organization_id == organization_id,
+            OrganizationUsagePeriod.period_start == period_start,
+        )
+        .with_for_update()
+    )
+    current_ai = usage.ai_requests if usage else 0
+    current_api = usage.api_requests if usage else 0
+
+    requested = (
+        ("AI", current_ai, ai_requests, organization.ai_monthly_limit),
+        ("API", current_api, api_requests, organization.api_monthly_limit),
+    )
+    for label, current, increment, limit in requested:
+        if not increment:
+            continue
+        if limit == 0:
+            raise HTTPException(
+                status_code=403,
+                detail=f"{label} capability is not included in this plan.",
+            )
+        if limit is not None and current + increment > limit:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"{label} monthly limit reached ({limit}). "
+                    f"Usage resets on {next_usage_period(period_start).isoformat()}."
+                ),
+            )
+
+    if usage is None:
+        usage = OrganizationUsagePeriod(
+            organization_id=organization_id,
+            period_start=period_start,
+        )
+        db.add(usage)
+    if ai_requests:
+        usage.ai_requests = current_ai + ai_requests
+        usage.last_ai_used_at = used_at
+    if api_requests:
+        usage.api_requests = current_api + api_requests
+        usage.last_api_used_at = used_at
+    db.add(usage)
+    db.flush()
+    return usage
 
 
 def enforce_user_capacity(

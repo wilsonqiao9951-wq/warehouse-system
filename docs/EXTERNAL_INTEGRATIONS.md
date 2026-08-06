@@ -136,6 +136,13 @@ Private, loopback, link-local, reserved, credential-bearing, fragment-bearing, n
 
 Every business event is committed to the delivery queue in the same transaction as the work-order status or part usage. External downtime therefore does not roll back or delay the engineer's field action.
 
+Every successful `/external/v1` call consumes one external API unit from the
+organization's current UTC monthly allowance. The recommendations endpoint also
+consumes one AI unit. A processed inbound idempotency key can be replayed without
+a second charge. Invalid credentials, validation failures, missing links,
+rejected mutations, and failed transactions are not charged. A plan without the
+capability returns `403`; an exhausted positive allowance returns `429`.
+
 Outbound requests include:
 
 ```text

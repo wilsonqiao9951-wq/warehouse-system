@@ -188,6 +188,9 @@ class OrganizationSettingsRead(OrganizationBrandingRead):
     max_vehicle_warehouses: int | None = None
     ai_monthly_limit: int | None = None
     api_monthly_limit: int | None = None
+    usage_period_start: date
+    ai_monthly_used: int = Field(default=0, ge=0)
+    api_monthly_used: int = Field(default=0, ge=0)
     settings_version: int = Field(ge=0)
     active_users: int = 0
     pending_invitations: int = 0
@@ -217,6 +220,9 @@ class OrganizationRead(BaseModel):
     max_vehicle_warehouses: int | None = None
     ai_monthly_limit: int | None = None
     api_monthly_limit: int | None = None
+    usage_period_start: date
+    ai_monthly_used: int = Field(default=0, ge=0)
+    api_monthly_used: int = Field(default=0, ge=0)
     settings_version: int = Field(ge=0)
     active_users: int = 0
     pending_invitations: int = 0

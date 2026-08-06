@@ -47,7 +47,7 @@ from app.services.integrations import (
     validate_webhook_url,
 )
 from app.services.inventory import get_available_stock_quantity, get_stock_balances
-from app.services.commercial import require_subscription_access
+from app.services.commercial import consume_monthly_usage, require_subscription_access
 from app.services.recommendations import build_part_recommendations
 
 
@@ -383,10 +383,20 @@ def _external_work_order(
     return link, work_order
 
 
-def _mark_external_read(db: Session, integration: ExternalIntegration) -> None:
+def _reserve_external_request(
+    db: Session,
+    integration: ExternalIntegration,
+    *,
+    includes_ai: bool = False,
+) -> None:
+    consume_monthly_usage(
+        db,
+        integration.organization_id,
+        ai_requests=1 if includes_ai else 0,
+        api_requests=1,
+    )
     integration.last_used_at = datetime.utcnow()
     db.add(integration)
-    db.commit()
 
 
 @router.get(
@@ -400,6 +410,7 @@ def external_inventory(
     db: Session = Depends(get_db),
     integration: ExternalIntegration = Depends(get_external_integration),
 ):
+    _reserve_external_request(db, integration)
     parts = {
         row.id: row
         for row in db.scalars(select(Part).where(Part.is_active.is_(True))).all()
@@ -438,7 +449,7 @@ def external_inventory(
         )
         if len(rows) >= limit:
             break
-    _mark_external_read(db, integration)
+    db.commit()
     return rows
 
 
@@ -452,6 +463,7 @@ def external_work_order_status(
     integration: ExternalIntegration = Depends(get_external_integration),
 ):
     link, work_order = _external_work_order(db, integration, external_id)
+    _reserve_external_request(db, integration)
     result = ExternalWorkOrderRead(
         external_id=link.external_id,
         work_order_id=work_order.id,
@@ -465,7 +477,7 @@ def external_work_order_status(
         final_outcome=work_order.final_outcome,
         updated_at=work_order.updated_at,
     )
-    _mark_external_read(db, integration)
+    db.commit()
     return result
 
 
@@ -479,6 +491,7 @@ def external_work_order_recommendations(
     integration: ExternalIntegration = Depends(get_external_integration),
 ):
     _, work_order = _external_work_order(db, integration, external_id)
+    _reserve_external_request(db, integration, includes_ai=True)
     result = [
         ExternalPartRecommendationRead(
             part_number=row.part.part_number,
@@ -494,7 +507,7 @@ def external_work_order_recommendations(
         )
         for row in build_part_recommendations(db, work_order)
     ]
-    _mark_external_read(db, integration)
+    db.commit()
     return result
 
 

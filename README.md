@@ -17,6 +17,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Idempotent knowledge drafts generated from completed jobs plus tenant-protected field photo/video storage
 - Explainable same-model fault analysis, published-guidance ranking, and similar completed-job retrieval on the mobile work-order screen
 - Tenant-scoped AppSheet/REST API keys, configurable inbound work-order mapping, idempotent Webhooks, and synchronization logs
+- Durable UTC monthly AI/API usage metering with plan limits, atomic concurrency enforcement, and idempotent external charging
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
 - Manager/administrator replenishment approval with rejection evidence before warehouse picking
 - Reserved picking stock with separate shipment OUTBOUND and receipt INBOUND inventory movements

@@ -14,9 +14,10 @@ store explicit customer overrides after selecting the plan.
 | Professional | 50 | 10 | 50 | 2,000 | 10,000 |
 | Enterprise | Contract | Contract | Contract | Contract | Contract |
 
-`null` means unlimited or contract-governed. `0` means the capability is not
-included. AI and API allowances are stored entitlements in this batch; request
-metering and hard monthly enforcement are a later Phase 9 batch.
+`null` means unlimited or contract-governed. Usage is still counted for an
+unlimited organization. `0` means the capability is not included and the
+metered endpoint returns `403`. A positive allowance is enforced atomically;
+the first request beyond the allowance returns `429`.
 
 Changing a plan resets all five limits to its defaults before explicit values in
 the same update are applied.
@@ -115,6 +116,39 @@ Organization users can read their current plan and usage:
 GET /api/organization/settings
 ```
 
+The response includes `usage_period_start`, `ai_monthly_used`, and
+`api_monthly_used`. Settings and the platform customer list show the same
+current-period counters beside each allowance.
+
+## Monthly AI and API metering
+
+OpenPartsFlow stores one tenant-isolated usage row per UTC calendar month. A
+new month automatically starts a new row at zero; prior rows remain available
+as durable commercial evidence.
+
+| Request | AI units | API units |
+|---|---:|---:|
+| Work-order part recommendations | 1 | 0 |
+| Work-order service intelligence | 1 | 0 |
+| Visual part candidate generation | 1 | 0 |
+| External inventory read | 0 | 1 |
+| External linked work-order status read | 0 | 1 |
+| External linked work-order recommendations | 1 | 1 |
+| New successful external work-order upsert | 0 | 1 |
+| Exact replay of a processed idempotency key | 0 | 0 |
+
+Authentication failures, validation failures, missing resources, rejected
+work-order mutations, and rolled-back server errors do not consume capacity.
+For inbound work orders, the usage increment is committed in the same final
+transaction as the work order and processed synchronization log. Exact
+idempotent replays return the stored response without another charge.
+
+Allowance decisions serialize on the organization row with PostgreSQL row
+locking or a SQLite immediate write transaction. Therefore two concurrent
+requests competing for the final unit cannot both succeed. Counters and their
+last-used timestamps never contain request payloads, API keys, image data, or
+AI response content.
+
 Only platform administrators can change plans, subscription state, trial dates,
 or capacity:
 
@@ -152,21 +186,19 @@ storage.
 
 ## Deployment
 
-Apply migration `20260730_0032` before starting the updated application:
+Apply migration `20260806_0033` before starting the updated application:
 
 ```bash
 alembic upgrade head
 ```
 
-The migration assigns existing organizations the Professional defaults and active
-subscription state. Downgrade is allowed only while every organization still has
-those untouched defaults; this prevents silent loss of commercial or branding
-configuration.
+Revision `0032` assigns existing organizations the Professional defaults and
+active subscription state. Revision `0033` creates the monthly usage ledger.
+Downgrading `0033` is refused after any usage has been recorded, preventing
+silent loss of billing evidence.
 
 ## Next Phase 9 batches
 
-- Durable monthly AI/API usage counters with idempotent charging and period reset
-- Plan-feature enforcement for AI and external API calls
 - Verified custom domains and customer-specific email identity
 - Trial/renewal notifications and billing-provider lifecycle integration
 - Customer data export, backup/restore evidence, and commercial usage reports

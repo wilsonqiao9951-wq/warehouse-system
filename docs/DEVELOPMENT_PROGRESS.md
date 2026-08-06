@@ -685,3 +685,41 @@ Verification:
   errors.
 - AI/API allowance storage is complete; durable monthly usage metering and hard
   allowance enforcement remain the next Phase 9 commercial batch.
+
+## 2026-08-06 - Phase 9 durable AI/API usage metering
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added a tenant-isolated UTC monthly usage ledger with durable AI/API counters
+  and last-used timestamps.
+- Enforced unavailable plan features with `403` and exhausted positive monthly
+  limits with `429`; unlimited contract plans remain metered for reporting.
+- Metered work-order recommendations, service intelligence, visual part
+  candidate generation, external reads, and external work-order intake.
+- Charged external recommendations once for API usage and once for AI usage.
+- Kept authentication, validation, missing-resource, rejected mutation, and
+  rolled-back server failures outside billable usage.
+- Returned exact processed inbound idempotency replays without another charge.
+- Serialized concurrent final-unit requests across PostgreSQL and SQLite.
+- Added live usage-to-allowance visibility to organization settings and the
+  platform customer list.
+- Added Alembic revision `20260806_0033` with non-negative count constraints,
+  tenant/month uniqueness, cascade cleanup, indexes, and guarded downgrade.
+- Added boundary, period rollover, combined-charge, idempotency, and file-backed
+  SQLite race coverage.
+
+Verification:
+
+- Usage-metering tests: 4 passed.
+- Affected commercial, integration, recognition, intelligence, and
+  recommendation regression suite: 27 passed.
+- Backend: all 119 tests passed, including file-backed SQLite concurrency.
+- Database: fresh base-to-`0033`, table/index/constraint inspection, empty
+  downgrade/re-upgrade, negative-counter rejection, and refusal to downgrade
+  recorded usage all passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for
+  all 32 static routes.
+- Python dependency consistency passed; production npm audit reported 0
+  vulnerabilities.

@@ -25,6 +25,11 @@ const rules = [
   ["require_manager_approval", "Require manager approval before locking"]
 ] as const;
 
+function usageLabel(used: number, limit?: number | null): string {
+  if (limit === 0) return "Not included";
+  return `${used.toLocaleString()} used / ${limit == null ? "Unlimited" : limit.toLocaleString()}`;
+}
+
 export default function SettingsPage() {
   const [policies, setPolicies] = useState<CompletionPolicy[]>([]);
   const [form, setForm] = useState({ ...emptyPolicy });
@@ -168,8 +173,9 @@ export default function SettingsPage() {
               <div>Users: {organization.active_users} active + {organization.pending_invitations} invited / {organization.max_users ?? "Unlimited"}</div>
               <div>Main warehouses: {organization.active_warehouses} / {organization.max_warehouses ?? "Unlimited"}</div>
               <div>Vehicle inventories: {organization.active_vehicle_warehouses} / {organization.max_vehicle_warehouses ?? "Unlimited"}</div>
-              <div>AI monthly allowance: {organization.ai_monthly_limit === 0 ? "Not included" : organization.ai_monthly_limit ?? "Unlimited / contract"}</div>
-              <div>API monthly allowance: {organization.api_monthly_limit === 0 ? "Not included" : organization.api_monthly_limit ?? "Unlimited / contract"}</div>
+              <div>AI requests: {usageLabel(organization.ai_monthly_used, organization.ai_monthly_limit)}</div>
+              <div>External API requests: {usageLabel(organization.api_monthly_used, organization.api_monthly_limit)}</div>
+              <div className="muted">Current UTC billing period started {organization.usage_period_start}.</div>
             </div>
           </div>
         </section>

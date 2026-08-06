@@ -68,6 +68,11 @@ function optionalLimit(value: string): number | null {
   return value ? Number(value) : null;
 }
 
+function usageLabel(used: number, limit?: number | null): string {
+  if (limit === 0) return "not included";
+  return `${used.toLocaleString()}/${limit == null ? "unlimited" : limit.toLocaleString()}`;
+}
+
 export default function PlatformPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [form, setForm] = useState(emptyForm);
@@ -276,6 +281,8 @@ export default function PlatformPage() {
                   <td>
                     <div>Seats {organization.active_users + organization.pending_invitations}/{organization.max_users ?? "∞"}</div>
                     <div className="muted">Warehouses {organization.active_warehouses}/{organization.max_warehouses ?? "∞"} · Vans {organization.active_vehicle_warehouses}/{organization.max_vehicle_warehouses ?? "∞"}</div>
+                    <div className="muted">AI {usageLabel(organization.ai_monthly_used, organization.ai_monthly_limit)} · API {usageLabel(organization.api_monthly_used, organization.api_monthly_limit)}</div>
+                    <div className="muted">Period {organization.usage_period_start}</div>
                   </td>
                   <td>{organization.total_work_orders}</td>
                   <td>

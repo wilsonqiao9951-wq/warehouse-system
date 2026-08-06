@@ -27,6 +27,7 @@ from app.schemas import (
     ExternalWorkOrderUpsertRead,
     WorkOrderCreate,
 )
+from app.services.commercial import consume_monthly_usage
 
 
 ALLOWED_WORK_ORDER_FIELDS = {
@@ -475,6 +476,11 @@ def upsert_external_work_order(
             integration,
             payload,
             creating=creating,
+        )
+        consume_monthly_usage(
+            db,
+            integration.organization_id,
+            api_requests=1,
         )
         changed_fields: list[str] = []
         if creating:

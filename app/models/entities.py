@@ -71,6 +71,46 @@ class Organization(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class OrganizationUsagePeriod(Base):
+    __tablename__ = "organization_usage_periods"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "period_start",
+            name="uq_organization_usage_period",
+        ),
+        CheckConstraint(
+            "ai_requests >= 0 AND api_requests >= 0",
+            name="ck_organization_usage_counts_non_negative",
+        ),
+        Index(
+            "ix_organization_usage_period_start",
+            "organization_id",
+            "period_start",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    period_start: Mapped[date] = mapped_column(Date, nullable=False)
+    ai_requests: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    api_requests: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_ai_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_api_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    organization = relationship("Organization")
+
+
 class User(Base):
     __tablename__ = "users"
 

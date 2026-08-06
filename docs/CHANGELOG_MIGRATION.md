@@ -431,3 +431,24 @@ fresh `0031 -> 0032`, schema/default/constraint inspection,
 production build passed for all 32 static routes; real browser branding/plan
 regression passed with zero console errors; production dependency audit reported
 0 vulnerabilities.
+
+## 20260806_0033 - Durable monthly AI/API usage metering
+
+- Adds one tenant-isolated commercial usage ledger row per UTC calendar month.
+- Stores non-negative AI and external API request counters plus last-used
+  timestamps without retaining request or response content.
+- Enforces `0` allowances as unavailable (`403`), positive allowance boundaries
+  as exhausted (`429`), and continues to count contract/unlimited usage.
+- Meters internal recommendations, service intelligence, visual part candidate
+  generation, and every external API operation; external recommendations consume
+  both an AI and API unit.
+- Commits inbound work-order usage with the processed business transaction and
+  does not double-charge exact idempotent replays.
+- Serializes competing final-unit requests with the organization commercial lock.
+- Blocks downgrade after usage evidence exists.
+
+Verification: usage boundary/idempotency/rollover/isolation/race tests passed;
+all 119 backend tests passed; fresh base-to-`0033`, schema/index/constraint
+inspection, empty `0033 -> 0032 -> 0033`, and guarded evidence downgrade passed
+on SQLite; ESLint and the Next.js 16.2.12 production build passed for all 32
+static routes; production dependency audit reported 0 vulnerabilities.

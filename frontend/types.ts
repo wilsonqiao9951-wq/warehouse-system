@@ -46,6 +46,9 @@ export interface OrganizationSettings extends OrganizationBranding {
   max_vehicle_warehouses?: number | null;
   ai_monthly_limit?: number | null;
   api_monthly_limit?: number | null;
+  usage_period_start: string;
+  ai_monthly_used: number;
+  api_monthly_used: number;
   settings_version: number;
   active_users: number;
   pending_invitations: number;
