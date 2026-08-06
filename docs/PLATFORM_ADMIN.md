@@ -74,6 +74,22 @@ Webhook secret only through the runtime environment.
 See [Billing lifecycle and subscription notices](BILLING_LIFECYCLE.md) for the
 event contract, supported transitions, recovery boundary, and deployment gate.
 
+## Commercial reporting
+
+The `/platform` control plane can compare every customer for one selected UTC
+calendar month. Customers with zero usage remain visible. Request counts are
+historical ledger evidence; plan, subscription, allowance, and capacity columns
+show the customer's current commercial state and must not be treated as a
+historical contract snapshot.
+
+CSV export requires the platform administrator's current password, writes a
+`platform_commercial_report_exported` audit event, and is never queued for
+offline replay. Organization administrators receive the equivalent
+tenant-scoped report and cannot lift its organization filter.
+
+See [Commercial usage reporting](COMMERCIAL_REPORTING.md) for the API contract,
+CSV safeguards, and interpretation rules.
+
 ## Operational requirements
 
 - Record the customer contract or support ticket associated with creation and suspension.

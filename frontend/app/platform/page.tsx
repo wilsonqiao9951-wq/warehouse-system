@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import {
   BillingLifecycleEvent,
@@ -8,6 +8,7 @@ import {
   Organization,
   PlanCode,
   PlatformBillingAccount,
+  PlatformCommercialReportRow,
   SubscriptionNotice,
   SubscriptionStatus
 } from "@/types";
@@ -99,6 +100,9 @@ export default function PlatformPage() {
   const [billingAccounts, setBillingAccounts] = useState<PlatformBillingAccount[]>([]);
   const [billingEvents, setBillingEvents] = useState<BillingLifecycleEvent[]>([]);
   const [billingNotices, setBillingNotices] = useState<SubscriptionNotice[]>([]);
+  const [commercialRows, setCommercialRows] = useState<PlatformCommercialReportRow[]>([]);
+  const [commercialPeriod, setCommercialPeriod] = useState(`${new Date().toISOString().slice(0, 7)}-01`);
+  const [commercialPassword, setCommercialPassword] = useState("");
   const [form, setForm] = useState(emptyForm);
   const [edit, setEdit] = useState<CommercialEdit | null>(null);
   const [billingEdit, setBillingEdit] = useState<BillingEdit | null>(null);
@@ -106,26 +110,28 @@ export default function PlatformPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      const [organizationRows, accountRows, eventRows, noticeRows] = await Promise.all([
+      const [organizationRows, accountRows, eventRows, noticeRows, reportRows] = await Promise.all([
         api.listOrganizations(),
         api.listPlatformBillingAccounts(),
         api.listPlatformBillingEvents(),
-        api.listPlatformSubscriptionNotices()
+        api.listPlatformSubscriptionNotices(),
+        api.getPlatformCommercialReport(commercialPeriod)
       ]);
       setOrganizations(organizationRows);
       setBillingAccounts(accountRows);
       setBillingEvents(eventRows);
       setBillingNotices(noticeRows);
+      setCommercialRows(reportRows);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load platform operations.");
     }
-  };
+  }, [commercialPeriod]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -229,6 +235,32 @@ export default function PlatformPage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to reconcile billing lifecycle.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const refreshCommercialReport = async () => {
+    try {
+      setBusy(true);
+      setError("");
+      setCommercialRows(await api.getPlatformCommercialReport(commercialPeriod));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load commercial report.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportCommercialReport = async () => {
+    try {
+      setBusy(true);
+      setError("");
+      await api.downloadPlatformCommercialReport(commercialPeriod, commercialPassword);
+      setCommercialPassword("");
+      setMessage("Commercial CSV export generated and audited.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to export commercial report.");
     } finally {
       setBusy(false);
     }
@@ -525,6 +557,39 @@ export default function PlatformPage() {
             })}
             {!billingEvents.length && <div className="empty-state">No provider events received.</div>}
           </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <h2>Commercial usage report</h2>
+        <p className="muted">Usage is fixed to the selected UTC month. Capacity and limits show the current contract and are labeled as current in the CSV.</p>
+        <div className="two-col" style={{ alignItems: "end" }}>
+          <label>
+            UTC report month
+            <input type="month" value={commercialPeriod.slice(0, 7)} onChange={(event) => setCommercialPeriod(`${event.target.value}-01`)} />
+          </label>
+          <button type="button" className="secondary-button" onClick={() => void refreshCommercialReport()} disabled={busy}>Refresh period</button>
+          <label>
+            Confirm platform administrator password for CSV
+            <input type="password" minLength={10} autoComplete="current-password" value={commercialPassword} onChange={(event) => setCommercialPassword(event.target.value)} />
+          </label>
+          <button type="button" onClick={() => void exportCommercialReport()} disabled={busy || commercialPassword.length < 10}>Export audited CSV</button>
+        </div>
+        <div style={{ overflowX: "auto", marginTop: 12 }}>
+          <table>
+            <thead><tr><th>Customer</th><th>AI usage</th><th>API usage</th><th>Seats</th><th>Inventory locations</th></tr></thead>
+            <tbody>
+              {commercialRows.map((row) => (
+                <tr key={row.organization_id}>
+                  <td>{row.organization_name}<div className="muted">{row.plan_code} · {row.subscription_status}</div></td>
+                  <td>{row.ai_requests.toLocaleString()} / {row.ai_monthly_limit ?? "Unlimited"}</td>
+                  <td>{row.api_requests.toLocaleString()} / {row.api_monthly_limit ?? "Unlimited"}</td>
+                  <td>{row.active_users + row.pending_invitations} / {row.max_users ?? "Unlimited"}</td>
+                  <td>{row.active_warehouses} main · {row.active_vehicle_warehouses} vehicle</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>

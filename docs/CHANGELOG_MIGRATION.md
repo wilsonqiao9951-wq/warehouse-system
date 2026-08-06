@@ -498,3 +498,18 @@ fresh base-to-`0035`, table/index/check inspection, empty
 downgrade refusal passed on SQLite; ESLint and the Next.js 16.2.12 production
 build passed for all 32 static routes; production dependency audit reported 0
 vulnerabilities.
+
+## 2026-08-06 - Commercial usage reports (no schema revision)
+
+- Adds continuous 1–36 month tenant reports backed by the existing `0033` UTC
+  usage ledger and current capacity/limit projections.
+- Adds a selected-month platform comparison that retains zero-usage customers.
+- Adds password-confirmed organization/platform CSV exports, export audit
+  evidence, fixed filenames, UTF-8 spreadsheet compatibility, and formula-cell
+  hardening.
+- Adds organization Reports and platform control-plane reporting UI.
+
+Verification: commercial report and affected billing suites passed; all 127
+backend tests passed; ESLint and the Next.js 16.2.12 production build passed for
+all 32 static routes; Python dependency consistency passed; production npm
+audit reported 0 vulnerabilities.

@@ -16,10 +16,12 @@ import {
   MachineKnowledgeProfile,
   Organization,
   OrganizationBillingOverview,
+  OrganizationCommercialReport,
   OrganizationBranding,
   OrganizationSettings,
   OrganizationDomain,
   PlatformBillingAccount,
+  PlatformCommercialReportRow,
   PlanCode,
   SubscriptionStatus,
   SubscriptionNotice,
@@ -83,6 +85,42 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
 const OFFLINE_QUEUE_KEY = "opf_offline_queue";
 const CLAIM_VERSIONS_KEY = "opf_claim_versions";
+
+async function downloadAuthenticatedCsv(
+  path: string,
+  payload: object,
+  fallbackFilename: string
+): Promise<void> {
+  if (typeof window === "undefined") throw new Error("CSV export requires a browser.");
+  const token = window.localStorage.getItem("opf_access_token");
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    let detail = `Unable to export report (${response.status})`;
+    try {
+      const body = await response.json() as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // Keep the status fallback.
+    }
+    throw new Error(detail);
+  }
+  const objectUrl = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fallbackFilename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
 
 interface OfflineQueueItem {
   id: string;
@@ -977,6 +1015,14 @@ export const api = {
     }),
   getOrganizationBilling: () =>
     request<OrganizationBillingOverview>("/organization/billing"),
+  getOrganizationCommercialReport: (months = 12) =>
+    request<OrganizationCommercialReport>(`/organization/commercial-report?months=${months}`),
+  downloadOrganizationCommercialReport: (months: number, accountPassword: string) =>
+    downloadAuthenticatedCsv(
+      "/organization/commercial-report/export",
+      { months, account_password: accountPassword },
+      "openpartsflow-commercial-usage.csv"
+    ),
   acknowledgeSubscriptionNotice: (noticeId: number, expectedVersion: number) =>
     request<SubscriptionNotice>(`/organization/billing/notices/${noticeId}/acknowledge`, {
       method: "POST",
@@ -1013,6 +1059,16 @@ export const api = {
     request<{ organizations_checked: number; notices_created: number; notices_resolved: number }>(
       "/platform/billing/reconcile",
       { method: "POST", body: JSON.stringify({}) }
+    ),
+  getPlatformCommercialReport: (periodStart?: string) =>
+    request<PlatformCommercialReportRow[]>(
+      `/platform/commercial-report${periodStart ? `?period_start=${encodeURIComponent(periodStart)}` : ""}`
+    ),
+  downloadPlatformCommercialReport: (periodStart: string, accountPassword: string) =>
+    downloadAuthenticatedCsv(
+      "/platform/commercial-report/export",
+      { period_start: periodStart, account_password: accountPassword },
+      `openpartsflow-platform-commercial-${periodStart}.csv`
     ),
   updateOrganizationBranding: (
     payload: {

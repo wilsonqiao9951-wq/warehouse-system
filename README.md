@@ -20,6 +20,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Durable UTC monthly AI/API usage metering with plan limits, atomic concurrency enforcement, and idempotent external charging
 - Verified customer domains, automatic host-based login branding, and domain-gated sender identity configuration
 - Provider-neutral signed subscription events, ordered idempotent billing evidence, and durable lifecycle notices
+- Tenant and platform commercial usage reports with password-confirmed, audited CSV export
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
 - Manager/administrator replenishment approval with rejection evidence before warehouse picking
 - Reserved picking stock with separate shipment OUTBOUND and receipt INBOUND inventory movements

@@ -724,6 +724,34 @@ Verification:
 - Python dependency consistency passed; production npm audit reported 0
   vulnerabilities.
 
+## 2026-08-06 - Phase 9 commercial usage reports
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added continuous zero-filled 1–36 month organization reports over the exact
+  UTC AI/API usage ledger used for quota enforcement.
+- Added selected-month platform comparison including customers with zero usage.
+- Kept historical request counts separate from clearly labeled current limits
+  and capacity because historical contract snapshots do not yet exist.
+- Added administrator-password-confirmed CSV exports, export audit evidence,
+  fixed filenames, UTF-8 spreadsheet compatibility, and formula-injection
+  hardening.
+- Added organization Reports and platform control-plane review/export UI.
+- Added no database revision; the batch reads existing `0033` usage evidence.
+
+Verification:
+
+- Commercial report timeline, zero-fill, period, tenant/platform scope, CSV,
+  formula safety, and audit tests: 2 passed.
+- Affected billing and commercial usage suite: 9 passed.
+- Backend: all 127 tests passed.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for
+  all 32 static routes.
+- Python dependency consistency passed; production npm audit reported 0
+  vulnerabilities.
+
 ## 2026-08-06 - Phase 9 billing lifecycle and subscription notices
 
 Status: implemented and verified.

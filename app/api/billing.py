@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+import csv
+from datetime import date, datetime
+from io import StringIO
 import json
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +26,7 @@ from app.models import (
     BillingLifecycleEvent,
     Organization,
     OrganizationBillingAccount,
+    OrganizationUsagePeriod,
     SubscriptionNotice,
     User,
     UserRole,
@@ -34,8 +38,14 @@ from app.schemas import (
     BillingReconciliationRead,
     BillingWebhookEvent,
     BillingWebhookResponse,
+    CommercialCapacityRead,
+    CommercialReportExportRequest,
+    CommercialUsagePeriodRead,
     OrganizationBillingOverviewRead,
+    OrganizationCommercialReportRead,
     PlatformBillingAccountRead,
+    PlatformCommercialReportExportRequest,
+    PlatformCommercialReportRow,
     SubscriptionNoticeAcknowledge,
     SubscriptionNoticeRead,
 )
@@ -46,10 +56,133 @@ from app.services.billing import (
     utcnow_naive,
     verify_billing_webhook_signature,
 )
-from app.services.commercial import lock_organization
+from app.services.commercial import current_usage_period, lock_organization, organization_usage
 
 
 router = APIRouter()
+
+
+def _previous_month(period_start: date) -> date:
+    if period_start.month == 1:
+        return date(period_start.year - 1, 12, 1)
+    return date(period_start.year, period_start.month - 1, 1)
+
+
+def _organization_commercial_report(
+    db: Session,
+    organization: Organization,
+    *,
+    months: int,
+) -> OrganizationCommercialReportRead:
+    starts: list[date] = []
+    cursor = current_usage_period()
+    for _ in range(months):
+        starts.append(cursor)
+        cursor = _previous_month(cursor)
+    recorded = {
+        row.period_start: row
+        for row in db.scalars(
+            select(OrganizationUsagePeriod).where(
+                OrganizationUsagePeriod.organization_id == organization.id,
+                OrganizationUsagePeriod.period_start.in_(starts),
+            )
+        ).all()
+    }
+    usage = organization_usage(db, organization.id)
+    periods = []
+    for period_start in starts:
+        row = recorded.get(period_start)
+        periods.append(
+            CommercialUsagePeriodRead(
+                period_start=period_start,
+                ai_requests=row.ai_requests if row else 0,
+                api_requests=row.api_requests if row else 0,
+                last_ai_used_at=row.last_ai_used_at if row else None,
+                last_api_used_at=row.last_api_used_at if row else None,
+            )
+        )
+    return OrganizationCommercialReportRead(
+        organization_id=organization.id,
+        organization_name=organization.name,
+        organization_slug=organization.slug,
+        plan_code=organization.plan_code,
+        subscription_status=organization.subscription_status,
+        generated_at=utcnow_naive(),
+        ai_monthly_limit=organization.ai_monthly_limit,
+        api_monthly_limit=organization.api_monthly_limit,
+        capacity=CommercialCapacityRead(
+            active_users=int(usage["active_users"]),
+            pending_invitations=int(usage["pending_invitations"]),
+            active_warehouses=int(usage["active_warehouses"]),
+            active_vehicle_warehouses=int(usage["active_vehicle_warehouses"]),
+            max_users=organization.max_users,
+            max_warehouses=organization.max_warehouses,
+            max_vehicle_warehouses=organization.max_vehicle_warehouses,
+        ),
+        periods=periods,
+    )
+
+
+def _platform_commercial_rows(
+    db: Session,
+    period_start: date,
+) -> list[PlatformCommercialReportRow]:
+    organizations = db.scalars(select(Organization).order_by(Organization.id)).all()
+    recorded = {
+        row.organization_id: row
+        for row in db.scalars(
+            select(OrganizationUsagePeriod).where(
+                OrganizationUsagePeriod.period_start == period_start
+            )
+        ).all()
+    }
+    rows = []
+    for organization in organizations:
+        capacity = organization_usage(db, organization.id)
+        usage = recorded.get(organization.id)
+        rows.append(
+            PlatformCommercialReportRow(
+                organization_id=organization.id,
+                organization_name=organization.name,
+                organization_slug=organization.slug,
+                plan_code=organization.plan_code,
+                subscription_status=organization.subscription_status,
+                period_start=period_start,
+                ai_requests=usage.ai_requests if usage else 0,
+                ai_monthly_limit=organization.ai_monthly_limit,
+                api_requests=usage.api_requests if usage else 0,
+                api_monthly_limit=organization.api_monthly_limit,
+                active_users=int(capacity["active_users"]),
+                pending_invitations=int(capacity["pending_invitations"]),
+                max_users=organization.max_users,
+                active_warehouses=int(capacity["active_warehouses"]),
+                max_warehouses=organization.max_warehouses,
+                active_vehicle_warehouses=int(capacity["active_vehicle_warehouses"]),
+                max_vehicle_warehouses=organization.max_vehicle_warehouses,
+            )
+        )
+    return rows
+
+
+def _safe_csv_cell(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if value and (value[0] in "=+-@" or value[0] in "\t\r"):
+        return f"'{value}"
+    return value
+
+
+def _csv_download(filename: str, rows: list[list[object]]) -> StreamingResponse:
+    output = StringIO(newline="")
+    writer = csv.writer(output, lineterminator="\n")
+    for row in rows:
+        writer.writerow([_safe_csv_cell(value) for value in row])
+    content = "\ufeff" + output.getvalue()
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _require_account_reauthentication(
@@ -415,4 +548,177 @@ def reconcile_platform_billing(
         organizations_checked=stats.organizations_checked,
         notices_created=stats.notices_created,
         notices_resolved=stats.notices_resolved,
+    )
+
+
+@router.get(
+    "/organization/commercial-report",
+    response_model=OrganizationCommercialReportRead,
+)
+def get_organization_commercial_report(
+    months: int = Query(default=12, ge=1, le=36),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _organization_commercial_report(db, organization, months=months)
+
+
+@router.post("/organization/commercial-report/export")
+def export_organization_commercial_report(
+    payload: CommercialReportExportRequest,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    report = _organization_commercial_report(db, organization, months=payload.months)
+    rows: list[list[object]] = [[
+        "organization_id",
+        "organization_name",
+        "organization_slug",
+        "plan_code",
+        "subscription_status",
+        "period_start_utc",
+        "ai_requests",
+        "current_ai_monthly_limit",
+        "api_requests",
+        "current_api_monthly_limit",
+        "active_users",
+        "pending_invitations",
+        "current_max_users",
+        "active_main_warehouses",
+        "current_max_main_warehouses",
+        "active_vehicle_inventories",
+        "current_max_vehicle_inventories",
+        "generated_at_utc",
+    ]]
+    for period in report.periods:
+        rows.append([
+            report.organization_id,
+            report.organization_name,
+            report.organization_slug,
+            report.plan_code,
+            report.subscription_status,
+            period.period_start.isoformat(),
+            period.ai_requests,
+            report.ai_monthly_limit if report.ai_monthly_limit is not None else "unlimited",
+            period.api_requests,
+            report.api_monthly_limit if report.api_monthly_limit is not None else "unlimited",
+            report.capacity.active_users,
+            report.capacity.pending_invitations,
+            report.capacity.max_users if report.capacity.max_users is not None else "unlimited",
+            report.capacity.active_warehouses,
+            report.capacity.max_warehouses if report.capacity.max_warehouses is not None else "unlimited",
+            report.capacity.active_vehicle_warehouses,
+            report.capacity.max_vehicle_warehouses if report.capacity.max_vehicle_warehouses is not None else "unlimited",
+            report.generated_at.isoformat() + "Z",
+        ])
+    _billing_audit(
+        db,
+        actor,
+        organization.id,
+        "organization_commercial_report_exported",
+        "commercial_report",
+        None,
+        {"format": "csv", "months": payload.months, "generated_at": report.generated_at},
+    )
+    db.commit()
+    return _csv_download(
+        f"openpartsflow-commercial-usage-{report.organization_slug}.csv",
+        rows,
+    )
+
+
+@router.get(
+    "/platform/commercial-report",
+    response_model=list[PlatformCommercialReportRow],
+)
+def get_platform_commercial_report(
+    period_start: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    selected = period_start or current_usage_period()
+    if selected.day != 1:
+        raise HTTPException(status_code=422, detail="Report period must start on day one")
+    db.info.pop("organization_id", None)
+    return _platform_commercial_rows(db, selected)
+
+
+@router.post("/platform/commercial-report/export")
+def export_platform_commercial_report(
+    payload: PlatformCommercialReportExportRequest,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    db.info.pop("organization_id", None)
+    report_rows = _platform_commercial_rows(db, payload.period_start)
+    rows: list[list[object]] = [[
+        "organization_id",
+        "organization_name",
+        "organization_slug",
+        "plan_code",
+        "subscription_status",
+        "period_start_utc",
+        "ai_requests",
+        "current_ai_monthly_limit",
+        "api_requests",
+        "current_api_monthly_limit",
+        "active_users",
+        "pending_invitations",
+        "current_max_users",
+        "active_main_warehouses",
+        "current_max_main_warehouses",
+        "active_vehicle_inventories",
+        "current_max_vehicle_inventories",
+    ]]
+    for row in report_rows:
+        rows.append([
+            row.organization_id,
+            row.organization_name,
+            row.organization_slug,
+            row.plan_code,
+            row.subscription_status,
+            row.period_start.isoformat(),
+            row.ai_requests,
+            row.ai_monthly_limit if row.ai_monthly_limit is not None else "unlimited",
+            row.api_requests,
+            row.api_monthly_limit if row.api_monthly_limit is not None else "unlimited",
+            row.active_users,
+            row.pending_invitations,
+            row.max_users if row.max_users is not None else "unlimited",
+            row.active_warehouses,
+            row.max_warehouses if row.max_warehouses is not None else "unlimited",
+            row.active_vehicle_warehouses,
+            row.max_vehicle_warehouses if row.max_vehicle_warehouses is not None else "unlimited",
+        ])
+    generated_at = utcnow_naive()
+    _billing_audit(
+        db,
+        actor,
+        actor.organization_id,
+        "platform_commercial_report_exported",
+        "commercial_report",
+        None,
+        {
+            "format": "csv",
+            "period_start": payload.period_start,
+            "organization_count": len(report_rows),
+            "generated_at": generated_at,
+        },
+    )
+    db.commit()
+    return _csv_download(
+        f"openpartsflow-platform-commercial-{payload.period_start.isoformat()}.csv",
+        rows,
     )

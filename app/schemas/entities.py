@@ -549,6 +549,80 @@ class BillingReconciliationRead(BaseModel):
     notices_resolved: int = Field(ge=0)
 
 
+class CommercialUsagePeriodRead(BaseModel):
+    period_start: date
+    ai_requests: int = Field(ge=0)
+    api_requests: int = Field(ge=0)
+    last_ai_used_at: datetime | None = None
+    last_api_used_at: datetime | None = None
+
+
+class CommercialCapacityRead(BaseModel):
+    active_users: int = Field(ge=0)
+    pending_invitations: int = Field(ge=0)
+    active_warehouses: int = Field(ge=0)
+    active_vehicle_warehouses: int = Field(ge=0)
+    max_users: int | None = None
+    max_warehouses: int | None = None
+    max_vehicle_warehouses: int | None = None
+
+
+class OrganizationCommercialReportRead(BaseModel):
+    organization_id: int
+    organization_name: str
+    organization_slug: str
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    generated_at: datetime
+    ai_monthly_limit: int | None = None
+    api_monthly_limit: int | None = None
+    capacity: CommercialCapacityRead
+    periods: list[CommercialUsagePeriodRead]
+
+
+class PlatformCommercialReportRow(BaseModel):
+    organization_id: int
+    organization_name: str
+    organization_slug: str
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: str
+    period_start: date
+    ai_requests: int = Field(ge=0)
+    ai_monthly_limit: int | None = None
+    api_requests: int = Field(ge=0)
+    api_monthly_limit: int | None = None
+    active_users: int = Field(ge=0)
+    pending_invitations: int = Field(ge=0)
+    max_users: int | None = None
+    active_warehouses: int = Field(ge=0)
+    max_warehouses: int | None = None
+    active_vehicle_warehouses: int = Field(ge=0)
+    max_vehicle_warehouses: int | None = None
+
+
+class CommercialReportExportRequest(BaseModel):
+    months: int = Field(default=12, ge=1, le=36)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class PlatformCommercialReportExportRequest(BaseModel):
+    period_start: date
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("period_start")
+    @classmethod
+    def require_month_start(cls, value: date) -> date:
+        if value.day != 1:
+            raise ValueError("Commercial report period must start on the first day of a month")
+        return value
+
+
 ExternalIntegrationProvider = Literal[
     "appsheet",
     "generic",

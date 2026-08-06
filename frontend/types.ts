@@ -175,6 +175,55 @@ export interface OrganizationBillingOverview {
   notices: SubscriptionNotice[];
 }
 
+export interface CommercialUsagePeriod {
+  period_start: string;
+  ai_requests: number;
+  api_requests: number;
+  last_ai_used_at?: string | null;
+  last_api_used_at?: string | null;
+}
+
+export interface OrganizationCommercialReport {
+  organization_id: number;
+  organization_name: string;
+  organization_slug: string;
+  plan_code: PlanCode;
+  subscription_status: SubscriptionStatus;
+  generated_at: string;
+  ai_monthly_limit?: number | null;
+  api_monthly_limit?: number | null;
+  capacity: {
+    active_users: number;
+    pending_invitations: number;
+    active_warehouses: number;
+    active_vehicle_warehouses: number;
+    max_users?: number | null;
+    max_warehouses?: number | null;
+    max_vehicle_warehouses?: number | null;
+  };
+  periods: CommercialUsagePeriod[];
+}
+
+export interface PlatformCommercialReportRow {
+  organization_id: number;
+  organization_name: string;
+  organization_slug: string;
+  plan_code: PlanCode;
+  subscription_status: SubscriptionStatus;
+  period_start: string;
+  ai_requests: number;
+  ai_monthly_limit?: number | null;
+  api_requests: number;
+  api_monthly_limit?: number | null;
+  active_users: number;
+  pending_invitations: number;
+  max_users?: number | null;
+  active_warehouses: number;
+  max_warehouses?: number | null;
+  active_vehicle_warehouses: number;
+  max_vehicle_warehouses?: number | null;
+}
+
 export type ExternalIntegrationProvider =
   | "appsheet"
   | "generic"

@@ -95,6 +95,26 @@ Claim, release, execution, approval, rejection, and completion actions record th
 - Administrators can correct unlocked records with their own audit attribution; managers cannot impersonate the field owner.
 - Releasing a claim invalidates the prior user's device and queued claim generation.
 
+## Commercial reporting access model
+
+| Operation | Engineer | Manager | Organization admin | Platform admin |
+| --- | --- | --- | --- | --- |
+| View organization commercial report | Deny | Deny | Own organization | Own organization |
+| Export organization commercial report | Deny | Deny | Own organization + current password | Own organization + current password |
+| View selected-month platform comparison | Deny | Deny | Deny | Allow |
+| Export platform comparison | Deny | Deny | Deny | Current password required |
+
+Organization reports are generated while the normal tenant session filter is
+active. Cross-customer report endpoints check the separate platform permission
+before lifting that filter. CSV exports are online-only and create audit
+evidence without retaining the confirming password or exported file contents.
+Historical rows contain exact metered request counts but deliberately label
+allowances and capacity as current state because contract-history snapshots do
+not yet exist.
+
+See [Commercial usage reporting](COMMERCIAL_REPORTING.md) for the response and
+export contract.
+
 ## External integration access model
 
 | Operation | Engineer | Manager | Admin | External API key |

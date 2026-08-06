@@ -202,7 +202,7 @@ Downgrades are refused when the corresponding customer evidence exists.
 
 - Provider-specific checkout, invoice, tax, refund, and restricted customer
   billing-recovery portal integration
-- Customer data export, backup/restore evidence, and commercial usage reports
+- Customer data export and backup/restore evidence
 - MFA and account recovery for platform and organization administrators
 
 Verified hostname ownership, automatic custom-host login branding, and the
@@ -211,3 +211,6 @@ provider-independent customer sender identity foundation are documented in
 
 Provider-neutral signed lifecycle events, ordering rules, and trial/renewal
 notices are documented in [`BILLING_LIFECYCLE.md`](BILLING_LIFECYCLE.md).
+
+Tenant/platform usage reports and audited CSV rules are documented in
+[`COMMERCIAL_REPORTING.md`](COMMERCIAL_REPORTING.md).
