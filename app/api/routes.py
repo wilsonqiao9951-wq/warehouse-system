@@ -124,7 +124,10 @@ from app.schemas import (
     VehicleReturnRequestCreate,
     VehicleReturnRequestRead,
     OrganizationCreate,
+    OrganizationBrandingRead,
+    OrganizationBrandingUpdate,
     OrganizationRead,
+    OrganizationSettingsRead,
     OrganizationUpdate,
     PasswordSet,
     StockBalance,
@@ -161,6 +164,15 @@ from app.services.inventory import (
     begin_inventory_write,
 )
 from app.services.integration_delivery import enqueue_work_order_event
+from app.services.commercial import (
+    PLAN_DEFAULTS,
+    apply_plan_defaults,
+    enforce_user_capacity,
+    enforce_warehouse_capacity,
+    lock_organization,
+    organization_usage,
+    require_subscription_access,
+)
 from app.services.recommendations import build_part_recommendations
 from app.services.service_intelligence import build_service_intelligence
 from app.services.visual_recognition import generate_visual_part_candidates
@@ -241,7 +253,10 @@ def login(
     if (
         not user
         or not user.is_active
-        or (not user.is_platform_admin and (not organization or not organization.is_active))
+        or (
+            not user.is_platform_admin
+            and (not organization or not organization.is_active)
+        )
         or not verify_password(form.password, user.password_hash)
     ):
         raise HTTPException(
@@ -249,6 +264,10 @@ def login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    require_subscription_access(
+        organization,
+        platform_admin=user.is_platform_admin,
+    )
     device_id = None
     if x_device_id or x_device_token:
         if not x_device_id or not x_device_token or not (16 <= len(x_device_id) <= 128) or len(x_device_token) < 32:
@@ -301,8 +320,15 @@ def create_user_invitation(
 ):
     require_roles(actor, UserRole.ADMIN)
     email = payload.email.strip().lower()
+    organization = lock_organization(db, actor.organization_id)
     if db.scalar(select(User.id).where(func.lower(User.email) == email)):
         raise HTTPException(status_code=409, detail="A user with this email already exists")
+    enforce_user_capacity(
+        db,
+        organization,
+        include_pending=True,
+        replacing_email=email,
+    )
     now = datetime.utcnow()
     pending = db.scalars(
         select(UserInvitation).where(
@@ -341,8 +367,10 @@ def _valid_invitation(db: Session, raw_token: str) -> UserInvitation:
     if not invitation or invitation.used_at is not None or invitation.expires_at <= datetime.utcnow():
         raise HTTPException(status_code=400, detail="Invitation is invalid or expired")
     organization = db.get(Organization, invitation.organization_id)
-    if not organization or not organization.is_active:
-        raise HTTPException(status_code=400, detail="Organization is inactive")
+    try:
+        require_subscription_access(organization)
+    except HTTPException as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
     return invitation
 
 
@@ -362,8 +390,27 @@ def invitation_info(token: str, db: Session = Depends(get_db)):
 @router.post("/auth/invitations/accept", response_model=UserRead)
 def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
     invitation = _valid_invitation(db, payload.token)
+    organization = lock_organization(db, invitation.organization_id)
+    db.refresh(invitation)
+    if (
+        invitation.used_at is not None
+        or invitation.expires_at <= datetime.utcnow()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invitation is invalid or expired",
+        )
+    try:
+        require_subscription_access(organization)
+    except HTTPException as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
     if db.scalar(select(User.id).where(func.lower(User.email) == invitation.email.lower())):
         raise HTTPException(status_code=409, detail="A user with this email already exists")
+    enforce_user_capacity(
+        db,
+        organization,
+        include_pending=False,
+    )
     user = User(
         organization_id=invitation.organization_id,
         name=invitation.name,
@@ -379,19 +426,172 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
     return user
 
 
-def _organization_read(db: Session, organization: Organization) -> OrganizationRead:
-    return OrganizationRead(
+def _organization_branding_read(
+    organization: Organization,
+) -> OrganizationBrandingRead:
+    return OrganizationBrandingRead(
+        name=organization.name,
+        slug=organization.slug,
+        brand_logo_url=organization.brand_logo_url,
+        brand_primary_color=organization.brand_primary_color,
+        brand_login_headline=organization.brand_login_headline,
+    )
+
+
+def _organization_settings_read(
+    db: Session,
+    organization: Organization,
+) -> OrganizationSettingsRead:
+    usage = organization_usage(db, organization.id)
+    return OrganizationSettingsRead(
         id=organization.id,
         name=organization.name,
         slug=organization.slug,
         is_active=organization.is_active,
-        total_users=db.scalar(select(func.count(User.id)).where(User.organization_id == organization.id)) or 0,
-        total_parts=db.scalar(select(func.count(Part.id)).where(Part.organization_id == organization.id)) or 0,
+        brand_logo_url=organization.brand_logo_url,
+        brand_primary_color=organization.brand_primary_color,
+        brand_login_headline=organization.brand_login_headline,
+        plan_code=organization.plan_code,
+        subscription_status=organization.subscription_status,
+        trial_ends_at=organization.trial_ends_at,
+        max_users=organization.max_users,
+        max_warehouses=organization.max_warehouses,
+        max_vehicle_warehouses=organization.max_vehicle_warehouses,
+        ai_monthly_limit=organization.ai_monthly_limit,
+        api_monthly_limit=organization.api_monthly_limit,
+        settings_version=organization.settings_version,
+        **usage,
+    )
+
+
+def _organization_read(db: Session, organization: Organization) -> OrganizationRead:
+    settings_read = _organization_settings_read(db, organization)
+    return OrganizationRead(
+        **settings_read.model_dump(),
+        total_users=db.scalar(
+            select(func.count(User.id)).where(
+                User.organization_id == organization.id
+            )
+        )
+        or 0,
+        total_parts=db.scalar(
+            select(func.count(Part.id)).where(
+                Part.organization_id == organization.id
+            )
+        )
+        or 0,
         total_work_orders=db.scalar(
-            select(func.count(WorkOrder.id)).where(WorkOrder.organization_id == organization.id)
-        ) or 0,
+            select(func.count(WorkOrder.id)).where(
+                WorkOrder.organization_id == organization.id
+            )
+        )
+        or 0,
         created_at=organization.created_at,
     )
+
+
+def _platform_audit(
+    db: Session,
+    actor: Actor,
+    organization: Organization,
+    action: str,
+    metadata: dict,
+) -> None:
+    db.add(
+        AuditLog(
+            organization_id=organization.id,
+            user_id=actor.user_id,
+            action=action,
+            entity_type="organization",
+            entity_id=organization.id,
+            metadata_json=json.dumps(
+                {
+                    "actor_role": actor.role.value,
+                    "auth_method": actor.auth_method,
+                    "device_id": actor.device_id,
+                    **metadata,
+                },
+                default=str,
+                separators=(",", ":"),
+            ),
+            timestamp=datetime.utcnow(),
+        )
+    )
+
+
+@router.get(
+    "/auth/organization-branding/{slug}",
+    response_model=OrganizationBrandingRead,
+)
+def public_organization_branding(
+    slug: str,
+    db: Session = Depends(get_db),
+):
+    organization = db.scalar(
+        select(Organization).where(
+            Organization.slug == slug.strip().lower(),
+            Organization.is_active.is_(True),
+        )
+    )
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _organization_branding_read(organization)
+
+
+@router.get("/organization/settings", response_model=OrganizationSettingsRead)
+def get_organization_settings(
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _organization_settings_read(db, organization)
+
+
+@router.patch(
+    "/organization/settings/branding",
+    response_model=OrganizationSettingsRead,
+)
+def update_organization_branding(
+    payload: OrganizationBrandingUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    organization = lock_organization(db, actor.organization_id)
+    if organization.settings_version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Organization settings changed; refresh before saving.",
+        )
+    fields = payload.model_fields_set - {"expected_version"}
+    if (
+        "brand_primary_color" in fields
+        and payload.brand_primary_color is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Brand primary color cannot be empty",
+        )
+    for field_name in fields:
+        setattr(organization, field_name, getattr(payload, field_name))
+    organization.settings_version += 1
+    db.add(organization)
+    _audit(
+        db,
+        actor,
+        "organization_branding_updated",
+        "organization",
+        organization.id,
+        {
+            "changed_fields": sorted(fields),
+            "settings_version": organization.settings_version,
+        },
+    )
+    db.commit()
+    db.refresh(organization)
+    return _organization_settings_read(db, organization)
 
 
 @router.get("/platform/organizations", response_model=list[OrganizationRead])
@@ -418,6 +618,15 @@ def create_organization(
         raise HTTPException(status_code=409, detail="Administrator email already exists")
 
     organization = Organization(name=payload.name.strip(), slug=slug)
+    apply_plan_defaults(organization, payload.plan_code)
+    if payload.trial_days:
+        organization.subscription_status = "trialing"
+        organization.trial_ends_at = datetime.utcnow() + timedelta(
+            days=payload.trial_days
+        )
+    else:
+        organization.subscription_status = "active"
+        organization.trial_ends_at = None
     db.add(organization)
     db.flush()
     administrator = User(
@@ -430,6 +639,19 @@ def create_organization(
         is_platform_admin=False,
     )
     db.add(administrator)
+    db.flush()
+    _platform_audit(
+        db,
+        actor,
+        organization,
+        "organization_created",
+        {
+            "plan_code": organization.plan_code,
+            "subscription_status": organization.subscription_status,
+            "trial_ends_at": organization.trial_ends_at,
+            "administrator_user_id": administrator.id,
+        },
+    )
     db.commit()
     db.refresh(organization)
     return _organization_read(db, organization)
@@ -444,11 +666,52 @@ def update_organization(
 ):
     require_platform_admin(actor)
     db.info.pop("organization_id", None)
-    organization = db.get(Organization, organization_id)
-    if not organization:
-        raise HTTPException(status_code=404, detail="Organization not found")
-    organization.is_active = payload.is_active
+    organization = lock_organization(db, organization_id)
+    if organization.settings_version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Organization settings changed; refresh before saving.",
+        )
+    fields = payload.model_fields_set - {"expected_version"}
+    audit_fields = set(fields)
+    if payload.plan_code is not None:
+        audit_fields.update(PLAN_DEFAULTS[payload.plan_code])
+    before = {
+        field_name: getattr(organization, field_name)
+        for field_name in audit_fields
+    }
+    if payload.plan_code is not None:
+        apply_plan_defaults(organization, payload.plan_code)
+    for field_name in fields - {"plan_code"}:
+        setattr(organization, field_name, getattr(payload, field_name))
+    if (
+        organization.subscription_status == "trialing"
+        and (
+            organization.trial_ends_at is None
+            or organization.trial_ends_at <= datetime.utcnow()
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="A trialing organization requires a future trial end.",
+        )
+    organization.settings_version += 1
     db.add(organization)
+    _platform_audit(
+        db,
+        actor,
+        organization,
+        "organization_subscription_updated",
+        {
+            "changed_fields": sorted(audit_fields),
+            "before": before,
+            "after": {
+                field_name: getattr(organization, field_name)
+                for field_name in audit_fields
+            },
+            "settings_version": organization.settings_version,
+        },
+    )
     db.commit()
     db.refresh(organization)
     return _organization_read(db, organization)
@@ -692,9 +955,32 @@ def list_work_order_voice_notes(
 @router.post("/users", response_model=UserRead)
 def create_user(payload: UserCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN)
+    email = (payload.email or "").strip().lower() or None
+    organization = lock_organization(db, actor.organization_id)
+    enforce_user_capacity(
+        db,
+        organization,
+        include_pending=True,
+        replacing_email=email,
+    )
     data = payload.model_dump(exclude={"password"})
+    data["email"] = email
     item = User(**data, password_hash=hash_password(payload.password) if payload.password else None)
     db.add(item)
+    db.flush()
+    if email:
+        now = datetime.utcnow()
+        pending = db.scalars(
+            select(UserInvitation).where(
+                UserInvitation.organization_id == actor.organization_id,
+                func.lower(UserInvitation.email) == email,
+                UserInvitation.used_at.is_(None),
+                UserInvitation.expires_at > now,
+            )
+        ).all()
+        for invitation in pending:
+            invitation.used_at = now
+            db.add(invitation)
     db.commit()
     db.refresh(item)
     return item
@@ -742,6 +1028,13 @@ def create_warehouse(payload: WarehouseCreate, db: Session = Depends(get_db), ac
         not owner or not owner.is_active or owner.role != UserRole.ENGINEER
     ):
         raise HTTPException(status_code=422, detail="A van warehouse must be assigned to an active engineer")
+    organization = lock_organization(db, actor.organization_id)
+    if values["is_active"]:
+        enforce_warehouse_capacity(
+            db,
+            organization,
+            values["warehouse_type"],
+        )
     values["code"] = (payload.code or payload.name).strip().upper().replace(" ", "-")
     item = Warehouse(**values)
     db.add(item)

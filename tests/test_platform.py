@@ -89,7 +89,10 @@ def test_platform_admin_can_onboard_and_suspend_customer(client):
         suspended = client.patch(
             f"/api/platform/organizations/{organization['id']}",
             headers={"Authorization": f"Bearer {platform_token}"},
-            json={"is_active": False},
+            json={
+                "expected_version": organization["settings_version"],
+                "is_active": False,
+            },
         )
         assert suspended.status_code == 200
         assert suspended.json()["is_active"] is False

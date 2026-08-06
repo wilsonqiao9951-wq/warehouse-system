@@ -47,6 +47,7 @@ from app.services.integrations import (
     validate_webhook_url,
 )
 from app.services.inventory import get_available_stock_quantity, get_stock_balances
+from app.services.commercial import require_subscription_access
 from app.services.recommendations import build_part_recommendations
 
 
@@ -109,8 +110,7 @@ def get_external_integration(
     if not candidate or not key_matches or not candidate.is_active:
         raise HTTPException(status_code=401, detail="Invalid or inactive API key")
     organization = db.get(Organization, candidate.organization_id)
-    if not organization or not organization.is_active:
-        raise HTTPException(status_code=403, detail="Organization is inactive")
+    require_subscription_access(organization)
     db.info["organization_id"] = candidate.organization_id
     return candidate
 

@@ -628,3 +628,60 @@ Verification:
 - Production dependency audit: 0 vulnerabilities.
 - Real in-app browser regression passed with a seeded engineer and work order: 14 scoped snapshots were visible in `/sync-center`; after stopping the API, `/today` and the exact work-order detail reopened from retained data with timestamps, the authenticated mobile shell remained present, and an offline claim attempt failed with no state change.
 - Backend remains on the fully verified `0031` / 111-test baseline; offline snapshots never bypass server mutation authorization.
+
+## 2026-08-06 - Phase 9 tenant branding and commercial plan controls
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added Starter, Professional, and Enterprise plan records with standard user,
+  main warehouse, vehicle inventory, AI, and external API allowances.
+- Distinguished `0` as not included and `null` as unlimited or
+  contract-governed for AI/API entitlements.
+- Added trialing, active, past-due, suspended, and cancelled subscription states
+  plus the existing platform active switch.
+- Enforced commercial access at password login, every access-token request,
+  invitation validation/acceptance, and external API-key authentication.
+- Preserved platform-administrator recovery access when the administrator's home
+  organization is commercially blocked.
+- Added capacity enforcement for active users plus unexpired invitations, active
+  main warehouses, and active vehicle inventories.
+- Serialized capacity decisions with PostgreSQL row locks or a SQLite immediate
+  write lock and handled invitation reissue/direct-account conversion without
+  double-counting a seat.
+- Added optimistic organization settings versions for branding and platform
+  commercial updates.
+- Added administrator-managed HTTPS logo, primary color, login headline, branded
+  app shell, and customer-specific login links.
+- Added a public safe branding projection that excludes subscription, quota,
+  usage, user, credential, and billing data.
+- Added platform organization creation/editing UI with plans, trials, states,
+  limits, usage, and suspension controls.
+- Added organization settings and employee seat-usage UI.
+- Added organization and platform audit records without passwords, API keys,
+  invitation tokens, or branding content.
+- Normalized timezone-aware trial input to UTC database values.
+- Added Alembic revision `20260730_0032` with database constraints and guarded
+  downgrade.
+- Documented commercial defaults, access states, quota semantics, security
+  boundaries, and deployment.
+
+Verification:
+
+- Commercial branding, public response, role, optimistic version, capacity,
+  invitation conversion, plan override, trial, token, and external API-key
+  target suite passed.
+- Backend: full suite passed, 115 tests, including a file-backed SQLite race
+  proving two simultaneous final-seat requests cannot both succeed.
+- Database: fresh migration through `0031 -> 0032`, schema/default/constraint
+  inspection, `0032 -> 0031`, and re-upgrade to `0032` passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for
+  all 32 static routes.
+- Production dependency audit: 0 vulnerabilities.
+- Real in-app browser regression passed for branded public login, authenticated
+  tenant header, settings/capacity display, Starter and Professional default
+  limits, persisted plan changes, immediate header refresh, and zero console
+  errors.
+- AI/API allowance storage is complete; durable monthly usage metering and hard
+  allowance enforcement remain the next Phase 9 commercial batch.

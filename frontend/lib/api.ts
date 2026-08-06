@@ -13,6 +13,10 @@ import {
   MachineKnowledgePartRole,
   MachineKnowledgeProfile,
   Organization,
+  OrganizationBranding,
+  OrganizationSettings,
+  PlanCode,
+  SubscriptionStatus,
   PilotChecklist,
   Part,
   PartRecognitionCandidate,
@@ -184,6 +188,7 @@ function isOfflineReadableRequest(path: string): boolean {
   );
   return (
     path === "/auth/me"
+    || path === "/organization/settings"
     || /^\/work-orders(?:\?|$)/.test(path)
     || reviewedWorkOrderPath
     || /^\/(parts|warehouses|job-status|qc-pictures|return-equipments|work-order-parts)(?:\?|$)/.test(path)
@@ -917,6 +922,23 @@ export const api = {
     });
   },
   getMe: () => request<User>("/auth/me"),
+  getPublicOrganizationBranding: (slug: string) =>
+    request<OrganizationBranding>(
+      `/auth/organization-branding/${encodeURIComponent(slug)}`
+    ),
+  getOrganizationSettings: () =>
+    request<OrganizationSettings>("/organization/settings"),
+  updateOrganizationBranding: (
+    payload: {
+      expected_version: number;
+      brand_logo_url?: string | null;
+      brand_primary_color?: string;
+      brand_login_headline?: string | null;
+    }
+  ) => request<OrganizationSettings>("/organization/settings/branding", {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  }),
   createInvitation: (payload: { name: string; email: string; role: string }) =>
     request<InvitationCreated>("/users/invitations", { method: "POST", body: JSON.stringify(payload) }),
   getInvitation: (token: string) =>
@@ -933,11 +955,27 @@ export const api = {
     admin_name: string;
     admin_email: string;
     admin_password: string;
+    plan_code: PlanCode;
+    trial_days: number;
   }) => request<Organization>("/platform/organizations", { method: "POST", body: JSON.stringify(payload) }),
-  updateOrganization: (organizationId: number, isActive: boolean) =>
+  updateOrganization: (
+    organizationId: number,
+    payload: {
+      expected_version: number;
+      is_active?: boolean;
+      plan_code?: PlanCode;
+      subscription_status?: SubscriptionStatus;
+      trial_ends_at?: string | null;
+      max_users?: number | null;
+      max_warehouses?: number | null;
+      max_vehicle_warehouses?: number | null;
+      ai_monthly_limit?: number | null;
+      api_monthly_limit?: number | null;
+    }
+  ) =>
     request<Organization>(`/platform/organizations/${organizationId}`, {
       method: "PATCH",
-      body: JSON.stringify({ is_active: isActive })
+      body: JSON.stringify(payload)
     }),
   listIntegrations: () => request<ExternalIntegration[]>("/integrations"),
   createIntegration: (payload: {

@@ -1,7 +1,8 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import base64
 import binascii
 import json
+from urllib.parse import urlsplit
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -77,10 +78,121 @@ class OrganizationCreate(BaseModel):
     admin_name: str = Field(min_length=2, max_length=120)
     admin_email: str = Field(min_length=3, max_length=255)
     admin_password: str = Field(min_length=10, max_length=128)
+    plan_code: Literal["starter", "professional", "enterprise"] = "professional"
+    trial_days: int = Field(default=14, ge=0, le=90)
 
 
 class OrganizationUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    is_active: bool | None = None
+    plan_code: Literal["starter", "professional", "enterprise"] | None = None
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ] | None = None
+    trial_ends_at: datetime | None = None
+    max_users: int | None = Field(default=None, ge=1)
+    max_warehouses: int | None = Field(default=None, ge=1)
+    max_vehicle_warehouses: int | None = Field(default=None, ge=1)
+    ai_monthly_limit: int | None = Field(default=None, ge=0)
+    api_monthly_limit: int | None = Field(default=None, ge=0)
+
+    @field_validator("trial_ends_at")
+    @classmethod
+    def normalize_trial_end(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def require_update(self):
+        if not (self.model_fields_set - {"expected_version"}):
+            raise ValueError("At least one organization setting must be supplied")
+        return self
+
+
+class OrganizationBrandingRead(BaseModel):
+    name: str
+    slug: str
+    brand_logo_url: str | None = None
+    brand_primary_color: str
+    brand_login_headline: str | None = None
+
+
+class OrganizationBrandingUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    brand_logo_url: str | None = Field(default=None, max_length=1000)
+    brand_primary_color: str | None = Field(
+        default=None,
+        pattern=r"^#[0-9a-fA-F]{6}$",
+    )
+    brand_login_headline: str | None = Field(default=None, max_length=200)
+
+    @field_validator("brand_logo_url")
+    @classmethod
+    def validate_logo_url(cls, value: str | None) -> str | None:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            return None
+        if any(character in cleaned for character in "\"'<>\\\r\n\t"):
+            raise ValueError("Brand logo URL must use HTTPS")
+        try:
+            parsed = urlsplit(cleaned)
+            valid = (
+                parsed.scheme.lower() == "https"
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+            )
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("Brand logo URL must be a valid HTTPS URL") from exc
+        if not valid:
+            raise ValueError("Brand logo URL must use HTTPS without embedded credentials")
+        return cleaned
+
+    @field_validator("brand_primary_color")
+    @classmethod
+    def normalize_primary_color(cls, value: str | None) -> str | None:
+        return value.lower() if value else None
+
+    @field_validator("brand_login_headline")
+    @classmethod
+    def normalize_login_headline(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
+
+    @model_validator(mode="after")
+    def require_branding_update(self):
+        if not (self.model_fields_set - {"expected_version"}):
+            raise ValueError("At least one branding field must be supplied")
+        return self
+
+
+class OrganizationSettingsRead(OrganizationBrandingRead):
+    id: int
     is_active: bool
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    trial_ends_at: datetime | None = None
+    max_users: int | None = None
+    max_warehouses: int | None = None
+    max_vehicle_warehouses: int | None = None
+    ai_monthly_limit: int | None = None
+    api_monthly_limit: int | None = None
+    settings_version: int = Field(ge=0)
+    active_users: int = 0
+    pending_invitations: int = 0
+    active_warehouses: int = 0
+    active_vehicle_warehouses: int = 0
 
 
 class OrganizationRead(BaseModel):
@@ -88,6 +200,28 @@ class OrganizationRead(BaseModel):
     name: str
     slug: str
     is_active: bool
+    brand_logo_url: str | None = None
+    brand_primary_color: str
+    brand_login_headline: str | None = None
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    trial_ends_at: datetime | None = None
+    max_users: int | None = None
+    max_warehouses: int | None = None
+    max_vehicle_warehouses: int | None = None
+    ai_monthly_limit: int | None = None
+    api_monthly_limit: int | None = None
+    settings_version: int = Field(ge=0)
+    active_users: int = 0
+    pending_invitations: int = 0
+    active_warehouses: int = 0
+    active_vehicle_warehouses: int = 0
     total_users: int = 0
     total_parts: int = 0
     total_work_orders: int = 0

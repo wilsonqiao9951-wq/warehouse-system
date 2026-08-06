@@ -46,6 +46,15 @@ No source value should be silently discarded. The customer approves the mapping 
 
 Create one `organization` for the customer. Users, parts, warehouses, work orders, inventory transactions, uploads and audit records inherit its `organization_id` from the authenticated user. Never accept `organization_id` from an import spreadsheet or normal API request.
 
+At creation, record the approved plan and trial length. Verify the standard or
+contract-specific limits for active users plus pending invitations, main
+warehouses, vehicle inventories, AI requests, and external API requests. Give
+the customer its branded link only after the HTTPS logo URL, primary color, and
+login headline have been reviewed.
+
+See [Commercial branding and plan controls](COMMERCIAL_BRANDING_PLANS.md) for
+the plan defaults, subscription states, access behavior, and quota definitions.
+
 ## 4. Trial import
 
 Import into a staging database first. Validate:

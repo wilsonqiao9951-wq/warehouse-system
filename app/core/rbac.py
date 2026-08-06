@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, with_loader_criteria
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.services.commercial import require_subscription_access
 from app.models import (
     AuditLog,
     CompletionPolicy,
@@ -182,8 +183,10 @@ def get_current_actor(
     if token_organization_id is not None and token_organization_id != user.organization_id:
         raise HTTPException(status_code=401, detail="Token organization is invalid")
     organization = db.get(Organization, user.organization_id)
-    if not organization or (not organization.is_active and not user.is_platform_admin):
-        raise HTTPException(status_code=403, detail="Organization is inactive")
+    require_subscription_access(
+        organization,
+        platform_admin=user.is_platform_admin,
+    )
     db.info["organization_id"] = user.organization_id
     device = None
     device_verified = False

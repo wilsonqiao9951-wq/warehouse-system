@@ -1,13 +1,21 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { OrganizationBranding } from "@/types";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [branding, setBranding] = useState<OrganizationBranding | null>(null);
+
+  useEffect(() => {
+    const slug = new URLSearchParams(window.location.search).get("organization");
+    if (!slug) return;
+    api.getPublicOrganizationBranding(slug).then(setBranding).catch(() => setBranding(null));
+  }, []);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -28,9 +36,15 @@ export default function LoginPage() {
 
   return (
     <section className="card" style={{ maxWidth: 480, margin: "64px auto", padding: 28 }}>
-      <div className="app-header-badge" style={{ display: "inline-block", marginBottom: 14 }}>OPERATIONS PLATFORM</div>
-      <h1 style={{ fontSize: "2rem", letterSpacing: "-0.04em", margin: "0 0 8px" }}>Welcome back</h1>
-      <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>Sign in to manage inventory, field work and customer operations in one place.</p>
+      <div className="app-header-badge" style={{ display: "inline-block", marginBottom: 14 }}>
+        {branding ? `${branding.name.toUpperCase()} PORTAL` : "OPERATIONS PLATFORM"}
+      </div>
+      <h1 style={{ fontSize: "2rem", letterSpacing: "-0.04em", margin: "0 0 8px" }}>
+        {branding?.brand_login_headline || "Welcome back"}
+      </h1>
+      <p className="muted" style={{ marginTop: 0, lineHeight: 1.6 }}>
+        Sign in to manage inventory, field work and customer operations in one place.
+      </p>
       <p className="notice" style={{ lineHeight: 1.5 }}>Engineer sign-in securely registers this phone. Claimed work orders can only be changed by the same account on the registered device.</p>
       <form onSubmit={submit} style={{ display: "grid", gap: 14 }}>
         <label>

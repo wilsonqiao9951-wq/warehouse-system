@@ -28,11 +28,45 @@ class UserRole(str, Enum):
 
 class Organization(Base):
     __tablename__ = "organizations"
+    __table_args__ = (
+        CheckConstraint(
+            "plan_code IN ('starter', 'professional', 'enterprise')",
+            name="ck_organizations_plan_code",
+        ),
+        CheckConstraint(
+            "subscription_status IN ('trialing', 'active', 'past_due', 'suspended', 'cancelled')",
+            name="ck_organizations_subscription_status",
+        ),
+        CheckConstraint(
+            "settings_version >= 0",
+            name="ck_organizations_settings_version_non_negative",
+        ),
+        CheckConstraint(
+            "(max_users IS NULL OR max_users > 0) "
+            "AND (max_warehouses IS NULL OR max_warehouses > 0) "
+            "AND (max_vehicle_warehouses IS NULL OR max_vehicle_warehouses > 0) "
+            "AND (ai_monthly_limit IS NULL OR ai_monthly_limit >= 0) "
+            "AND (api_monthly_limit IS NULL OR api_monthly_limit >= 0)",
+            name="ck_organizations_limits_positive",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    brand_logo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    brand_primary_color: Mapped[str] = mapped_column(String(7), default="#155eef", nullable=False)
+    brand_login_headline: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    plan_code: Mapped[str] = mapped_column(String(32), default="professional", nullable=False)
+    subscription_status: Mapped[str] = mapped_column(String(24), default="active", nullable=False)
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    max_users: Mapped[int | None] = mapped_column(Integer, default=50, nullable=True)
+    max_warehouses: Mapped[int | None] = mapped_column(Integer, default=10, nullable=True)
+    max_vehicle_warehouses: Mapped[int | None] = mapped_column(Integer, default=50, nullable=True)
+    ai_monthly_limit: Mapped[int | None] = mapped_column(Integer, default=2000, nullable=True)
+    api_monthly_limit: Mapped[int | None] = mapped_column(Integer, default=10000, nullable=True)
+    settings_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

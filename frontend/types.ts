@@ -19,11 +19,41 @@ export interface AuthToken {
   device_id?: string | null;
 }
 
-export interface Organization {
-  id: number;
+export type PlanCode = "starter" | "professional" | "enterprise";
+export type SubscriptionStatus =
+  | "trialing"
+  | "active"
+  | "past_due"
+  | "suspended"
+  | "cancelled";
+
+export interface OrganizationBranding {
   name: string;
   slug: string;
+  brand_logo_url?: string | null;
+  brand_primary_color: string;
+  brand_login_headline?: string | null;
+}
+
+export interface OrganizationSettings extends OrganizationBranding {
+  id: number;
   is_active: boolean;
+  plan_code: PlanCode;
+  subscription_status: SubscriptionStatus;
+  trial_ends_at?: string | null;
+  max_users?: number | null;
+  max_warehouses?: number | null;
+  max_vehicle_warehouses?: number | null;
+  ai_monthly_limit?: number | null;
+  api_monthly_limit?: number | null;
+  settings_version: number;
+  active_users: number;
+  pending_invitations: number;
+  active_warehouses: number;
+  active_vehicle_warehouses: number;
+}
+
+export interface Organization extends OrganizationSettings {
   total_users: number;
   total_parts: number;
   total_work_orders: number;

@@ -406,3 +406,28 @@ Verification: form-action target suite 3 passed, all 109 backend tests passed in
 - Blocks downgrade while any conflict evidence exists.
 
 Verification: conflict, idempotency, account/device ownership, administrator role, cross-tenant, merge, server-revision, form-action, and claim regression suite 17 passed; all 111 backend tests passed in two bounded groups (45 plus 66); fresh base-to-`0031` plus `0031 -> 0030 -> 0031` passed on SQLite; the Next.js 16.2.12 production build generated all 32 static routes.
+
+## 20260730_0032 - Tenant branding and commercial plan controls
+
+- Adds HTTPS logo, primary color, and login headline configuration to each
+  organization.
+- Adds Starter, Professional, and Enterprise plan codes.
+- Adds trialing, active, past-due, suspended, and cancelled subscription states
+  plus optional trial end.
+- Adds user, main warehouse, vehicle inventory, AI monthly, and external API
+  monthly limits.
+- Adds optimistic organization settings versions.
+- Adds database constraints for supported plan/state values, non-negative
+  settings versions, positive resource limits, and non-negative metered
+  allowances.
+- Migrates existing organizations to active Professional defaults.
+- Blocks downgrade after any branding, subscription, plan, limit, trial, or
+  settings-version customization to prevent silent configuration loss.
+
+Verification: commercial target suite and file-backed SQLite seat-race coverage
+passed; all 115 backend tests passed;
+fresh `0031 -> 0032`, schema/default/constraint inspection,
+`0032 -> 0031 -> 0032` passed on SQLite; ESLint and the Next.js 16.2.12
+production build passed for all 32 static routes; real browser branding/plan
+regression passed with zero console errors; production dependency audit reported
+0 vulnerabilities.
