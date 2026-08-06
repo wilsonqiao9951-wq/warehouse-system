@@ -15,6 +15,7 @@ import {
   Organization,
   OrganizationBranding,
   OrganizationSettings,
+  OrganizationDomain,
   PlanCode,
   SubscriptionStatus,
   PilotChecklist,
@@ -539,6 +540,7 @@ async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQ
     }
     throw new ApiRequestError(detail, res.status);
   }
+  if (res.status === 204) return undefined as T;
   const payload = (await res.json()) as T;
   rememberClaimVersionsFromPayload(payload);
   if (method === "GET" && isOfflineReadableRequest(path)) {
@@ -926,8 +928,48 @@ export const api = {
     request<OrganizationBranding>(
       `/auth/organization-branding/${encodeURIComponent(slug)}`
     ),
+  getPublicOrganizationBrandingByDomain: (domain: string) =>
+    request<OrganizationBranding>(
+      `/auth/organization-branding/by-domain/${encodeURIComponent(domain)}`
+    ),
   getOrganizationSettings: () =>
     request<OrganizationSettings>("/organization/settings"),
+  getOrganizationDomain: () =>
+    request<OrganizationDomain | null>("/organization/domain"),
+  putOrganizationDomain: (domain: string, accountPassword: string, expectedVersion?: number) =>
+    request<OrganizationDomain>("/organization/domain", {
+      method: "PUT",
+      body: JSON.stringify({
+        domain,
+        account_password: accountPassword,
+        ...(expectedVersion == null ? {} : { expected_version: expectedVersion })
+      })
+    }),
+  verifyOrganizationDomain: (expectedVersion: number) =>
+    request<OrganizationDomain>("/organization/domain/verify", {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion })
+    }),
+  rotateOrganizationDomainChallenge: (expectedVersion: number, accountPassword: string) =>
+    request<OrganizationDomain>("/organization/domain/rotate-challenge", {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion, account_password: accountPassword })
+    }),
+  updateOrganizationEmailIdentity: (payload: {
+    expected_version: number;
+    enabled: boolean;
+    from_name: string;
+    local_part: string;
+    account_password: string;
+  }) => request<OrganizationDomain>("/organization/domain/email-identity", {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  }),
+  deleteOrganizationDomain: (expectedVersion: number, accountPassword: string) =>
+    request<void>("/organization/domain", {
+      method: "DELETE",
+      body: JSON.stringify({ expected_version: expectedVersion, account_password: accountPassword })
+    }),
   updateOrganizationBranding: (
     payload: {
       expected_version: number;

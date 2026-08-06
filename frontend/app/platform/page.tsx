@@ -272,6 +272,8 @@ export default function PlatformPage() {
                   <td>
                     {organization.name}
                     <div className="muted">{organization.slug}</div>
+                    {organization.custom_domain && <div className="muted">{organization.custom_domain} · {organization.custom_domain_status}</div>}
+                    {organization.email_sender_address && <div className="muted">{organization.email_sender_address}</div>}
                   </td>
                   <td>
                     {organization.is_active ? organization.subscription_status : "suspended by platform"}

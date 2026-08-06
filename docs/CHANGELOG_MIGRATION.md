@@ -452,3 +452,24 @@ all 119 backend tests passed; fresh base-to-`0033`, schema/index/constraint
 inspection, empty `0033 -> 0032 -> 0033`, and guarded evidence downgrade passed
 on SQLite; ESLint and the Next.js 16.2.12 production build passed for all 32
 static routes; production dependency audit reported 0 vulnerabilities.
+
+## 20260806_0034 - Verified domains and sender identities
+
+- Adds one globally unique, tenant-owned custom hostname per organization.
+- Adds pending/verified ownership states, high-entropy DNS TXT challenges,
+  verification checks, safe errors, timestamps, and optimistic versions.
+- Restricts the capability to Professional and Enterprise administrators.
+- Requires current-password reauthentication before hostname, challenge,
+  sender-identity, or removal mutations.
+- Adds customer sender display/local-part configuration that cannot be enabled
+  until domain ownership is verified.
+- Adds public safe branding lookup by verified host and automatic login-page host
+  discovery without exposing challenges or commercial data.
+- Adds platform domain/status/sender visibility, audit evidence, and guarded
+  downgrade.
+
+Verification: domain lifecycle and affected commercial suite passed; all 122
+backend tests passed; fresh base-to-`0034`, schema/index/constraint inspection,
+empty `0034 -> 0033 -> 0034`, and guarded configured-domain downgrade passed on
+SQLite; ESLint and the Next.js 16.2.12 production build passed for all 32 static
+routes; production dependency audit reported 0 vulnerabilities.

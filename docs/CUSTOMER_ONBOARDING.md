@@ -54,6 +54,9 @@ login headline have been reviewed.
 
 See [Commercial branding and plan controls](COMMERCIAL_BRANDING_PLANS.md) for
 the plan defaults, subscription states, access behavior, and quota definitions.
+For a Professional or Enterprise custom hostname, complete the DNS ownership,
+TLS/routing, CORS, and sender-identity checklist in
+[Verified custom domains](VERIFIED_DOMAINS.md) before publishing the URL.
 
 ## 4. Trial import
 

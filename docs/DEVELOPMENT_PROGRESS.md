@@ -723,3 +723,44 @@ Verification:
   all 32 static routes.
 - Python dependency consistency passed; production npm audit reported 0
   vulnerabilities.
+
+## 2026-08-06 - Phase 9 verified domains and sender identity foundation
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added one globally unique custom portal hostname per Professional/Enterprise
+  customer with canonical IDNA normalization and reserved/local-name rejection.
+- Added high-entropy DNS TXT challenges, fixed HTTPS DoH resolution, exact
+  comparison, safe resolver errors, verification cooldown, and challenge
+  rotation.
+- Added tenant filtering, administrator-only management, optimistic versions,
+  global collision handling, and challenge-free audit evidence.
+- Added current-password reauthentication for domain configuration, challenge
+  rotation, sender changes, and removal without persisting password material.
+- Added automatic safe login branding by verified browser hostname.
+- Added verified-domain-gated customer sender display/local-part configuration
+  and automatic disablement after a hostname or challenge change.
+- Added domain configuration, DNS instructions, verification, rotation, sender,
+  and removal controls to organization settings.
+- Added domain/status/sender visibility to the platform customer list.
+- Added Alembic revision `20260806_0034` with status/version constraints,
+  tenant/global uniqueness, foreign keys, indexes, and guarded downgrade.
+- Documented the boundary between ownership proof and separately operated DNS
+  routing, TLS, hosting, CORS, SPF/DKIM, and email delivery.
+
+Verification:
+
+- Domain normalization, TXT parsing, lifecycle, cooldown, roles, plans,
+  uniqueness, tenant isolation, password reauthentication, public projection,
+  sender gating, rotation, removal, and audit target tests: 3 passed.
+- Affected commercial/platform/auth/multitenancy suite: 18 passed.
+- Backend: all 122 tests passed.
+- Database: fresh base-to-`0034`, table/index inspection, status/version
+  constraint rejection, empty downgrade/re-upgrade, and refusal to downgrade
+  configured domains all passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for
+  all 32 static routes.
+- Python dependency consistency passed; production npm audit reported 0
+  vulnerabilities.

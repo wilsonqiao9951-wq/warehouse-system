@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     max_import_upload_bytes: int = 5 * 1024 * 1024
     integration_delivery_enabled: bool = True
     integration_delivery_poll_seconds: int = 30
+    custom_domain_dns_resolver_url: str = "https://cloudflare-dns.com/dns-query"
+    custom_domain_verification_cooldown_seconds: int = 30
     # Comma-separated browser origins for CORS (e.g. Cloudflare Tunnel https://xxx.trycloudflare.com)
     cors_extra_origins: str = ""
 

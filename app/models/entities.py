@@ -111,6 +111,55 @@ class OrganizationUsagePeriod(Base):
     organization = relationship("Organization")
 
 
+class OrganizationDomain(Base):
+    __tablename__ = "organization_domains"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_organization_domain_org"),
+        UniqueConstraint("domain", name="uq_organization_domain_name"),
+        CheckConstraint(
+            "status IN ('pending', 'verified')",
+            name="ck_organization_domain_status",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_organization_domain_version_non_negative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    domain: Mapped[str] = mapped_column(String(253), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    verification_token: Mapped[str] = mapped_column(String(128), nullable=False)
+    verification_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    verification_value: Mapped[str] = mapped_column(String(255), nullable=False)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    verification_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    email_from_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    email_from_local_part: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    email_identity_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    organization = relationship("Organization")
+
+
 class User(Base):
     __tablename__ = "users"
 

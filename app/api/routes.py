@@ -44,6 +44,7 @@ from app.models import (
     MachineKnowledgeEntry,
     MachineKnowledgeProfile,
     Organization,
+    OrganizationDomain,
     Part,
     PartMachineAssociation,
     PartRecognitionCandidate,
@@ -126,6 +127,10 @@ from app.schemas import (
     OrganizationCreate,
     OrganizationBrandingRead,
     OrganizationBrandingUpdate,
+    OrganizationDomainAction,
+    OrganizationDomainRead,
+    OrganizationDomainUpsert,
+    OrganizationEmailIdentityUpdate,
     OrganizationRead,
     OrganizationSettingsRead,
     OrganizationUpdate,
@@ -177,6 +182,7 @@ from app.services.commercial import (
 from app.services.recommendations import build_part_recommendations
 from app.services.service_intelligence import build_service_intelligence
 from app.services.visual_recognition import generate_visual_part_candidates
+from app.services.domains import lookup_txt_records, normalize_custom_domain
 from app.services.work_order_forms import (
     snapshot_template,
     template_for_assignment,
@@ -467,6 +473,19 @@ def _organization_settings_read(
 
 def _organization_read(db: Session, organization: Organization) -> OrganizationRead:
     settings_read = _organization_settings_read(db, organization)
+    domain = db.scalar(
+        select(OrganizationDomain).where(
+            OrganizationDomain.organization_id == organization.id
+        )
+    )
+    email_sender_address = None
+    if (
+        domain
+        and domain.status == "verified"
+        and domain.email_identity_enabled
+        and domain.email_from_local_part
+    ):
+        email_sender_address = f"{domain.email_from_local_part}@{domain.domain}"
     return OrganizationRead(
         **settings_read.model_dump(),
         total_users=db.scalar(
@@ -487,6 +506,9 @@ def _organization_read(db: Session, organization: Organization) -> OrganizationR
             )
         )
         or 0,
+        custom_domain=domain.domain if domain else None,
+        custom_domain_status=domain.status if domain else None,
+        email_sender_address=email_sender_address,
         created_at=organization.created_at,
     )
 
@@ -520,6 +542,59 @@ def _platform_audit(
     )
 
 
+def _require_custom_domain_feature(organization: Organization) -> None:
+    if organization.plan_code == "starter":
+        raise HTTPException(
+            status_code=403,
+            detail="Custom domains are not included in the Starter plan.",
+        )
+
+
+def _new_domain_challenge(domain: str) -> tuple[str, str, str]:
+    token = secrets.token_urlsafe(24)
+    return (
+        token,
+        f"_openpartsflow-challenge.{domain}",
+        f"openpartsflow-verification={token}",
+    )
+
+
+def _organization_domain_read(row: OrganizationDomain) -> OrganizationDomainRead:
+    sender_address = None
+    if (
+        row.status == "verified"
+        and row.email_identity_enabled
+        and row.email_from_local_part
+    ):
+        sender_address = f"{row.email_from_local_part}@{row.domain}"
+    return OrganizationDomainRead(
+        id=row.id,
+        organization_id=row.organization_id,
+        domain=row.domain,
+        status=row.status,
+        verification_name=row.verification_name,
+        verification_value=row.verification_value,
+        last_checked_at=row.last_checked_at,
+        verification_error=row.verification_error,
+        verified_at=row.verified_at,
+        email_from_name=row.email_from_name,
+        email_from_local_part=row.email_from_local_part,
+        email_identity_enabled=row.email_identity_enabled,
+        email_sender_address=sender_address,
+        login_url=f"https://{row.domain}/login" if row.status == "verified" else None,
+        version=row.version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _organization_domain_or_404(db: Session) -> OrganizationDomain:
+    row = db.scalar(select(OrganizationDomain))
+    if not row:
+        raise HTTPException(status_code=404, detail="Custom domain is not configured")
+    return row
+
+
 @router.get(
     "/auth/organization-branding/{slug}",
     response_model=OrganizationBrandingRead,
@@ -532,6 +607,36 @@ def public_organization_branding(
         select(Organization).where(
             Organization.slug == slug.strip().lower(),
             Organization.is_active.is_(True),
+        )
+    )
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _organization_branding_read(organization)
+
+
+@router.get(
+    "/auth/organization-branding/by-domain/{domain}",
+    response_model=OrganizationBrandingRead,
+)
+def public_organization_branding_by_domain(
+    domain: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        normalized = normalize_custom_domain(domain)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Organization not found") from None
+    organization = db.scalar(
+        select(Organization)
+        .join(
+            OrganizationDomain,
+            OrganizationDomain.organization_id == Organization.id,
+        )
+        .where(
+            OrganizationDomain.domain == normalized,
+            OrganizationDomain.status == "verified",
+            Organization.is_active.is_(True),
+            Organization.plan_code.in_(("professional", "enterprise")),
         )
     )
     if not organization:
@@ -593,6 +698,282 @@ def update_organization_branding(
     db.commit()
     db.refresh(organization)
     return _organization_settings_read(db, organization)
+
+
+@router.get(
+    "/organization/domain",
+    response_model=OrganizationDomainRead | None,
+)
+def get_organization_domain(
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    _require_custom_domain_feature(organization)
+    row = db.scalar(select(OrganizationDomain))
+    return _organization_domain_read(row) if row else None
+
+
+@router.put(
+    "/organization/domain",
+    response_model=OrganizationDomainRead,
+)
+def put_organization_domain(
+    payload: OrganizationDomainUpsert,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = lock_organization(db, actor.organization_id)
+    _require_custom_domain_feature(organization)
+    row = db.scalar(select(OrganizationDomain).with_for_update())
+    now = datetime.utcnow()
+    created = row is None
+    if row:
+        if payload.expected_version is None or row.version != payload.expected_version:
+            raise HTTPException(
+                status_code=409,
+                detail="Custom domain changed; refresh before saving.",
+            )
+        if row.domain == payload.domain:
+            db.commit()
+            return _organization_domain_read(row)
+        token, name, value = _new_domain_challenge(payload.domain)
+        row.domain = payload.domain
+        row.status = "pending"
+        row.verification_token = token
+        row.verification_name = name
+        row.verification_value = value
+        row.last_checked_at = None
+        row.verification_error = None
+        row.verified_at = None
+        row.email_identity_enabled = False
+        row.updated_by = actor.user_id
+        row.version += 1
+    else:
+        if payload.expected_version not in {None, 0}:
+            raise HTTPException(status_code=409, detail="Custom domain does not exist")
+        token, name, value = _new_domain_challenge(payload.domain)
+        row = OrganizationDomain(
+            organization_id=actor.organization_id,
+            domain=payload.domain,
+            status="pending",
+            verification_token=token,
+            verification_name=name,
+            verification_value=value,
+            created_by=actor.user_id,
+            updated_by=actor.user_id,
+        )
+        db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="This custom domain is already assigned to another organization.",
+        ) from exc
+    _audit(
+        db,
+        actor,
+        "organization_domain_created" if created else "organization_domain_changed",
+        "organization_domain",
+        row.id,
+        {"domain": row.domain, "version": row.version, "timestamp": now},
+    )
+    db.commit()
+    db.refresh(row)
+    return _organization_domain_read(row)
+
+
+@router.post(
+    "/organization/domain/verify",
+    response_model=OrganizationDomainRead,
+)
+async def verify_organization_domain(
+    payload: OrganizationDomainAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    _require_custom_domain_feature(organization)
+    row = _organization_domain_or_404(db)
+    if row.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Custom domain version is stale")
+    now = datetime.utcnow()
+    cooldown = max(1, settings.custom_domain_verification_cooldown_seconds)
+    if row.last_checked_at and now - row.last_checked_at < timedelta(seconds=cooldown):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Wait {cooldown} seconds between DNS verification checks.",
+        )
+    expected_name = row.verification_name
+    expected_value = row.verification_value
+    records, resolver_error = await lookup_txt_records(expected_name)
+
+    lock_organization(db, actor.organization_id)
+    row = _organization_domain_or_404(db)
+    if (
+        row.version != payload.expected_version
+        or row.verification_name != expected_name
+        or row.verification_value != expected_value
+    ):
+        raise HTTPException(status_code=409, detail="Custom domain changed during verification")
+    matched = any(
+        secrets.compare_digest(record, expected_value)
+        for record in records
+    )
+    row.last_checked_at = now
+    if matched:
+        row.status = "verified"
+        row.verified_at = row.verified_at or now
+        row.verification_error = None
+    else:
+        row.verification_error = resolver_error or (
+            "Required TXT verification value was not found yet."
+        )
+    row.updated_by = actor.user_id
+    row.version += 1
+    db.add(row)
+    _audit(
+        db,
+        actor,
+        "organization_domain_verification_checked",
+        "organization_domain",
+        row.id,
+        {
+            "domain": row.domain,
+            "verified": matched,
+            "resolver_available": resolver_error is None,
+            "version": row.version,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _organization_domain_read(row)
+
+
+@router.post(
+    "/organization/domain/rotate-challenge",
+    response_model=OrganizationDomainRead,
+)
+def rotate_organization_domain_challenge(
+    payload: OrganizationDomainAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = lock_organization(db, actor.organization_id)
+    _require_custom_domain_feature(organization)
+    row = _organization_domain_or_404(db)
+    if row.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Custom domain version is stale")
+    token, name, value = _new_domain_challenge(row.domain)
+    row.verification_token = token
+    row.verification_name = name
+    row.verification_value = value
+    row.status = "pending"
+    row.last_checked_at = None
+    row.verification_error = None
+    row.verified_at = None
+    row.email_identity_enabled = False
+    row.updated_by = actor.user_id
+    row.version += 1
+    db.add(row)
+    _audit(
+        db,
+        actor,
+        "organization_domain_challenge_rotated",
+        "organization_domain",
+        row.id,
+        {"domain": row.domain, "version": row.version},
+    )
+    db.commit()
+    db.refresh(row)
+    return _organization_domain_read(row)
+
+
+@router.patch(
+    "/organization/domain/email-identity",
+    response_model=OrganizationDomainRead,
+)
+def update_organization_email_identity(
+    payload: OrganizationEmailIdentityUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = lock_organization(db, actor.organization_id)
+    _require_custom_domain_feature(organization)
+    row = _organization_domain_or_404(db)
+    if row.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Custom domain version is stale")
+    if payload.enabled and row.status != "verified":
+        raise HTTPException(
+            status_code=409,
+            detail="Verify domain ownership before enabling its email identity.",
+        )
+    row.email_from_name = payload.from_name
+    row.email_from_local_part = payload.local_part
+    row.email_identity_enabled = payload.enabled
+    row.updated_by = actor.user_id
+    row.version += 1
+    db.add(row)
+    _audit(
+        db,
+        actor,
+        "organization_email_identity_updated",
+        "organization_domain",
+        row.id,
+        {
+            "domain": row.domain,
+            "enabled": row.email_identity_enabled,
+            "version": row.version,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _organization_domain_read(row)
+
+
+@router.delete(
+    "/organization/domain",
+    status_code=204,
+)
+def delete_organization_domain(
+    payload: OrganizationDomainAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = lock_organization(db, actor.organization_id)
+    _require_custom_domain_feature(organization)
+    row = _organization_domain_or_404(db)
+    if row.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Custom domain version is stale")
+    row_id = row.id
+    row_domain = row.domain
+    _audit(
+        db,
+        actor,
+        "organization_domain_removed",
+        "organization_domain",
+        row_id,
+        {"domain": row_domain, "version": row.version},
+    )
+    db.delete(row)
+    db.commit()
+    return None
 
 
 @router.get("/platform/organizations", response_model=list[OrganizationRead])

@@ -60,7 +60,31 @@ export interface Organization extends OrganizationSettings {
   total_users: number;
   total_parts: number;
   total_work_orders: number;
+  custom_domain?: string | null;
+  custom_domain_status?: "pending" | "verified" | null;
+  email_sender_address?: string | null;
   created_at: string;
+}
+
+export interface OrganizationDomain {
+  id: number;
+  organization_id: number;
+  domain: string;
+  status: "pending" | "verified";
+  verification_record_type: "TXT";
+  verification_name: string;
+  verification_value: string;
+  last_checked_at?: string | null;
+  verification_error?: string | null;
+  verified_at?: string | null;
+  email_from_name?: string | null;
+  email_from_local_part?: string | null;
+  email_identity_enabled: boolean;
+  email_sender_address?: string | null;
+  login_url?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export type ExternalIntegrationProvider =

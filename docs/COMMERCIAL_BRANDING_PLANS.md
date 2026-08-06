@@ -199,7 +199,10 @@ silent loss of billing evidence.
 
 ## Next Phase 9 batches
 
-- Verified custom domains and customer-specific email identity
 - Trial/renewal notifications and billing-provider lifecycle integration
 - Customer data export, backup/restore evidence, and commercial usage reports
 - MFA and account recovery for platform and organization administrators
+
+Verified hostname ownership, automatic custom-host login branding, and the
+provider-independent customer sender identity foundation are documented in
+[`VERIFIED_DOMAINS.md`](VERIFIED_DOMAINS.md).

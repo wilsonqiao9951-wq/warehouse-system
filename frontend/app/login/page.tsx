@@ -13,8 +13,20 @@ export default function LoginPage() {
 
   useEffect(() => {
     const slug = new URLSearchParams(window.location.search).get("organization");
-    if (!slug) return;
-    api.getPublicOrganizationBranding(slug).then(setBranding).catch(() => setBranding(null));
+    if (slug) {
+      api.getPublicOrganizationBranding(slug).then(setBranding).catch(() => setBranding(null));
+      return;
+    }
+    const hostname = window.location.hostname.toLowerCase();
+    const isLocal = hostname === "localhost"
+      || hostname === "127.0.0.1"
+      || hostname === "::1"
+      || hostname.endsWith(".localhost");
+    if (!isLocal) {
+      api.getPublicOrganizationBrandingByDomain(hostname)
+        .then(setBranding)
+        .catch(() => setBranding(null));
+    }
   }, []);
 
   const submit = async (event: FormEvent) => {

@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
+from app.services.domains import normalize_custom_domain
 
 
 class UserBase(BaseModel):
@@ -231,10 +232,78 @@ class OrganizationRead(BaseModel):
     total_users: int = 0
     total_parts: int = 0
     total_work_orders: int = 0
+    custom_domain: str | None = None
+    custom_domain_status: Literal["pending", "verified"] | None = None
+    email_sender_address: str | None = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class OrganizationDomainUpsert(BaseModel):
+    domain: str = Field(min_length=3, max_length=253)
+    expected_version: int | None = Field(default=None, ge=0)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("domain")
+    @classmethod
+    def normalize_domain(cls, value: str) -> str:
+        return normalize_custom_domain(value)
+
+
+class OrganizationDomainAction(BaseModel):
+    expected_version: int = Field(ge=0)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class OrganizationEmailIdentityUpdate(OrganizationDomainAction):
+    enabled: bool
+    from_name: str = Field(min_length=1, max_length=160)
+    local_part: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+    )
+
+    @field_validator("from_name")
+    @classmethod
+    def normalize_from_name(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if any(character in value for character in "\r\n"):
+            raise ValueError("Sender name cannot contain line breaks")
+        if not cleaned:
+            raise ValueError("Sender name cannot be blank")
+        return cleaned
+
+    @field_validator("local_part", mode="before")
+    @classmethod
+    def normalize_local_part(cls, value: str) -> str:
+        cleaned = value.strip().casefold()
+        if ".." in cleaned:
+            raise ValueError("Sender local part cannot contain consecutive dots")
+        return cleaned
+
+
+class OrganizationDomainRead(BaseModel):
+    id: int
+    organization_id: int
+    domain: str
+    status: Literal["pending", "verified"]
+    verification_record_type: Literal["TXT"] = "TXT"
+    verification_name: str
+    verification_value: str
+    last_checked_at: datetime | None = None
+    verification_error: str | None = None
+    verified_at: datetime | None = None
+    email_from_name: str | None = None
+    email_from_local_part: str | None = None
+    email_identity_enabled: bool
+    email_sender_address: str | None = None
+    login_url: str | None = None
+    version: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
 
 
 ExternalIntegrationProvider = Literal[
