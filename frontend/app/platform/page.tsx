@@ -2,7 +2,15 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Organization, PlanCode, SubscriptionStatus } from "@/types";
+import {
+  BillingLifecycleEvent,
+  BillingProvider,
+  Organization,
+  PlanCode,
+  PlatformBillingAccount,
+  SubscriptionNotice,
+  SubscriptionStatus
+} from "@/types";
 
 const planDefaults: Record<PlanCode, {
   max_users: string;
@@ -57,6 +65,19 @@ type CommercialEdit = {
   api_monthly_limit: string;
 };
 
+type BillingEdit = {
+  organization_id: number;
+  expected_version: number;
+  provider: BillingProvider;
+  external_customer_id: string;
+  external_subscription_id: string;
+  current_period_start: string;
+  current_period_end: string;
+  grace_ends_at: string;
+  cancel_at_period_end: boolean;
+  account_password: string;
+};
+
 function localDateTime(value?: string | null): string {
   if (!value) return "";
   const date = new Date(value);
@@ -75,13 +96,32 @@ function usageLabel(used: number, limit?: number | null): string {
 
 export default function PlatformPage() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [billingAccounts, setBillingAccounts] = useState<PlatformBillingAccount[]>([]);
+  const [billingEvents, setBillingEvents] = useState<BillingLifecycleEvent[]>([]);
+  const [billingNotices, setBillingNotices] = useState<SubscriptionNotice[]>([]);
   const [form, setForm] = useState(emptyForm);
   const [edit, setEdit] = useState<CommercialEdit | null>(null);
+  const [billingEdit, setBillingEdit] = useState<BillingEdit | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const load = () => api.listOrganizations().then(setOrganizations).catch((err: Error) => setError(err.message));
+  const load = async () => {
+    try {
+      const [organizationRows, accountRows, eventRows, noticeRows] = await Promise.all([
+        api.listOrganizations(),
+        api.listPlatformBillingAccounts(),
+        api.listPlatformBillingEvents(),
+        api.listPlatformSubscriptionNotices()
+      ]);
+      setOrganizations(organizationRows);
+      setBillingAccounts(accountRows);
+      setBillingEvents(eventRows);
+      setBillingNotices(noticeRows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load platform operations.");
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -132,6 +172,66 @@ export default function PlatformPage() {
     });
     setError("");
     setMessage("");
+  };
+
+  const beginBillingEdit = (organization: Organization) => {
+    const account = billingAccounts.find((row) => row.organization_id === organization.id);
+    setBillingEdit({
+      organization_id: organization.id,
+      expected_version: account?.version || 0,
+      provider: account?.provider || "manual",
+      external_customer_id: account?.external_customer_id || "",
+      external_subscription_id: account?.external_subscription_id || "",
+      current_period_start: localDateTime(account?.current_period_start),
+      current_period_end: localDateTime(account?.current_period_end),
+      grace_ends_at: localDateTime(account?.grace_ends_at),
+      cancel_at_period_end: account?.cancel_at_period_end || false,
+      account_password: ""
+    });
+    setError("");
+    setMessage("");
+  };
+
+  const saveBilling = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!billingEdit) return;
+    try {
+      setBusy(true);
+      setError("");
+      const generic = billingEdit.provider === "generic";
+      await api.putPlatformBillingAccount(billingEdit.organization_id, {
+        expected_version: billingEdit.expected_version,
+        provider: billingEdit.provider,
+        external_customer_id: generic ? billingEdit.external_customer_id.trim() : null,
+        external_subscription_id: generic ? billingEdit.external_subscription_id.trim() : null,
+        current_period_start: billingEdit.current_period_start ? new Date(billingEdit.current_period_start).toISOString() : null,
+        current_period_end: billingEdit.current_period_end ? new Date(billingEdit.current_period_end).toISOString() : null,
+        grace_ends_at: billingEdit.grace_ends_at ? new Date(billingEdit.grace_ends_at).toISOString() : null,
+        cancel_at_period_end: billingEdit.cancel_at_period_end,
+        account_password: billingEdit.account_password
+      });
+      setBillingEdit(null);
+      setMessage("Billing lifecycle binding saved.");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save billing binding.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reconcileBilling = async () => {
+    try {
+      setBusy(true);
+      setError("");
+      const result = await api.reconcilePlatformBilling();
+      setMessage(`Billing lifecycle checked ${result.organizations_checked} customers; created ${result.notices_created} and resolved ${result.notices_resolved} notices.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to reconcile billing lifecycle.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const saveCommercial = async (event: FormEvent) => {
@@ -252,8 +352,96 @@ export default function PlatformPage() {
         </section>
       )}
 
+      {billingEdit && (
+        <section className="card">
+          <h2>Billing lifecycle binding</h2>
+          <p className="muted">
+            Manual mode keeps lifecycle control inside OpenPartsFlow. Generic mode accepts only signed, timestamped events matching both external references. No card or payment-method data is stored.
+          </p>
+          <form onSubmit={saveBilling} style={{ display: "grid", gap: 12 }}>
+            <div className="two-col">
+              <label>
+                Provider mode
+                <select
+                  value={billingEdit.provider}
+                  onChange={(event) => {
+                    const provider = event.target.value as BillingProvider;
+                    setBillingEdit({
+                      ...billingEdit,
+                      provider,
+                      external_customer_id: provider === "manual" ? "" : billingEdit.external_customer_id,
+                      external_subscription_id: provider === "manual" ? "" : billingEdit.external_subscription_id
+                    });
+                  }}
+                >
+                  <option value="manual">Manual</option>
+                  <option value="generic">Signed generic webhook</option>
+                </select>
+              </label>
+              <label>
+                External customer reference
+                <input
+                  value={billingEdit.external_customer_id}
+                  onChange={(event) => setBillingEdit({ ...billingEdit, external_customer_id: event.target.value })}
+                  disabled={billingEdit.provider === "manual"}
+                  required={billingEdit.provider === "generic"}
+                />
+              </label>
+              <label>
+                External subscription reference
+                <input
+                  value={billingEdit.external_subscription_id}
+                  onChange={(event) => setBillingEdit({ ...billingEdit, external_subscription_id: event.target.value })}
+                  disabled={billingEdit.provider === "manual"}
+                  required={billingEdit.provider === "generic"}
+                />
+              </label>
+              <label>
+                Current period starts
+                <input type="datetime-local" value={billingEdit.current_period_start} onChange={(event) => setBillingEdit({ ...billingEdit, current_period_start: event.target.value })} />
+              </label>
+              <label>
+                Current period ends
+                <input type="datetime-local" value={billingEdit.current_period_end} onChange={(event) => setBillingEdit({ ...billingEdit, current_period_end: event.target.value })} />
+              </label>
+              <label>
+                Payment grace ends
+                <input type="datetime-local" value={billingEdit.grace_ends_at} onChange={(event) => setBillingEdit({ ...billingEdit, grace_ends_at: event.target.value })} />
+              </label>
+              <label style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={billingEdit.cancel_at_period_end}
+                  onChange={(event) => setBillingEdit({ ...billingEdit, cancel_at_period_end: event.target.checked })}
+                  style={{ width: 20, minHeight: 20 }}
+                />
+                Cancel at period end
+              </label>
+              <label>
+                Confirm platform administrator password
+                <input
+                  type="password"
+                  minLength={10}
+                  autoComplete="current-password"
+                  value={billingEdit.account_password}
+                  onChange={(event) => setBillingEdit({ ...billingEdit, account_password: event.target.value })}
+                  required
+                />
+              </label>
+            </div>
+            <div className="two-col">
+              <button type="submit" disabled={busy}>{busy ? "Saving…" : "Save billing binding"}</button>
+              <button type="button" className="secondary-button" onClick={() => setBillingEdit(null)}>Cancel</button>
+            </div>
+          </form>
+        </section>
+      )}
+
       <section className="card">
-        <h2>Customers</h2>
+        <div className="two-col" style={{ alignItems: "center" }}>
+          <h2 style={{ margin: 0 }}>Customers</h2>
+          <button type="button" className="secondary-button" onClick={() => void reconcileBilling()} disabled={busy}>Reconcile billing notices</button>
+        </div>
         <div style={{ overflowX: "auto" }}>
           <table>
             <thead>
@@ -290,6 +478,7 @@ export default function PlatformPage() {
                   <td>
                     <div style={{ display: "grid", gap: 8 }}>
                       <button type="button" onClick={() => beginEdit(organization)}>Plan & limits</button>
+                      <button type="button" className="secondary-button" onClick={() => beginBillingEdit(organization)}>Billing lifecycle</button>
                       <button type="button" className="secondary-button" onClick={() => void toggle(organization)}>
                         {organization.is_active ? "Suspend" : "Activate"}
                       </button>
@@ -299,6 +488,43 @@ export default function PlatformPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <section className="two-col">
+        <div className="card">
+          <h2>Subscription notices</h2>
+          <div style={{ display: "grid", gap: 10 }}>
+            {billingNotices.slice(0, 20).map((item) => {
+              const organization = organizations.find((row) => row.id === item.organization_id);
+              return (
+                <div className="notice" key={item.id}>
+                  <strong>{organization?.name || `Organization ${item.organization_id}`}</strong>
+                  <div>{item.notice_type.replaceAll("_", " ")} · {item.severity} · {item.status}</div>
+                  <div>{item.message}</div>
+                  <div className="muted">{new Date(item.effective_at).toLocaleString()}</div>
+                </div>
+              );
+            })}
+            {!billingNotices.length && <div className="empty-state">No subscription notices.</div>}
+          </div>
+        </div>
+        <div className="card">
+          <h2>Provider event evidence</h2>
+          <div style={{ display: "grid", gap: 10 }}>
+            {billingEvents.slice(0, 20).map((item) => {
+              const organization = organizations.find((row) => row.id === item.organization_id);
+              return (
+                <div className="notice" key={item.id}>
+                  <strong>{organization?.name || `Organization ${item.organization_id}`}</strong>
+                  <div>{item.event_type} · {item.processing_status}</div>
+                  <div className="muted">{item.before_subscription_status} → {item.after_subscription_status} · {new Date(item.occurred_at).toLocaleString()}</div>
+                  <div className="muted">Event {item.external_event_id}</div>
+                </div>
+              );
+            })}
+            {!billingEvents.length && <div className="empty-state">No provider events received.</div>}
+          </div>
         </div>
       </section>
     </div>

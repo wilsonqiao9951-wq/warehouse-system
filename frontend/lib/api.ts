@@ -1,4 +1,6 @@
 import {
+  BillingLifecycleEvent,
+  BillingProvider,
   EngineerDashboard,
   ExternalIntegration,
   ExternalIntegrationProvider,
@@ -13,11 +15,14 @@ import {
   MachineKnowledgePartRole,
   MachineKnowledgeProfile,
   Organization,
+  OrganizationBillingOverview,
   OrganizationBranding,
   OrganizationSettings,
   OrganizationDomain,
+  PlatformBillingAccount,
   PlanCode,
   SubscriptionStatus,
+  SubscriptionNotice,
   PilotChecklist,
   Part,
   PartRecognitionCandidate,
@@ -970,6 +975,45 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ expected_version: expectedVersion, account_password: accountPassword })
     }),
+  getOrganizationBilling: () =>
+    request<OrganizationBillingOverview>("/organization/billing"),
+  acknowledgeSubscriptionNotice: (noticeId: number, expectedVersion: number) =>
+    request<SubscriptionNotice>(`/organization/billing/notices/${noticeId}/acknowledge`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion })
+    }),
+  listPlatformBillingAccounts: () =>
+    request<PlatformBillingAccount[]>("/platform/billing/accounts"),
+  putPlatformBillingAccount: (
+    organizationId: number,
+    payload: {
+      expected_version: number;
+      provider: BillingProvider;
+      external_customer_id?: string | null;
+      external_subscription_id?: string | null;
+      current_period_start?: string | null;
+      current_period_end?: string | null;
+      cancel_at_period_end: boolean;
+      grace_ends_at?: string | null;
+      account_password: string;
+    }
+  ) => request<PlatformBillingAccount>(`/platform/billing/accounts/${organizationId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  }),
+  listPlatformBillingEvents: (organizationId?: number) =>
+    request<BillingLifecycleEvent[]>(
+      `/platform/billing/events${organizationId ? `?organization_id=${organizationId}` : ""}`
+    ),
+  listPlatformSubscriptionNotices: (organizationId?: number) =>
+    request<SubscriptionNotice[]>(
+      `/platform/billing/notices${organizationId ? `?organization_id=${organizationId}` : ""}`
+    ),
+  reconcilePlatformBilling: () =>
+    request<{ organizations_checked: number; notices_created: number; notices_resolved: number }>(
+      "/platform/billing/reconcile",
+      { method: "POST", body: JSON.stringify({}) }
+    ),
   updateOrganizationBranding: (
     payload: {
       expected_version: number;

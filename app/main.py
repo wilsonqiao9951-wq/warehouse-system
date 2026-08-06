@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -10,6 +11,7 @@ from app.api.pages import pages_router
 from app.api.integrations import router as integrations_router
 from app.api.work_order_forms import router as work_order_forms_router
 from app.api.routes import router
+from app.api.billing import router as billing_router
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine, ensure_schema_compatibility, get_db
 from app.core.logging import setup_logging
@@ -17,14 +19,17 @@ from app.core.middleware import ErrorHandlingMiddleware
 from app.models import *  # noqa: F401,F403
 from app.schemas import RootInfo
 from app.services.integration_delivery import process_due_deliveries
+from app.services.billing import reconcile_billing_lifecycle
 
 setup_logging()
+logger = logging.getLogger(__name__)
 Base.metadata.create_all(bind=engine)
 ensure_schema_compatibility()
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     delivery_task = None
+    billing_task = None
     # Tests replace the database dependency with an isolated session. Skipping
     # the production worker prevents it from touching the developer database.
     if (
@@ -37,6 +42,19 @@ async def lifespan(app_instance: FastAPI):
                 await asyncio.to_thread(process_due_deliveries, SessionLocal)
 
         delivery_task = asyncio.create_task(delivery_loop())
+    if (
+        settings.billing_reconciliation_enabled
+        and get_db not in app_instance.dependency_overrides
+    ):
+        async def billing_loop() -> None:
+            while True:
+                try:
+                    await asyncio.to_thread(reconcile_billing_lifecycle, SessionLocal)
+                except Exception:
+                    logger.exception("Billing lifecycle reconciliation failed")
+                await asyncio.sleep(max(60, settings.billing_reconciliation_poll_seconds))
+
+        billing_task = asyncio.create_task(billing_loop())
     try:
         yield
     finally:
@@ -44,6 +62,12 @@ async def lifespan(app_instance: FastAPI):
             delivery_task.cancel()
             try:
                 await delivery_task
+            except asyncio.CancelledError:
+                pass
+        if billing_task:
+            billing_task.cancel()
+            try:
+                await billing_task
             except asyncio.CancelledError:
                 pass
 
@@ -67,6 +91,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router, prefix="/api")
+app.include_router(billing_router, prefix="/api")
 app.include_router(integrations_router, prefix="/api")
 app.include_router(work_order_forms_router, prefix="/api")
 app.include_router(pages_router)

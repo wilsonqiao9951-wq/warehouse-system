@@ -160,6 +160,218 @@ class OrganizationDomain(Base):
     organization = relationship("Organization")
 
 
+class OrganizationBillingAccount(Base):
+    __tablename__ = "organization_billing_accounts"
+    __table_args__ = (
+        UniqueConstraint("organization_id", name="uq_billing_account_org"),
+        UniqueConstraint(
+            "provider",
+            "external_customer_id",
+            name="uq_billing_account_provider_customer",
+        ),
+        UniqueConstraint(
+            "provider",
+            "external_subscription_id",
+            name="uq_billing_account_provider_subscription",
+        ),
+        CheckConstraint(
+            "provider IN ('manual', 'generic')",
+            name="ck_billing_account_provider",
+        ),
+        CheckConstraint(
+            "(provider = 'manual' AND external_customer_id IS NULL "
+            "AND external_subscription_id IS NULL) OR "
+            "(provider = 'generic' AND external_customer_id IS NOT NULL "
+            "AND external_subscription_id IS NOT NULL)",
+            name="ck_billing_account_provider_refs",
+        ),
+        CheckConstraint(
+            "(current_period_start IS NULL AND current_period_end IS NULL) OR "
+            "(current_period_start IS NOT NULL AND current_period_end IS NOT NULL "
+            "AND current_period_end > current_period_start)",
+            name="ck_billing_account_period",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_billing_account_version_non_negative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(30), default="manual", nullable=False)
+    external_customer_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    external_subscription_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    current_period_start: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    grace_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_event_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_event_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    organization = relationship("Organization")
+
+
+class BillingLifecycleEvent(Base):
+    __tablename__ = "billing_lifecycle_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "external_event_id",
+            name="uq_billing_event_provider_event",
+        ),
+        CheckConstraint(
+            "processing_status IN ('applied', 'ignored_stale')",
+            name="ck_billing_event_processing_status",
+        ),
+        CheckConstraint(
+            "provider = 'generic'",
+            name="ck_billing_event_provider",
+        ),
+        CheckConstraint(
+            "event_type IN ('trial.started', 'subscription.activated', "
+            "'subscription.renewed', 'payment.failed', "
+            "'subscription.cancellation_scheduled', "
+            "'subscription.cancellation_reversed', "
+            "'subscription.suspended', 'subscription.cancelled')",
+            name="ck_billing_event_type",
+        ),
+        CheckConstraint(
+            "before_subscription_status IN ('trialing', 'active', 'past_due', "
+            "'suspended', 'cancelled') AND "
+            "after_subscription_status IN ('trialing', 'active', 'past_due', "
+            "'suspended', 'cancelled')",
+            name="ck_billing_event_subscription_statuses",
+        ),
+        CheckConstraint(
+            "before_plan_code IN ('starter', 'professional', 'enterprise') AND "
+            "after_plan_code IN ('starter', 'professional', 'enterprise')",
+            name="ck_billing_event_plan_codes",
+        ),
+        CheckConstraint(
+            "length(payload_sha256) = 64",
+            name="ck_billing_event_payload_sha256",
+        ),
+        Index(
+            "ix_billing_event_org_occurred",
+            "organization_id",
+            "occurred_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    billing_account_id: Mapped[int] = mapped_column(
+        ForeignKey("organization_billing_accounts.id"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(30), nullable=False)
+    external_event_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    processing_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    before_subscription_status: Mapped[str] = mapped_column(String(24), nullable=False)
+    after_subscription_status: Mapped[str] = mapped_column(String(24), nullable=False)
+    before_plan_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    after_plan_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    organization = relationship("Organization")
+    billing_account = relationship("OrganizationBillingAccount")
+
+
+class SubscriptionNotice(Base):
+    __tablename__ = "subscription_notices"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "notice_type",
+            "effective_at",
+            name="uq_subscription_notice_milestone",
+        ),
+        CheckConstraint(
+            "notice_type IN ('trial_ending', 'trial_expired', "
+            "'renewal_upcoming', 'renewal_overdue', 'cancellation_scheduled', "
+            "'payment_past_due', 'subscription_suspended', "
+            "'subscription_cancelled')",
+            name="ck_subscription_notice_type",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'acknowledged', 'resolved')",
+            name="ck_subscription_notice_status",
+        ),
+        CheckConstraint(
+            "severity IN ('info', 'warning', 'critical')",
+            name="ck_subscription_notice_severity",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_subscription_notice_version_non_negative",
+        ),
+        Index(
+            "ix_subscription_notice_org_status_effective",
+            "organization_id",
+            "status",
+            "effective_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_event_id: Mapped[int | None] = mapped_column(
+        ForeignKey("billing_lifecycle_events.id"),
+        nullable=True,
+    )
+    notice_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="open", nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    effective_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    acknowledged_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    organization = relationship("Organization")
+    source_event = relationship("BillingLifecycleEvent")
+
+
 class User(Base):
     __tablename__ = "users"
 

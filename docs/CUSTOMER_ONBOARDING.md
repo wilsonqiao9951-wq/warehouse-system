@@ -100,6 +100,18 @@ The preview shows current quantity, proposed opening quantity and projected quan
 
 The customer signs off on the part catalog and opening balances. Then import users, warehouses, parts, stock and open work orders in that order. Run a limited pilot before broad rollout.
 
+## 6. Billing lifecycle binding
+
+In `/platform`, select **Billing lifecycle** for the customer. Use `manual` mode
+until an approved provider adapter exists. For a generic adapter, record the
+unique external customer and subscription references, configure the production
+Webhook secret outside source control, and send a signed activation event.
+Replay the same event once to verify idempotency, then confirm the current period,
+event evidence, audit evidence, and subscription notices. Never paste payment
+methods, card details, or the Webhook secret into customer records.
+
+See [Billing lifecycle and subscription notices](BILLING_LIFECYCLE.md).
+
 ## Product delivery options
 
 ### Managed SaaS (recommended default)

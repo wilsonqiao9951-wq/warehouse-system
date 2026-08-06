@@ -724,6 +724,49 @@ Verification:
 - Python dependency consistency passed; production npm audit reported 0
   vulnerabilities.
 
+## 2026-08-06 - Phase 9 billing lifecycle and subscription notices
+
+Status: implemented and verified.
+
+Delivered:
+
+- Added manual and signed-generic provider bindings with globally unique
+  external references, current periods, scheduled cancellation, grace dates,
+  ordering cursor, and optimistic versions.
+- Added HMAC-SHA256/timestamp verification, a bounded strict event schema, exact
+  two-reference account matching, future-clock rejection, and current-password
+  reauthentication for platform binding changes.
+- Added deterministic subscription transitions, plan-change restrictions,
+  chronological application, exact replay idempotency, event ID collision
+  rejection, and retained stale-event evidence.
+- Stored normalized before/after lifecycle evidence and SHA-256 payload digests
+  without raw provider payloads, Webhook secrets, payment methods, or card data.
+- Added durable trial-ending, trial-expired, renewal-upcoming/overdue,
+  cancellation, past-due, suspension, and cancelled notices with unique milestones, acknowledgement,
+  recovery resolution, and optimistic versions.
+- Added startup/hourly and on-demand reconciliation, organization Settings
+  visibility, and platform binding/event/notice operations.
+- Added Alembic revision `20260806_0035` with provider/reference, period, status,
+  digest, version, uniqueness, tenant, index, foreign-key, and guarded-downgrade
+  controls.
+- Documented that checkout, invoices, tax, refunds, payment collection,
+  customer recovery sessions, and outbound notice delivery remain separate
+  provider-specific work.
+
+Verification:
+
+- Billing signature, timestamp, replay, collision, ordering, transition,
+  recovery, notice, password, and uniqueness tests: 3 passed.
+- Affected billing, commercial-plan, and usage-metering suite: 11 passed.
+- Backend: all 125 tests passed.
+- Database: fresh base-to-`0035`, lifecycle table/index/check inspection, empty
+  downgrade/re-upgrade, invalid-provider rejection, and refusal to downgrade
+  configured billing evidence all passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for
+  all 32 static routes.
+- Python dependency consistency passed; production npm audit reported 0
+  vulnerabilities.
+
 ## 2026-08-06 - Phase 9 verified domains and sender identity foundation
 
 Status: implemented and verified.

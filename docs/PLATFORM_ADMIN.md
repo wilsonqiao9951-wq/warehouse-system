@@ -57,6 +57,23 @@ settings version.
 See [Commercial branding and plan controls](COMMERCIAL_BRANDING_PLANS.md) for
 the default limits, access matrix, capacity rules, and rollout behavior.
 
+## Billing lifecycle operations
+
+The `/platform` control plane can bind a customer to `manual` billing or to the
+signed `generic` lifecycle receiver. Binding changes require the platform
+administrator's current password and optimistic billing-account version. The
+same screen shows durable subscription notices and provider event evidence and
+can run notice reconciliation on demand.
+
+Generic provider events must match both configured external references, pass
+HMAC-SHA256 and timestamp verification, and arrive in chronological order to
+change access. Exact event replays are idempotent; collisions and future events
+are rejected; old events are retained without being applied. Configure the
+Webhook secret only through the runtime environment.
+
+See [Billing lifecycle and subscription notices](BILLING_LIFECYCLE.md) for the
+event contract, supported transitions, recovery boundary, and deployment gate.
+
 ## Operational requirements
 
 - Record the customer contract or support ticket associated with creation and suspension.
@@ -67,3 +84,5 @@ the default limits, access matrix, capacity rules, and rollout behavior.
   support ticket, or approved commercial change.
 - Never place passwords, API keys, invitation tokens, or payment details in
   commercial control notes.
+- Never store provider Webhook secrets or raw provider payloads in organization
+  notes, audit metadata, or support tickets.

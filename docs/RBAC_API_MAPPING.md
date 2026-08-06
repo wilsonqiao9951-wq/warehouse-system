@@ -247,3 +247,18 @@ Recognition actions never mutate inventory. A candidate can reach trusted knowle
 | Read protected published media | Allow | Allow | Allow | Allow |
 
 All reads and writes are tenant-scoped. Optional source work orders must already be completed and locked and must match the profile model. Work-order extraction is idempotent and never auto-publishes. Recommended-part drafts require a labeled successful first-time repair; other usage is reference-only. Uploaded media uses file-header validation, private random storage keys, and authenticated delivery. Engineer and warehouse responses use a redacted part summary that excludes cost, supplier, and other commercial fields. Frontend capability flags mirror these rules but do not replace API enforcement.
+
+## Billing lifecycle
+
+| Operation | Engineer | Manager | Org admin | Platform admin | Signed provider |
+|---|---:|---:|---:|---:|---:|
+| Read organization billing/notices | Deny | Deny | Allow while subscription access is available | Home tenant only | Deny |
+| Acknowledge organization notice | Deny | Deny | Allow, matching version | Home tenant only | Deny |
+| Bind provider references | Deny | Deny | Deny | Allow, current-password reauthentication | Deny |
+| List all billing events/notices | Deny | Deny | Deny | Allow | Deny |
+| Reconcile all notices | Deny | Deny | Deny | Allow | Deny |
+| Submit lifecycle event | Deny | Deny | Deny | Deny | HMAC + timestamp + exact bound references |
+
+Provider events never authorize user actions and do not bypass tenant filters.
+They may update only the documented commercial lifecycle fields and retain no
+raw payload or payment-method data.

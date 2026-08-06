@@ -186,7 +186,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260806_0033` before starting the updated application:
+Apply migration `20260806_0035` before starting the updated application:
 
 ```bash
 alembic upgrade head
@@ -194,15 +194,20 @@ alembic upgrade head
 
 Revision `0032` assigns existing organizations the Professional defaults and
 active subscription state. Revision `0033` creates the monthly usage ledger.
-Downgrading `0033` is refused after any usage has been recorded, preventing
-silent loss of billing evidence.
+Revision `0034` adds verified customer domains. Revision `0035` adds provider
+bindings, ordered lifecycle events, and durable subscription notices.
+Downgrades are refused when the corresponding customer evidence exists.
 
 ## Next Phase 9 batches
 
-- Trial/renewal notifications and billing-provider lifecycle integration
+- Provider-specific checkout, invoice, tax, refund, and restricted customer
+  billing-recovery portal integration
 - Customer data export, backup/restore evidence, and commercial usage reports
 - MFA and account recovery for platform and organization administrators
 
 Verified hostname ownership, automatic custom-host login branding, and the
 provider-independent customer sender identity foundation are documented in
 [`VERIFIED_DOMAINS.md`](VERIFIED_DOMAINS.md).
+
+Provider-neutral signed lifecycle events, ordering rules, and trial/renewal
+notices are documented in [`BILLING_LIFECYCLE.md`](BILLING_LIFECYCLE.md).

@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     integration_delivery_poll_seconds: int = 30
     custom_domain_dns_resolver_url: str = "https://cloudflare-dns.com/dns-query"
     custom_domain_verification_cooldown_seconds: int = 30
+    billing_reconciliation_enabled: bool = True
+    billing_reconciliation_poll_seconds: int = 3600
+    billing_notice_window_days: int = 7
+    billing_webhook_secret: str = ""
+    billing_webhook_tolerance_seconds: int = 300
+    billing_webhook_max_bytes: int = 65536
     # Comma-separated browser origins for CORS (e.g. Cloudflare Tunnel https://xxx.trycloudflare.com)
     cors_extra_origins: str = ""
 

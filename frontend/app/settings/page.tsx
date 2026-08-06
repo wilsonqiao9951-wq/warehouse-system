@@ -3,7 +3,12 @@
 import { FormEvent, useEffect, useState } from "react";
 import ManagerShell from "@/components/manager-shell";
 import { api } from "@/lib/api";
-import { CompletionPolicy, OrganizationDomain, OrganizationSettings } from "@/types";
+import {
+  CompletionPolicy,
+  OrganizationBillingOverview,
+  OrganizationDomain,
+  OrganizationSettings
+} from "@/types";
 import { AppRole, getCurrentRole } from "@/lib/role";
 
 const emptyPolicy = {
@@ -37,6 +42,7 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [role, setRole] = useState<AppRole>("manager");
   const [organization, setOrganization] = useState<OrganizationSettings | null>(null);
+  const [billing, setBilling] = useState<OrganizationBillingOverview | null>(null);
   const [domain, setDomain] = useState<OrganizationDomain | null>(null);
   const [domainInput, setDomainInput] = useState("");
   const [domainPassword, setDomainPassword] = useState("");
@@ -61,11 +67,16 @@ export default function SettingsPage() {
       brand_login_headline: settings.brand_login_headline || ""
     });
   }).catch((e: Error) => setError(e.message));
+  const refreshBilling = () => api.getOrganizationBilling().then(setBilling).catch((e: Error) => setError(e.message));
   useEffect(() => {
     setRole(getCurrentRole());
     void refreshPolicies();
     void refreshOrganization();
   }, []);
+
+  useEffect(() => {
+    if (role === "admin" && organization) void refreshBilling();
+  }, [organization, role]);
 
   useEffect(() => {
     if (role !== "admin" || !organization || organization.plan_code === "starter") return;
@@ -79,6 +90,17 @@ export default function SettingsPage() {
       });
     }).catch((e: Error) => setError(e.message));
   }, [organization, role]);
+
+  const acknowledgeBillingNotice = async (noticeId: number, expectedVersion: number) => {
+    try {
+      setError("");
+      await api.acknowledgeSubscriptionNotice(noticeId, expectedVersion);
+      setNotice("Subscription notice acknowledged.");
+      await refreshBilling();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to acknowledge subscription notice.");
+    }
+  };
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -292,6 +314,48 @@ export default function SettingsPage() {
               <div>External API requests: {usageLabel(organization.api_monthly_used, organization.api_monthly_limit)}</div>
               <div className="muted">Current UTC billing period started {organization.usage_period_start}.</div>
             </div>
+          </div>
+        </section>
+      )}
+      {organization && role === "admin" && (
+        <section className="card">
+          <h3>Subscription lifecycle</h3>
+          <div className="two-col">
+            <div>
+              <strong>{billing?.plan_code || organization.plan_code}</strong> · {billing?.subscription_status || organization.subscription_status}
+              {billing?.trial_ends_at && <div className="muted">Trial ends {new Date(billing.trial_ends_at).toLocaleString()}</div>}
+              {billing?.account ? (
+                <div className="muted" style={{ marginTop: 8 }}>
+                  Billing source: {billing.account.provider}
+                  {billing.account.current_period_end && <> · period ends {new Date(billing.account.current_period_end).toLocaleString()}</>}
+                  {billing.account.cancel_at_period_end && <> · cancellation scheduled</>}
+                </div>
+              ) : (
+                <div className="muted" style={{ marginTop: 8 }}>No external billing account is connected.</div>
+              )}
+            </div>
+            <div className="muted">
+              Lifecycle notices are generated from trial dates and verified provider events. Payment methods and card data are never stored here.
+            </div>
+          </div>
+          <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
+            {billing?.notices.length ? billing.notices.slice(0, 8).map((item) => (
+              <div className="notice" key={item.id}>
+                <strong>{item.notice_type.replaceAll("_", " ")}</strong> · {item.severity} · {item.status}
+                <div>{item.message}</div>
+                <div className="muted">Effective {new Date(item.effective_at).toLocaleString()}</div>
+                {item.status === "open" && (
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    style={{ marginTop: 8 }}
+                    onClick={() => void acknowledgeBillingNotice(item.id, item.version)}
+                  >
+                    Acknowledge
+                  </button>
+                )}
+              </div>
+            )) : <div className="empty-state">No subscription lifecycle notices.</div>}
           </div>
         </section>
       )}

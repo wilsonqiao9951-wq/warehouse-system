@@ -473,3 +473,28 @@ backend tests passed; fresh base-to-`0034`, schema/index/constraint inspection,
 empty `0034 -> 0033 -> 0034`, and guarded configured-domain downgrade passed on
 SQLite; ESLint and the Next.js 16.2.12 production build passed for all 32 static
 routes; production dependency audit reported 0 vulnerabilities.
+
+## 20260806_0035 - Billing lifecycle and subscription notices
+
+- Adds one provider-neutral billing account per organization with manual or
+  signed-generic binding, unique external references, periods, cancellation,
+  grace, ordering cursor, and optimistic version.
+- Adds immutable normalized lifecycle event evidence with global provider event
+  idempotency, SHA-256 body evidence, applied/stale outcome, and before/after
+  subscription and plan state.
+- Adds tenant-owned trial, renewal, cancellation, past-due, suspension, and
+  cancellation notices with acknowledgement, automatic resolution, and
+  optimistic versions.
+- Adds HMAC-SHA256 and timestamp-verified Webhook processing with payload size,
+  schema, reference, event collision, ordering, and future-clock safeguards.
+- Adds platform binding/event/notice/reconciliation operations, organization
+  administrator notice visibility, background reconciliation, UI, and audits.
+- Requires current-password reauthentication for platform billing bindings and
+  refuses downgrade while any billing configuration or evidence remains.
+
+Verification: billing lifecycle tests passed; all 125 backend tests passed;
+fresh base-to-`0035`, table/index/check inspection, empty
+`0035 -> 0034 -> 0035`, invalid-provider rejection, and configured-evidence
+downgrade refusal passed on SQLite; ESLint and the Next.js 16.2.12 production
+build passed for all 32 static routes; production dependency audit reported 0
+vulnerabilities.

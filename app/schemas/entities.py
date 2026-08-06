@@ -4,7 +4,7 @@ import binascii
 import json
 from urllib.parse import urlsplit
 from typing import Literal
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
 from app.services.domains import normalize_custom_domain
@@ -304,6 +304,249 @@ class OrganizationDomainRead(BaseModel):
     version: int = Field(ge=0)
     created_at: datetime
     updated_at: datetime
+
+
+class BillingAccountUpsert(BaseModel):
+    expected_version: int = Field(default=0, ge=0)
+    provider: Literal["manual", "generic"]
+    external_customer_id: str | None = Field(default=None, min_length=1, max_length=200)
+    external_subscription_id: str | None = Field(default=None, min_length=1, max_length=200)
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool = False
+    grace_ends_at: datetime | None = None
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("external_customer_id", "external_subscription_id")
+    @classmethod
+    def normalize_external_reference(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
+
+    @field_validator(
+        "current_period_start",
+        "current_period_end",
+        "grace_ends_at",
+    )
+    @classmethod
+    def normalize_billing_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def validate_binding(self):
+        references = (self.external_customer_id, self.external_subscription_id)
+        if self.provider == "manual" and any(references):
+            raise ValueError("Manual billing cannot include provider references")
+        if self.provider == "generic" and not all(references):
+            raise ValueError("Generic billing requires customer and subscription references")
+        if (self.current_period_start is None) != (self.current_period_end is None):
+            raise ValueError("Billing period start and end must be supplied together")
+        if (
+            self.current_period_start is not None
+            and self.current_period_end is not None
+            and self.current_period_end <= self.current_period_start
+        ):
+            raise ValueError("Billing period end must be after its start")
+        return self
+
+
+BillingEventType = Literal[
+    "trial.started",
+    "subscription.activated",
+    "subscription.renewed",
+    "payment.failed",
+    "subscription.cancellation_scheduled",
+    "subscription.cancellation_reversed",
+    "subscription.suspended",
+    "subscription.cancelled",
+]
+
+
+class BillingWebhookEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(
+        min_length=1,
+        max_length=200,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$",
+    )
+    event_type: BillingEventType
+    occurred_at: datetime
+    external_customer_id: str = Field(min_length=1, max_length=200)
+    external_subscription_id: str = Field(min_length=1, max_length=200)
+    plan_code: Literal["starter", "professional", "enterprise"] | None = None
+    trial_ends_at: datetime | None = None
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool | None = None
+    grace_ends_at: datetime | None = None
+
+    @field_validator("external_customer_id", "external_subscription_id")
+    @classmethod
+    def normalize_webhook_reference(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Provider reference cannot be blank")
+        return cleaned
+
+    @field_validator(
+        "occurred_at",
+        "trial_ends_at",
+        "current_period_start",
+        "current_period_end",
+        "grace_ends_at",
+    )
+    @classmethod
+    def normalize_webhook_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def validate_event_timeline(self):
+        if (self.current_period_start is None) != (self.current_period_end is None):
+            raise ValueError("Billing period start and end must be supplied together")
+        if (
+            self.current_period_start is not None
+            and self.current_period_end is not None
+            and self.current_period_end <= self.current_period_start
+        ):
+            raise ValueError("Billing period end must be after its start")
+        if self.current_period_start is not None and self.current_period_start > self.occurred_at:
+            raise ValueError("Billing period start cannot be after the event")
+        if self.current_period_end is not None and self.current_period_end <= self.occurred_at:
+            raise ValueError("Billing period end must be after the event")
+        if self.event_type == "trial.started":
+            if self.trial_ends_at is None or self.trial_ends_at <= self.occurred_at:
+                raise ValueError("A trial event requires a future trial end")
+        if self.event_type in {"subscription.activated", "subscription.renewed"}:
+            if self.current_period_end is None or self.current_period_end <= self.occurred_at:
+                raise ValueError("An active subscription event requires a future billing period")
+        if self.grace_ends_at is not None:
+            if self.event_type != "payment.failed" or self.grace_ends_at <= self.occurred_at:
+                raise ValueError("Only a payment failure may set a future grace end")
+        if self.cancel_at_period_end is not None and self.event_type not in {
+            "subscription.activated",
+            "subscription.renewed",
+        }:
+            raise ValueError("This event type cannot set cancel_at_period_end directly")
+        return self
+
+
+class BillingAccountRead(BaseModel):
+    id: int
+    organization_id: int
+    provider: Literal["manual", "generic"]
+    external_customer_id: str | None = None
+    external_subscription_id: str | None = None
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool
+    grace_ends_at: datetime | None = None
+    last_event_at: datetime | None = None
+    last_event_id: str | None = None
+    version: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlatformBillingAccountRead(BillingAccountRead):
+    organization_name: str
+    organization_slug: str
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    open_notice_count: int = Field(ge=0)
+
+
+class BillingLifecycleEventRead(BaseModel):
+    id: int
+    organization_id: int
+    billing_account_id: int
+    provider: str
+    external_event_id: str
+    event_type: BillingEventType
+    processing_status: Literal["applied", "ignored_stale"]
+    payload_sha256: str
+    before_subscription_status: str
+    after_subscription_status: str
+    before_plan_code: str
+    after_plan_code: str
+    occurred_at: datetime
+    received_at: datetime
+    processed_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SubscriptionNoticeRead(BaseModel):
+    id: int
+    organization_id: int
+    source_event_id: int | None = None
+    notice_type: Literal[
+        "trial_ending",
+        "trial_expired",
+        "renewal_upcoming",
+        "renewal_overdue",
+        "cancellation_scheduled",
+        "payment_past_due",
+        "subscription_suspended",
+        "subscription_cancelled",
+    ]
+    status: Literal["open", "acknowledged", "resolved"]
+    severity: Literal["info", "warning", "critical"]
+    message: str
+    effective_at: datetime
+    acknowledged_by: int | None = None
+    acknowledged_at: datetime | None = None
+    resolved_at: datetime | None = None
+    version: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrganizationBillingOverviewRead(BaseModel):
+    organization_id: int
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    trial_ends_at: datetime | None = None
+    account: BillingAccountRead | None = None
+    notices: list[SubscriptionNoticeRead]
+
+
+class SubscriptionNoticeAcknowledge(BaseModel):
+    expected_version: int = Field(ge=0)
+
+
+class BillingWebhookResponse(BaseModel):
+    event_id: int
+    external_event_id: str
+    processing_status: Literal["applied", "ignored_stale"]
+    duplicate: bool
+    subscription_status: str
+    plan_code: str
+
+
+class BillingReconciliationRead(BaseModel):
+    organizations_checked: int = Field(ge=0)
+    notices_created: int = Field(ge=0)
+    notices_resolved: int = Field(ge=0)
 
 
 ExternalIntegrationProvider = Literal[

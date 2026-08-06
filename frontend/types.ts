@@ -87,6 +87,94 @@ export interface OrganizationDomain {
   updated_at: string;
 }
 
+export type BillingProvider = "manual" | "generic";
+export type BillingEventType =
+  | "trial.started"
+  | "subscription.activated"
+  | "subscription.renewed"
+  | "payment.failed"
+  | "subscription.cancellation_scheduled"
+  | "subscription.cancellation_reversed"
+  | "subscription.suspended"
+  | "subscription.cancelled";
+
+export interface BillingAccount {
+  id: number;
+  organization_id: number;
+  provider: BillingProvider;
+  external_customer_id?: string | null;
+  external_subscription_id?: string | null;
+  current_period_start?: string | null;
+  current_period_end?: string | null;
+  cancel_at_period_end: boolean;
+  grace_ends_at?: string | null;
+  last_event_at?: string | null;
+  last_event_id?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlatformBillingAccount extends BillingAccount {
+  organization_name: string;
+  organization_slug: string;
+  plan_code: PlanCode;
+  subscription_status: SubscriptionStatus;
+  open_notice_count: number;
+}
+
+export interface BillingLifecycleEvent {
+  id: number;
+  organization_id: number;
+  billing_account_id: number;
+  provider: string;
+  external_event_id: string;
+  event_type: BillingEventType;
+  processing_status: "applied" | "ignored_stale";
+  payload_sha256: string;
+  before_subscription_status: string;
+  after_subscription_status: string;
+  before_plan_code: string;
+  after_plan_code: string;
+  occurred_at: string;
+  received_at: string;
+  processed_at: string;
+}
+
+export interface SubscriptionNotice {
+  id: number;
+  organization_id: number;
+  source_event_id?: number | null;
+  notice_type:
+    | "trial_ending"
+    | "trial_expired"
+    | "renewal_upcoming"
+    | "renewal_overdue"
+    | "cancellation_scheduled"
+    | "payment_past_due"
+    | "subscription_suspended"
+    | "subscription_cancelled";
+  status: "open" | "acknowledged" | "resolved";
+  severity: "info" | "warning" | "critical";
+  message: string;
+  effective_at: string;
+  acknowledged_by?: number | null;
+  acknowledged_at?: string | null;
+  resolved_at?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationBillingOverview {
+  organization_id: number;
+  plan_code: PlanCode;
+  subscription_status: SubscriptionStatus;
+  trial_ends_at?: string | null;
+  account?: BillingAccount | null;
+  notices: SubscriptionNotice[];
+}
+
 export type ExternalIntegrationProvider =
   | "appsheet"
   | "generic"
