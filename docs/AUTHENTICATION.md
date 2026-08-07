@@ -15,6 +15,19 @@ ACCESS_TOKEN_EXPIRE_MINUTES=480
 LOGIN_RATE_LIMIT_WINDOW_SECONDS=900
 LOGIN_RATE_LIMIT_PRINCIPAL_FAILURES=10
 LOGIN_RATE_LIMIT_SOURCE_FAILURES=50
+PASSWORD_RESET_EXPIRE_MINUTES=30
+PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS=3600
+PASSWORD_RESET_PRINCIPAL_REQUESTS=3
+PASSWORD_RESET_SOURCE_REQUESTS=20
+PASSWORD_RESET_EMAIL_ENABLED=true
+AUTH_EMAIL_FROM=OpenPartsFlow <security@example.com>
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=<relay account>
+SMTP_PASSWORD=<relay secret>
+SMTP_USE_STARTTLS=true
+SMTP_USE_SSL=false
+SMTP_TIMEOUT_SECONDS=10
 ```
 
 The application refuses to issue tokens in staging or production when the development JWT secret is still configured.
@@ -36,6 +49,22 @@ POST /api/auth/sessions/revoke-all
 ```
 
 The profile workspace exposes this control to every role and shows the tenant-scoped event history to administrators. Device registrations are not silently deleted by session revocation; users must authenticate again, and the existing device-secret checks still apply.
+
+## Password reset
+
+The public reset workflow uses three endpoints:
+
+```text
+GET  /api/auth/password-reset/configuration
+POST /api/auth/password-reset/request
+POST /api/auth/password-reset/complete
+```
+
+Production and staging expose reset requests only when the SMTP relay, sender, TLS mode, credential pairing, port, and timeout pass startup validation. Account lookup responses are identical for known, unknown, disabled, and ineligible users. Requests are bounded by keyed account and trusted-source fingerprints; once the limit is reached, the API keeps returning the same accepted response without creating additional tokens or delivery work.
+
+Each eligible request invalidates earlier unused tokens and creates 32 random bytes. Only the keyed token hash is stored. Tokens expire after 30 minutes by default, are consumed through a conditional database update, and cannot be replayed. Completing a reset replaces the Argon2 password hash, increments the account authentication version, invalidates every older bearer session, and records safe security evidence.
+
+SMTP delivery runs after the HTTP response so account existence cannot be inferred from relay latency. The raw token exists only in the reset URL passed to the mail task and is never written to the database, logs, API response, or customer export in production. Delivery status retains only `pending`, `sent`, or a safe failure code; a user can request another link after a relay failure. Development/test mode may expose a clearly labeled local reset URL when email delivery is disabled.
 
 ## Account onboarding
 
@@ -96,7 +125,6 @@ The application is fail-closed in every runnable environment: RBAC is enabled an
 
 ## Remaining commercial hardening
 
-- Password reset with single-use, short-lived tokens
 - Optional MFA for administrators
 - Prefer HttpOnly secure cookies for browser deployments that do not require standalone Bearer-token clients
-- Invitation acceptance exists; verified email delivery and invitation-email ownership proof remain to be connected to a transactional email provider
+- Invitation acceptance exists; invitation-email ownership proof remains to reuse the verified reset mail transport

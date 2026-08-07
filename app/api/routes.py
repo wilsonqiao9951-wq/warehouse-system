@@ -4,9 +4,10 @@ from io import BytesIO
 import json
 import secrets
 from pathlib import Path
+from urllib.parse import urlencode
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
@@ -14,7 +15,7 @@ from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.config import settings
 from app.core.operations import operations_monitor
 from app.core.permissions import REPORTS_READ, USERS_READ
@@ -55,6 +56,7 @@ from app.models import (
     PartRecognitionAnalysis,
     PartRecognitionCandidate,
     PartRecognitionObservation,
+    PasswordResetToken,
     QCPicture,
     ReturnEquipment,
     StorageLocation,
@@ -145,6 +147,10 @@ from app.schemas import (
     OrganizationSettingsRead,
     OrganizationUpdate,
     PasswordSet,
+    PasswordResetComplete,
+    PasswordResetConfigurationRead,
+    PasswordResetRequest,
+    PasswordResetRequestRead,
     SessionRevoke,
     StockBalance,
     StorageLocationCreate,
@@ -183,7 +189,13 @@ from app.services.auth_security import (
     auth_fingerprint,
     login_is_rate_limited,
     login_source_fingerprint,
+    password_reset_is_rate_limited,
     record_auth_security_event,
+)
+from app.services.password_reset_delivery import (
+    PasswordResetDeliveryError,
+    deliver_password_reset_email,
+    password_reset_delivery_available,
 )
 from app.services.integration_delivery import enqueue_work_order_event
 from app.services.regions import ensure_default_region
@@ -219,6 +231,10 @@ from app.services.work_order_forms import (
 )
 
 router = APIRouter()
+
+PASSWORD_RESET_ACCEPTED_MESSAGE = (
+    "If an eligible account exists, password reset instructions will be sent."
+)
 
 PART_IMPORT_FIELDS = {
     "part_number",
@@ -422,6 +438,242 @@ def auth_me(db: Session = Depends(get_db), actor: Actor = Depends(get_current_ac
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+
+def _password_reset_manual_mode() -> bool:
+    return settings.app_env.lower() in {"development", "test"}
+
+
+def _deliver_password_reset_background(
+    session_factory,
+    token_id: int,
+    recipient: str,
+    recipient_name: str,
+    reset_url: str,
+) -> None:
+    outcome = "reset_delivered"
+    failure_code = None
+    try:
+        deliver_password_reset_email(
+            recipient=recipient,
+            recipient_name=recipient_name,
+            reset_url=reset_url,
+        )
+    except PasswordResetDeliveryError as exc:
+        outcome = "reset_delivery_failed"
+        failure_code = str(exc)[:100]
+
+    now = datetime.utcnow()
+    with session_factory() as db:
+        token_row = db.get(PasswordResetToken, token_id)
+        if not token_row:
+            return
+        token_row.delivery_attempted_at = now
+        token_row.delivery_status = "sent" if outcome == "reset_delivered" else "failed"
+        token_row.failure_code = failure_code
+        user = db.get(User, token_row.user_id)
+        record_auth_security_event(
+            db,
+            event_type="password_reset",
+            outcome=outcome,
+            principal_fingerprint=token_row.principal_fingerprint,
+            source_fingerprint=token_row.source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.add(token_row)
+        db.commit()
+
+
+@router.get(
+    "/auth/password-reset/configuration",
+    response_model=PasswordResetConfigurationRead,
+)
+def password_reset_configuration():
+    return PasswordResetConfigurationRead(
+        available=_password_reset_manual_mode() or password_reset_delivery_available(),
+        expires_in_minutes=settings.password_reset_expire_minutes,
+    )
+
+
+@router.post(
+    "/auth/password-reset/request",
+    response_model=PasswordResetRequestRead,
+    status_code=202,
+)
+def request_password_reset(
+    payload: PasswordResetRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    manual_mode = _password_reset_manual_mode()
+    delivery_available = password_reset_delivery_available()
+    if not manual_mode and not delivery_available:
+        raise HTTPException(
+            status_code=503,
+            detail="Password reset delivery is not configured",
+        )
+
+    now = datetime.utcnow()
+    email = payload.email.strip().lower()
+    principal_fingerprint = auth_fingerprint("login-principal", email)
+    source_fingerprint = login_source_fingerprint(request)
+    if password_reset_is_rate_limited(
+        db,
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        now=now,
+    ):
+        return PasswordResetRequestRead(message=PASSWORD_RESET_ACCEPTED_MESSAGE)
+
+    user = db.scalar(select(User).where(func.lower(User.email) == email))
+    organization = db.get(Organization, user.organization_id) if user else None
+    eligible = bool(
+        user
+        and user.is_active
+        and user.password_hash
+        and (user.is_platform_admin or (organization and organization.is_active))
+    )
+    if not eligible:
+        record_auth_security_event(
+            db,
+            event_type="password_reset",
+            outcome="reset_request_ignored",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        return PasswordResetRequestRead(message=PASSWORD_RESET_ACCEPTED_MESSAGE)
+
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.invalidated_at.is_(None),
+        )
+        .values(invalidated_at=now)
+    )
+    raw_token = secrets.token_urlsafe(32)
+    token_row = PasswordResetToken(
+        organization_id=user.organization_id,
+        user_id=user.id,
+        token_hash=auth_fingerprint("password-reset-token", raw_token),
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        delivery_status="pending" if delivery_available else "manual",
+        expires_at=now + timedelta(minutes=settings.password_reset_expire_minutes),
+    )
+    db.add(token_row)
+    record_auth_security_event(
+        db,
+        event_type="password_reset",
+        outcome="reset_requested",
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        user=user,
+        occurred_at=now,
+    )
+    db.commit()
+    db.refresh(token_row)
+
+    reset_url = (
+        f"{settings.frontend_public_url.rstrip('/')}/reset-password?"
+        f"{urlencode({'token': raw_token})}"
+    )
+    if delivery_available:
+        session_factory = getattr(request.app.state, "testing_session_local", SessionLocal)
+        background_tasks.add_task(
+            _deliver_password_reset_background,
+            session_factory,
+            token_row.id,
+            user.email,
+            user.name,
+            reset_url,
+        )
+    return PasswordResetRequestRead(
+        message=PASSWORD_RESET_ACCEPTED_MESSAGE,
+        reset_url=reset_url if manual_mode and not delivery_available else None,
+    )
+
+
+@router.post("/auth/password-reset/complete", status_code=204)
+def complete_password_reset(
+    payload: PasswordResetComplete,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    now = datetime.utcnow()
+    token_hash = auth_fingerprint("password-reset-token", payload.token)
+    source_fingerprint = login_source_fingerprint(request)
+    token_row = db.scalar(
+        select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash)
+    )
+    user = db.get(User, token_row.user_id) if token_row else None
+    organization = db.get(Organization, user.organization_id) if user else None
+    if (
+        not token_row
+        or token_row.used_at is not None
+        or token_row.invalidated_at is not None
+        or token_row.expires_at <= now
+        or not user
+        or not user.is_active
+        or (not user.is_platform_admin and (not organization or not organization.is_active))
+    ):
+        record_auth_security_event(
+            db,
+            event_type="password_reset",
+            outcome="reset_rejected",
+            principal_fingerprint=(
+                token_row.principal_fingerprint if token_row else token_hash
+            ),
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        raise HTTPException(status_code=400, detail="Password reset token is invalid or expired")
+
+    consumed = db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.id == token_row.id,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.invalidated_at.is_(None),
+            PasswordResetToken.expires_at > now,
+        )
+        .values(used_at=now)
+    )
+    if consumed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Password reset token is invalid or expired")
+
+    user.password_hash = hash_password(payload.password)
+    user.auth_version += 1
+    db.execute(
+        update(PasswordResetToken)
+        .where(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.id != token_row.id,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.invalidated_at.is_(None),
+        )
+        .values(invalidated_at=now)
+    )
+    record_auth_security_event(
+        db,
+        event_type="password_reset",
+        outcome="reset_completed",
+        principal_fingerprint=token_row.principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        user=user,
+        occurred_at=now,
+    )
+    db.add(user)
+    db.commit()
 
 
 @router.post("/auth/sessions/revoke-all", status_code=204)

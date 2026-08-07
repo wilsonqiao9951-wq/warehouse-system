@@ -10,7 +10,13 @@ const outcomeLabel: Record<AuthSecurityEvent["outcome"], string> = {
   rate_limited: "Rate limited",
   subscription_denied: "Subscription denied",
   device_rejected: "Device rejected",
-  sessions_revoked: "Sessions revoked"
+  sessions_revoked: "Sessions revoked",
+  reset_requested: "Reset requested",
+  reset_request_ignored: "Reset request ignored",
+  reset_delivered: "Reset email delivered",
+  reset_delivery_failed: "Reset delivery failed",
+  reset_completed: "Password reset completed",
+  reset_rejected: "Reset token rejected"
 };
 
 export default function ProfilePage() {
@@ -104,7 +110,7 @@ export default function ProfilePage() {
                   <tr key={item.id}>
                     <td>{new Date(item.occurred_at).toLocaleString()}</td>
                     <td>{item.user_id || "Unknown"}</td>
-                    <td>{item.event_type === "login" ? "Login" : "Session control"}</td>
+                    <td>{item.event_type === "login" ? "Login" : item.event_type === "password_reset" ? "Password reset" : "Session control"}</td>
                     <td>{outcomeLabel[item.outcome]}</td>
                   </tr>
                 ))}

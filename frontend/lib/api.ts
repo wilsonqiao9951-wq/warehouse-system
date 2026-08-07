@@ -26,6 +26,8 @@ import {
   OrganizationDataRestore,
   OrganizationBranding,
   OrganizationSettings,
+  PasswordResetConfiguration,
+  PasswordResetRequestResult,
   OrganizationDomain,
   PlatformBillingAccount,
   PlatformCommercialReportRow,
@@ -1015,6 +1017,18 @@ export const api = {
     }),
   listAuthSecurityEvents: (limit = 50) =>
     request<AuthSecurityEvent[]>(`/auth/security-events?limit=${limit}`),
+  getPasswordResetConfiguration: () =>
+    request<PasswordResetConfiguration>("/auth/password-reset/configuration"),
+  requestPasswordReset: (email: string) =>
+    request<PasswordResetRequestResult>("/auth/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify({ email })
+    }),
+  completePasswordReset: (token: string, password: string) =>
+    request<void>("/auth/password-reset/complete", {
+      method: "POST",
+      body: JSON.stringify({ token, password })
+    }),
   getPublicOrganizationBranding: (slug: string) =>
     request<OrganizationBranding>(
       `/auth/organization-branding/${encodeURIComponent(slug)}`

@@ -82,7 +82,7 @@ class SessionRevoke(BaseModel):
 class AuthSecurityEventRead(BaseModel):
     id: int
     user_id: int | None
-    event_type: Literal["login", "session_revocation"]
+    event_type: Literal["login", "session_revocation", "password_reset"]
     outcome: Literal[
         "success",
         "invalid_credentials",
@@ -90,10 +90,36 @@ class AuthSecurityEventRead(BaseModel):
         "subscription_denied",
         "device_rejected",
         "sessions_revoked",
+        "reset_requested",
+        "reset_request_ignored",
+        "reset_delivered",
+        "reset_delivery_failed",
+        "reset_completed",
+        "reset_rejected",
     ]
     occurred_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+
+
+class PasswordResetRequestRead(BaseModel):
+    accepted: bool = True
+    message: str
+    reset_url: str | None = None
+
+
+class PasswordResetComplete(BaseModel):
+    token: str = Field(min_length=32, max_length=200)
+    password: str = Field(min_length=10, max_length=128)
+
+
+class PasswordResetConfigurationRead(BaseModel):
+    available: bool
+    expires_in_minutes: int
 
 
 class InvitationCreate(BaseModel):

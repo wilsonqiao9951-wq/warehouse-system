@@ -670,12 +670,14 @@ class AuthSecurityEvent(Base):
     __tablename__ = "auth_security_events"
     __table_args__ = (
         CheckConstraint(
-            "event_type IN ('login', 'session_revocation')",
+            "event_type IN ('login', 'session_revocation', 'password_reset')",
             name="ck_auth_security_events_type",
         ),
         CheckConstraint(
             "outcome IN ('success', 'invalid_credentials', 'rate_limited', "
-            "'subscription_denied', 'device_rejected', 'sessions_revoked')",
+            "'subscription_denied', 'device_rejected', 'sessions_revoked', "
+            "'reset_requested', 'reset_request_ignored', 'reset_delivered', "
+            "'reset_delivery_failed', 'reset_completed', 'reset_rejected')",
             name="ck_auth_security_events_outcome",
         ),
         CheckConstraint(
@@ -713,6 +715,56 @@ class AuthSecurityEvent(Base):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    organization = relationship("Organization")
+    user = relationship("User")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (
+        CheckConstraint(
+            "delivery_status IN ('manual', 'pending', 'sent', 'failed')",
+            name="ck_password_reset_tokens_delivery_status",
+        ),
+        CheckConstraint(
+            "length(token_hash) = 64 AND length(principal_fingerprint) = 64 "
+            "AND length(source_fingerprint) = 64",
+            name="ck_password_reset_tokens_hashes",
+        ),
+        CheckConstraint(
+            "used_at IS NULL OR invalidated_at IS NULL",
+            name="ck_password_reset_tokens_terminal_state",
+        ),
+        Index(
+            "ix_password_reset_tokens_org_created",
+            "organization_id",
+            "created_at",
+        ),
+        Index(
+            "ix_password_reset_tokens_user_active",
+            "user_id",
+            "expires_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    principal_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    delivery_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    delivery_attempted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     organization = relationship("Organization")
