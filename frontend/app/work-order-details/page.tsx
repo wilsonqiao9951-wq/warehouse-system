@@ -4,7 +4,8 @@ import { FormEvent, useCallback, useEffect, useId, useMemo, useState } from "rea
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
-import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderPart, WorkOrderServiceContext, WorkOrderVoiceNote } from "@/types";
+import { isOfflineMediaMarker } from "@/lib/offline-media";
+import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderForm, WorkOrderFormAction, WorkOrderFormValue, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
 import { VoiceRecorder } from "@/components/voice-recorder";
 
@@ -22,7 +23,14 @@ export default function WorkOrderDetailsPage() {
   const [woParts, setWoParts] = useState<WorkOrderPart[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<WorkOrderVoiceNote[]>([]);
   const [serviceContext, setServiceContext] = useState<WorkOrderServiceContext | null>(null);
+  const [serviceIntelligence, setServiceIntelligence] = useState<WorkOrderServiceIntelligence | null>(null);
+  const [serviceIntelligenceLoaded, setServiceIntelligenceLoaded] = useState(false);
   const [completionPolicy, setCompletionPolicy] = useState<CompletionPolicy | null>(null);
+  const [dynamicForm, setDynamicForm] = useState<WorkOrderForm | null>(null);
+  const [formActions, setFormActions] = useState<WorkOrderFormAction[]>([]);
+  const [dynamicFormValues, setDynamicFormValues] = useState<Record<string, WorkOrderFormValue>>({});
+  const [dynamicFormSaving, setDynamicFormSaving] = useState(false);
+  const [dynamicPhotoBusy, setDynamicPhotoBusy] = useState("");
   const [role, setRole] = useState("");
   const [completionPassword, setCompletionPassword] = useState("");
   const [claimBusy, setClaimBusy] = useState(false);
@@ -41,6 +49,12 @@ export default function WorkOrderDetailsPage() {
   const [retForm, setRetForm] = useState({ equipment_type: "", quantity: "1" });
   const [completion, setCompletion] = useState({
     repairResult: "",
+    faultType: "",
+    errorCode: "",
+    environmentInfo: "",
+    finalOutcome: "repaired",
+    firstTimeFix: false,
+    isRework: false,
     signatureName: "",
     signatureData: "",
     equipmentSafe: false,
@@ -105,6 +119,12 @@ export default function WorkOrderDetailsPage() {
     }
     setCompletion({
       repairResult: selectedWorkOrder.repair_result || "",
+      faultType: selectedWorkOrder.fault_type || selectedWorkOrder.job_type || "",
+      errorCode: selectedWorkOrder.error_code || "",
+      environmentInfo: selectedWorkOrder.environment_info || "",
+      finalOutcome: selectedWorkOrder.final_outcome || "repaired",
+      firstTimeFix: selectedWorkOrder.first_time_fix ?? false,
+      isRework: selectedWorkOrder.is_rework || false,
       signatureName: selectedWorkOrder.customer_signature_name || "",
       signatureData: selectedWorkOrder.customer_signature_data || "",
       equipmentSafe: Boolean(checklist.equipment_safe),
@@ -144,13 +164,52 @@ export default function WorkOrderDetailsPage() {
 
   useEffect(() => {
     if (!currentWorkOrderId) return;
+    let active = true;
     setServiceContext(null);
+    setServiceIntelligence(null);
+    setServiceIntelligenceLoaded(false);
+    setDynamicForm(null);
+    setDynamicFormValues({});
+    setFormActions([]);
     api.getWorkOrderServiceContext(currentWorkOrderId, 5)
       .then(setServiceContext)
       .catch(() => setServiceContext({ history: [] }));
+    api.getWorkOrderServiceIntelligence(currentWorkOrderId)
+      .then((result) => {
+        if (active) setServiceIntelligence(result);
+      })
+      .catch(() => {
+        if (active) setServiceIntelligence(null);
+      })
+      .finally(() => {
+        if (active) setServiceIntelligenceLoaded(true);
+      });
     api.getCompletionPolicy(currentWorkOrderId)
       .then(setCompletionPolicy)
       .catch(() => setCompletionPolicy(null));
+    api.getWorkOrderForm(currentWorkOrderId)
+      .then((result) => {
+        if (active) {
+          setDynamicForm(result);
+          setDynamicFormValues(result.values);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setDynamicForm(null);
+          setDynamicFormValues({});
+        }
+      });
+    api.listWorkOrderFormActionProgress(currentWorkOrderId)
+      .then((result) => {
+        if (active) setFormActions(result);
+      })
+      .catch(() => {
+        if (active) setFormActions([]);
+      });
+    return () => {
+      active = false;
+    };
   }, [currentWorkOrderId]);
 
   const onStartJob = async () => {
@@ -207,6 +266,12 @@ export default function WorkOrderDetailsPage() {
     if (completionPolicy?.require_completion_photo && qcPictures.length === 0) missing.push("field photo");
     if (completionPolicy?.require_parts_usage && woParts.length === 0) missing.push("part usage");
     if (completionPolicy?.require_all_checklist_items && !(completion.equipmentSafe && completion.siteClean && completion.customerBriefed)) missing.push("field checklist");
+    if (dynamicForm?.missing_required_fields.length) {
+      missing.push(...dynamicForm.missing_required_fields.map((key) => {
+        const field = dynamicForm.fields.find((item) => item.field_key === key);
+        return field?.label || key;
+      }));
+    }
     if (missing.length) {
       setNotice({ type: "error", text: `Complete the required evidence: ${missing.join(", ")}.` });
       return;
@@ -220,6 +285,12 @@ export default function WorkOrderDetailsPage() {
     try {
       const result = await api.completeJob(currentWorkOrderId, {
         repair_result: completion.repairResult.trim(),
+        fault_type: completion.faultType.trim(),
+        error_code: completion.errorCode.trim(),
+        environment_info: completion.environmentInfo.trim(),
+        final_outcome: completion.finalOutcome,
+        first_time_fix: completion.firstTimeFix,
+        is_rework: completion.isRework,
         customer_signature_name: completion.signatureName.trim(),
         customer_signature_data: completion.signatureData,
         checklist_json: JSON.stringify({
@@ -235,6 +306,84 @@ export default function WorkOrderDetailsPage() {
       void reloadDetails();
     } catch (e) {
       setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to complete job." });
+    }
+  };
+
+  const onSaveDynamicForm = async () => {
+    if (!currentWorkOrderId || !dynamicForm?.can_edit) return;
+    try {
+      setDynamicFormSaving(true);
+      const result = await api.updateWorkOrderForm(
+        currentWorkOrderId,
+        dynamicForm.form_version,
+        dynamicFormValues
+      );
+      if ("queued" in result) {
+        const missingRequiredFields = dynamicForm.fields
+          .filter((field) => (
+            field.required_at_completion
+            || field.requires_photo
+            || field.requires_signature
+          ))
+          .filter((field) => {
+            const value = dynamicFormValues[field.field_key];
+            return value === null
+              || value === undefined
+              || (typeof value === "string" && !value.trim());
+          })
+          .map((field) => field.field_key);
+        setDynamicForm({
+          ...dynamicForm,
+          values: dynamicFormValues,
+          missing_required_fields: missingRequiredFields
+        });
+        setNotice({
+          type: "success",
+          text: "Offline form changes are saved on this account and device. They will sync only while this claim remains current."
+        });
+        return;
+      }
+      setDynamicForm(result);
+      setDynamicFormValues(result.values);
+      setFormActions(await api.listWorkOrderFormActionProgress(currentWorkOrderId));
+      setNotice({ type: "success", text: "Configured job form saved with verified ownership." });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to save configured job form."
+      });
+    } finally {
+      setDynamicFormSaving(false);
+    }
+  };
+
+  const onUploadDynamicPhoto = async (fieldKey: string, file: File | null) => {
+    if (!file || !currentWorkOrderId || !dynamicForm?.can_edit) return;
+    try {
+      setDynamicPhotoBusy(fieldKey);
+      const uploaded = await api.uploadPartUsagePhoto(
+        currentWorkOrderId,
+        file,
+        () => undefined,
+        "configured_form_photo"
+      );
+      setDynamicFormValues((current) => ({
+        ...current,
+        [fieldKey]: uploaded.url
+      }));
+      setNotice({
+        type: "success",
+        text: uploaded.queued_offline
+          ? "Photo retained on this account and device. Save the configured form to add it to the sync queue."
+          : "Photo uploaded. Save the configured form to record it."
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error instanceof Error ? error.message : "Failed to upload configured-form photo."
+      });
+    } finally {
+      setDynamicPhotoBusy("");
     }
   };
 
@@ -299,21 +448,30 @@ export default function WorkOrderDetailsPage() {
       setQcUploadPct(0);
       let imageUrl = manual;
       if (qcPhotoFile) {
-        const uploaded = await api.uploadPartUsagePhoto(currentWorkOrderId, qcPhotoFile, (p) => setQcUploadPct(p));
-        imageUrl = resolveUploadedImageUrl(uploaded.url);
-        setQcUploadPct(100);
+        const uploaded = await api.uploadPartUsagePhoto(
+          currentWorkOrderId,
+          qcPhotoFile,
+          (p) => setQcUploadPct(p),
+          "qc_photo"
+        );
+        imageUrl = uploaded.url;
+        if (!uploaded.queued_offline) setQcUploadPct(100);
       } else if (manual && !manual.startsWith("http://") && !manual.startsWith("https://")) {
         imageUrl = resolveUploadedImageUrl(manual);
       }
-      await api.createQCPicture({
+      const created = await api.createQCPicture({
         work_order_id: currentWorkOrderId,
         image_url: imageUrl
       });
       setQcForm({ image_url: "" });
       setQcPhotoFromFile(null);
       setQcUploadPct(0);
-      setNotice({ type: "success", text: "QC picture added." });
-      void reloadDetails();
+      if ("queued" in created) {
+        setNotice({ type: "success", text: "QC photo retained on this account and device for verified sync." });
+      } else {
+        setNotice({ type: "success", text: "QC picture added." });
+        void reloadDetails();
+      }
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "Failed to add QC picture." });
     } finally {
@@ -326,14 +484,18 @@ export default function WorkOrderDetailsPage() {
     e.preventDefault();
     if (!currentWorkOrderId || !retForm.equipment_type.trim() || !canEdit) return;
     try {
-      await api.createReturnEquipment({
+      const created = await api.createReturnEquipment({
         work_order_id: currentWorkOrderId,
         equipment_type: retForm.equipment_type.trim(),
         quantity: Number(retForm.quantity) || 1
       });
       setRetForm({ equipment_type: "", quantity: "1" });
-      setNotice({ type: "success", text: "Return equipment added." });
-      void reloadDetails();
+      if ("queued" in created) {
+        setNotice({ type: "success", text: "Return-equipment evidence retained for verified sync." });
+      } else {
+        setNotice({ type: "success", text: "Return equipment added." });
+        void reloadDetails();
+      }
     } catch (err) {
       setNotice({ type: "error", text: err instanceof Error ? err.message : "Failed to add return equipment." });
     }
@@ -440,6 +602,17 @@ export default function WorkOrderDetailsPage() {
                 {serviceContext?.equipment?.serial_number && <div className="muted">Serial {serviceContext.equipment.serial_number}</div>}
               </div>
             </div>
+            {(serviceContext?.equipment?.model || serviceContext?.fallback_equipment_model) && (
+              <Link
+                className="nav-item"
+                style={{ marginTop: 10 }}
+                href={`/knowledge-base?model=${encodeURIComponent(
+                  serviceContext?.equipment?.model || serviceContext?.fallback_equipment_model || "",
+                )}`}
+              >
+                Open machine service knowledge
+              </Link>
+            )}
           </div>
 
           <div className="card">
@@ -453,12 +626,331 @@ export default function WorkOrderDetailsPage() {
                 </summary>
                 <p><strong>Problem:</strong> {item.problem_description || "Not recorded"}</p>
                 <p><strong>Result:</strong> {item.repair_result || "Not recorded"}</p>
+                <p><strong>Learning:</strong> {[item.fault_type, item.error_code, item.final_outcome].filter(Boolean).join(" · ") || "Not recorded"}</p>
+                <p><strong>First-time fix:</strong> {item.first_time_fix === null || item.first_time_fix === undefined ? "Unknown" : item.first_time_fix ? "Yes" : "No"} · <strong>Rework:</strong> {item.is_rework ? "Yes" : "No"} · <strong>Duration:</strong> {item.repair_duration_minutes ?? "—"} min</p>
                 {item.parts_used.length > 0 && <div><strong>Parts:</strong><ul>{item.parts_used.map((part) => (
                   <li key={part.part_number}>{part.part_number} · {part.name} × {part.quantity}</li>
                 ))}</ul></div>}
               </details>
             ))}
           </div>
+
+          <div className="card">
+            <h3 className="section-title">Service intelligence</h3>
+            {!serviceIntelligenceLoaded ? (
+              <div className="skeleton" style={{ width: "80%" }} />
+            ) : !serviceIntelligence ? (
+              <div className="empty-state">Service intelligence is currently unavailable.</div>
+            ) : (
+              <>
+                <p style={{ marginTop: 0 }}>{serviceIntelligence.fault_analysis.summary}</p>
+                <div className="grid" style={{ marginBottom: 12 }}>
+                  <div className="card" style={{ marginBottom: 0 }}>
+                    <div className="muted">Same-model evidence</div>
+                    <div className="metric">{serviceIntelligence.fault_analysis.completed_work_orders}</div>
+                  </div>
+                  <div className="card" style={{ marginBottom: 0 }}>
+                    <div className="muted">First-time fix</div>
+                    <div className="metric">
+                      {serviceIntelligence.fault_analysis.first_time_fix_rate == null
+                        ? "—"
+                        : `${Math.round(serviceIntelligence.fault_analysis.first_time_fix_rate * 100)}%`}
+                    </div>
+                  </div>
+                  <div className="card" style={{ marginBottom: 0 }}>
+                    <div className="muted">Rework</div>
+                    <div className="metric">
+                      {serviceIntelligence.fault_analysis.rework_rate == null
+                        ? "—"
+                        : `${Math.round(serviceIntelligence.fault_analysis.rework_rate * 100)}%`}
+                    </div>
+                  </div>
+                  <div className="card" style={{ marginBottom: 0 }}>
+                    <div className="muted">Average repair</div>
+                    <div className="metric">
+                      {serviceIntelligence.fault_analysis.average_repair_minutes == null
+                        ? "—"
+                        : `${Math.round(serviceIntelligence.fault_analysis.average_repair_minutes)} min`}
+                    </div>
+                  </div>
+                </div>
+                {(serviceIntelligence.fault_analysis.top_fault_types.length > 0
+                  || serviceIntelligence.fault_analysis.top_error_codes.length > 0) && (
+                  <p className="muted">
+                    Frequent evidence:{" "}
+                    {[
+                      ...serviceIntelligence.fault_analysis.top_fault_types.map((item) => `${item.value} (${item.count})`),
+                      ...serviceIntelligence.fault_analysis.top_error_codes.map((item) => `${item.value} (${item.count})`)
+                    ].join(" · ")}
+                  </p>
+                )}
+                {serviceIntelligence.fault_analysis.warnings.map((warning) => (
+                  <p className="notice" key={warning}>{warning}</p>
+                ))}
+
+                <h4>Published machine guidance</h4>
+                {serviceIntelligence.knowledge_entries.length === 0 ? (
+                  <div className="empty-state">No published exact-model guidance matches this job yet.</div>
+                ) : serviceIntelligence.knowledge_entries.map((entry) => (
+                  <details key={entry.id} style={{ padding: "10px 0", borderBottom: "1px solid #e2e8f0" }}>
+                    <summary style={{ cursor: "pointer" }}>
+                      <strong>{entry.title}</strong> · {Math.round(entry.confidence * 100)}% match
+                    </summary>
+                    <p style={{ whiteSpace: "pre-wrap" }}>{entry.content}</p>
+                    <p className="muted">{entry.reason}</p>
+                    {entry.related_part && (
+                      <p>
+                        <strong>{entry.related_part_role || "related"} part:</strong>{" "}
+                        {entry.related_part.part_number} · {entry.related_part.name}
+                        {entry.installation_location ? ` · ${entry.installation_location}` : ""}
+                      </p>
+                    )}
+                    {entry.alternative_for_part && (
+                      <p><strong>Replaces:</strong> {entry.alternative_for_part.part_number} · {entry.alternative_for_part.name}</p>
+                    )}
+                    {entry.media_url?.startsWith("/api/machine-knowledge/media/") ? (
+                      <button
+                        type="button"
+                        onClick={() => void api.openMachineKnowledgeMedia(entry.id).catch((error: Error) => (
+                          setNotice({ type: "error", text: error.message })
+                        ))}
+                      >
+                        Open protected field media
+                      </button>
+                    ) : entry.media_url ? (
+                      <a className="nav-item" href={resolveUploadedImageUrl(entry.media_url)} target="_blank" rel="noreferrer">
+                        Open reference media
+                      </a>
+                    ) : null}
+                  </details>
+                ))}
+
+                <h4>Similar completed work orders</h4>
+                {serviceIntelligence.similar_work_orders.length === 0 ? (
+                  <div className="empty-state">No sufficiently similar completed work orders found.</div>
+                ) : serviceIntelligence.similar_work_orders.map((item) => (
+                  <details key={item.id} style={{ padding: "10px 0", borderBottom: "1px solid #e2e8f0" }}>
+                    <summary style={{ cursor: "pointer" }}>
+                      <strong>{item.ticket_number}</strong> · {Math.round(item.confidence * 100)}% match ·{" "}
+                      {item.completed_at ? new Date(item.completed_at).toLocaleDateString() : "date unavailable"}
+                    </summary>
+                    <p className="muted">{item.reason}</p>
+                    <p><strong>Problem:</strong> {item.problem_description || "Not recorded"}</p>
+                    <p><strong>Repair:</strong> {item.repair_result || "Not recorded"}</p>
+                    <p>
+                      <strong>Outcome:</strong> {item.final_outcome || "Not labeled"} ·{" "}
+                      first-time fix {item.first_time_fix == null ? "unknown" : item.first_time_fix ? "yes" : "no"} ·{" "}
+                      rework {item.is_rework ? "yes" : "no"} · {item.repair_duration_minutes ?? "—"} min
+                    </p>
+                    {item.parts_used.length > 0 && (
+                      <p><strong>Parts:</strong> {item.parts_used.map((part) => `${part.part_number} × ${part.quantity}`).join(", ")}</p>
+                    )}
+                  </details>
+                ))}
+                <p className="muted" style={{ marginBottom: 0 }}>
+                  Evidence is limited to this company&apos;s locked completed work orders and published exact-model knowledge.
+                </p>
+              </>
+            )}
+          </div>
+
+          {dynamicForm && dynamicForm.fields.length > 0 && (
+            <div className="card">
+              <h3 className="section-title">{dynamicForm.template_name || "Configured job form"}</h3>
+              <p className="muted">
+                Template snapshot v{dynamicForm.template_version ?? "—"} · form revision {dynamicForm.form_version}.
+                {!dynamicForm.can_edit && " Visible to everyone; editable only by the verified job owner or administrator."}
+              </p>
+              {dynamicForm.missing_required_fields.length > 0 && (
+                <p className="notice">
+                  Required before completion:{" "}
+                  {dynamicForm.missing_required_fields.map((key) => (
+                    dynamicForm.fields.find((field) => field.field_key === key)?.label || key
+                  )).join(", ")}
+                </p>
+              )}
+              <div className="form-grid">
+                {dynamicForm.fields.map((field) => {
+                  const value = dynamicFormValues[field.field_key];
+                  const disabled = !dynamicForm.can_edit || dynamicForm.is_frozen;
+                  const label = `${field.label}${field.required_at_completion || field.requires_photo || field.requires_signature ? " *" : ""}`;
+                  const updateValue = (next: WorkOrderFormValue) => {
+                    setDynamicFormValues((current) => ({ ...current, [field.field_key]: next }));
+                  };
+                  if (field.field_type === "boolean") {
+                    return (
+                      <label key={field.field_key} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={value === true}
+                          disabled={disabled}
+                          onChange={(event) => updateValue(event.target.checked)}
+                        />
+                        {label}
+                        {field.help_text && <span className="muted">· {field.help_text}</span>}
+                      </label>
+                    );
+                  }
+                  if (field.field_type === "textarea") {
+                    return (
+                      <label key={field.field_key}>
+                        {label}
+                        <textarea
+                          rows={4}
+                          value={String(value ?? "")}
+                          placeholder={field.placeholder || ""}
+                          disabled={disabled}
+                          onChange={(event) => updateValue(event.target.value)}
+                        />
+                        {field.help_text && <span className="muted">{field.help_text}</span>}
+                      </label>
+                    );
+                  }
+                  if (field.field_type === "select") {
+                    return (
+                      <label key={field.field_key}>
+                        {label}
+                        <select
+                          value={String(value ?? "")}
+                          disabled={disabled}
+                          onChange={(event) => updateValue(event.target.value)}
+                        >
+                          <option value="">Select…</option>
+                          {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                        </select>
+                        {field.help_text && <span className="muted">{field.help_text}</span>}
+                      </label>
+                    );
+                  }
+                  if (field.field_type === "photo") {
+                    return (
+                      <label key={field.field_key}>
+                        {label}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          disabled={disabled || dynamicPhotoBusy === field.field_key}
+                          onChange={(event) => void onUploadDynamicPhoto(
+                            field.field_key,
+                            event.target.files?.[0] || null
+                          )}
+                        />
+                        {isOfflineMediaMarker(value) && (
+                          <span className="notice notice-success" style={{ marginTop: 6, display: "block" }}>
+                            Photo retained offline on this account and device.
+                          </span>
+                        )}
+                        {typeof value === "string" && value && !isOfflineMediaMarker(value) && (
+                          <a
+                            className="nav-item"
+                            href={resolveUploadedImageUrl(value)}
+                            target="_blank"
+                            rel="noreferrer"
+                            style={{ marginTop: 6, display: "block" }}
+                          >
+                            Open uploaded photo
+                          </a>
+                        )}
+                        {dynamicPhotoBusy === field.field_key && <span className="muted">Uploading…</span>}
+                        {field.help_text && <span className="muted">{field.help_text}</span>}
+                      </label>
+                    );
+                  }
+                  if (field.field_type === "signature") {
+                    return (
+                      <div key={field.field_key}>
+                        <strong>{label}</strong>
+                        {typeof value === "string" && value.startsWith("data:image/") ? (
+                          <>
+                            {/* Signature data is an authenticated evidence payload, not an optimizable asset URL. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={value}
+                              alt={field.label}
+                              style={{ width: "100%", maxWidth: 420, border: "1px solid #cbd5e1", borderRadius: 8 }}
+                            />
+                            {!disabled && (
+                              <button type="button" onClick={() => updateValue("")}>
+                                Replace signature
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <SignaturePad
+                            onChange={(signature) => updateValue(signature)}
+                            disabled={disabled}
+                          />
+                        )}
+                        {field.help_text && <span className="muted">{field.help_text}</span>}
+                      </div>
+                    );
+                  }
+                  return (
+                    <label key={field.field_key}>
+                      {label}
+                      <input
+                        type={
+                          field.field_type === "number"
+                            ? "number"
+                            : field.field_type === "date"
+                              ? "date"
+                            : "text"
+                        }
+                        value={String(value ?? "")}
+                        placeholder={
+                          field.placeholder
+                          || ""
+                        }
+                        disabled={disabled}
+                        onChange={(event) => updateValue(
+                          field.field_type === "number"
+                            ? (event.target.value === "" ? null : Number(event.target.value))
+                            : event.target.value
+                        )}
+                      />
+                      {field.help_text && <span className="muted">{field.help_text}</span>}
+                    </label>
+                  );
+                })}
+              </div>
+              {dynamicForm.can_edit && !dynamicForm.is_frozen && (
+                <button type="button" disabled={dynamicFormSaving} onClick={() => void onSaveDynamicForm()}>
+                  {dynamicFormSaving ? "Saving…" : "Save configured form"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {formActions.length > 0 && (
+            <div className="card">
+              <h3 className="section-title">Configured form action progress</h3>
+              <p className="muted">
+                Everyone on the work order can see progress. Only the authorized manager, warehouse role, or administrator can process each action.
+              </p>
+              <div style={{ display: "grid", gap: 8 }}>
+                {formActions.map((task) => (
+                  <div key={task.id} style={{ borderBottom: "1px solid #e2e8f0", paddingBottom: 8 }}>
+                    <strong>{task.field_label}</strong>
+                    <span className="muted">
+                      {" "}· {task.action_type === "inventory_review" ? "inventory review" : "notification"} · {task.status}
+                    </span>
+                    <span className="muted" style={{ display: "block" }}>
+                      Triggered from form revision {task.triggered_form_version}
+                      {task.acknowledged_by_name ? ` · acknowledged by ${task.acknowledged_by_name}` : ""}
+                      {task.resolved_by_name ? ` · resolved by ${task.resolved_by_name}` : ""}
+                    </span>
+                    {task.resolution_notes && <span className="muted">{task.resolution_notes}</span>}
+                  </div>
+                ))}
+              </div>
+              {["admin", "manager", "warehouse"].includes(role) && (
+                <Link className="nav-item" href="/form-actions" style={{ marginTop: 10, display: "inline-block" }}>
+                  Open action inbox
+                </Link>
+              )}
+            </div>
+          )}
 
           <div className="card" id="completion">
             <h3 className="section-title">Field completion</h3>
@@ -474,6 +966,42 @@ export default function WorkOrderDetailsPage() {
                 completionPolicy.require_manager_approval && "manager approval"
               ].filter(Boolean).join(", ") || "No additional company requirements"}
             </div>}
+            <div className="form-grid">
+              <label>
+                Fault type
+                <input value={completion.faultType} onChange={(e) => setCompletion((prev) => ({ ...prev, faultType: e.target.value }))}
+                  placeholder="Cooling failure, leak, electrical..." disabled={evidenceFrozen} maxLength={120} />
+              </label>
+              <label>
+                Error code
+                <input value={completion.errorCode} onChange={(e) => setCompletion((prev) => ({ ...prev, errorCode: e.target.value }))}
+                  placeholder="Optional equipment error code" disabled={evidenceFrozen} maxLength={120} />
+              </label>
+              <label>
+                Final outcome
+                <select value={completion.finalOutcome} onChange={(e) => setCompletion((prev) => ({ ...prev, finalOutcome: e.target.value }))} disabled={evidenceFrozen}>
+                  <option value="repaired">Repaired</option>
+                  <option value="temporary_fix">Temporary fix</option>
+                  <option value="parts_required">Parts required</option>
+                  <option value="referred">Referred / escalated</option>
+                  <option value="unresolved">Unresolved</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              Environment information
+              <textarea value={completion.environmentInfo} onChange={(e) => setCompletion((prev) => ({ ...prev, environmentInfo: e.target.value }))}
+                placeholder="Temperature, installation conditions, access constraints, contamination..." disabled={evidenceFrozen} rows={3} maxLength={4000} />
+            </label>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", margin: "12px 0" }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={completion.firstTimeFix}
+                onChange={(e) => setCompletion((prev) => ({ ...prev, firstTimeFix: e.target.checked }))} disabled={evidenceFrozen} /> Fixed on first visit</label>
+              <label style={{ display: "flex", gap: 8, alignItems: "center" }}><input type="checkbox" checked={completion.isRework}
+                onChange={(e) => setCompletion((prev) => ({ ...prev, isRework: e.target.checked }))} disabled={evidenceFrozen} /> This job is rework</label>
+            </div>
+            {selectedWorkOrder.repair_duration_minutes !== null && selectedWorkOrder.repair_duration_minutes !== undefined && (
+              <p className="muted">Server-recorded field duration: {selectedWorkOrder.repair_duration_minutes} minutes.</p>
+            )}
             <label>
               Repair result
               <textarea

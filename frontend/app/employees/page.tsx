@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { EngineerDashboard, InvitationCreated, User, UserRole } from "@/types";
+import { EngineerDashboard, InvitationCreated, OrganizationSettings, User, UserRole } from "@/types";
 import { AppRole, getCurrentRole } from "@/lib/role";
 import ManagerShell from "@/components/manager-shell";
 
@@ -13,6 +13,7 @@ export default function EmployeesPage() {
   const [invite, setInvite] = useState({ name: "", email: "", role: "engineer" as UserRole });
   const [createdInvite, setCreatedInvite] = useState<InvitationCreated | null>(null);
   const [inviteError, setInviteError] = useState("");
+  const [organization, setOrganization] = useState<OrganizationSettings | null>(null);
 
   useEffect(() => {
     setRole(getCurrentRole());
@@ -20,6 +21,7 @@ export default function EmployeesPage() {
 
   useEffect(() => {
     if (role !== "manager" && role !== "admin") return;
+    api.getOrganizationSettings().then(setOrganization).catch(() => setOrganization(null));
     api.listUsers().then(async (allUsers) => {
       setUsers(allUsers);
       const engineers = allUsers.filter((u) => u.role === "engineer");
@@ -42,7 +44,13 @@ export default function EmployeesPage() {
       subtitle="Role and technician performance overview."
       metrics={[
         { label: "Employees", value: users.length },
-        { label: "Engineers", value: users.filter((u) => u.role === "engineer").length }
+        { label: "Engineers", value: users.filter((u) => u.role === "engineer").length },
+        {
+          label: "Plan seats",
+          value: organization
+            ? `${organization.active_users + organization.pending_invitations}/${organization.max_users ?? "Unlimited"}`
+            : "—"
+        }
       ]}
     >
     <section className="card">
@@ -57,9 +65,17 @@ export default function EmployeesPage() {
             </select>
             <button type="button" onClick={() => {
               setInviteError(""); setCreatedInvite(null);
-              api.createInvitation(invite).then(setCreatedInvite).catch((e: Error) => setInviteError(e.message));
+              api.createInvitation(invite).then((created) => {
+                setCreatedInvite(created);
+                void api.getOrganizationSettings().then(setOrganization).catch(() => undefined);
+              }).catch((e: Error) => setInviteError(e.message));
             }}>Create invitation</button>
           </div>
+          {organization && (
+            <p className="muted">
+              {organization.plan_code} plan: {organization.active_users} active users and {organization.pending_invitations} open invitations use {organization.max_users ?? "unlimited"} seats.
+            </p>
+          )}
           {inviteError && <div className="error">{inviteError}</div>}
           {createdInvite && <div className="success" style={{ marginTop: 12 }}>Invitation link (shown once): <a href={createdInvite.invitation_url}>{createdInvite.invitation_url}</a></div>}
         </div>

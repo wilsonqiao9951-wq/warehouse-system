@@ -10,28 +10,49 @@ from sqlalchemy.orm import Session, with_loader_criteria
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import decode_access_token
+from app.services.commercial import require_subscription_access
 from app.models import (
     AuditLog,
+    BillingLifecycleEvent,
     CompletionPolicy,
     Customer,
     Equipment,
+    ExternalIntegration,
+    ExternalSyncLog,
+    ExternalWorkOrderLink,
     ImportBatch,
     InventoryNotification,
+    InventoryCountLine,
+    InventoryCountSession,
     InventoryTransaction,
     JobStatus,
+    MachineKnowledgeEntry,
+    MachineKnowledgeProfile,
     Organization,
+    OrganizationBillingAccount,
+    OrganizationDataExport,
+    OrganizationDomain,
+    OrganizationUsagePeriod,
     Part,
     PartMachineAssociation,
+    PartRecognitionCandidate,
+    PartRecognitionObservation,
     QCPicture,
     ReplenishmentRequest,
+    VehicleReturnRequest,
     ReturnEquipment,
     StorageLocation,
+    SubscriptionNotice,
     User,
     UserDevice,
     UserInvitation,
     UserRole,
     Warehouse,
     WorkOrder,
+    WorkOrderFormAction,
+    WorkOrderFormConflict,
+    WorkOrderFormField,
+    WorkOrderFormTemplate,
     WorkOrderPart,
     WorkOrderPartMemory,
     WorkOrderVoiceNote,
@@ -42,13 +63,30 @@ TENANT_MODELS = (
     CompletionPolicy,
     Customer,
     Equipment,
+    ExternalIntegration,
+    ExternalSyncLog,
+    ExternalWorkOrderLink,
+    BillingLifecycleEvent,
+    OrganizationDomain,
+    OrganizationBillingAccount,
+    OrganizationDataExport,
+    OrganizationUsagePeriod,
+    SubscriptionNotice,
     User,
     UserDevice,
     Warehouse,
     StorageLocation,
     Part,
     PartMachineAssociation,
+    PartRecognitionCandidate,
+    PartRecognitionObservation,
+    MachineKnowledgeProfile,
+    MachineKnowledgeEntry,
     WorkOrder,
+    WorkOrderFormAction,
+    WorkOrderFormConflict,
+    WorkOrderFormField,
+    WorkOrderFormTemplate,
     InventoryTransaction,
     WorkOrderPart,
     WorkOrderPartMemory,
@@ -57,7 +95,10 @@ TENANT_MODELS = (
     ReturnEquipment,
     AuditLog,
     InventoryNotification,
+    InventoryCountSession,
+    InventoryCountLine,
     ReplenishmentRequest,
+    VehicleReturnRequest,
     ImportBatch,
     UserInvitation,
     WorkOrderVoiceNote,
@@ -154,8 +195,10 @@ def get_current_actor(
     if token_organization_id is not None and token_organization_id != user.organization_id:
         raise HTTPException(status_code=401, detail="Token organization is invalid")
     organization = db.get(Organization, user.organization_id)
-    if not organization or (not organization.is_active and not user.is_platform_admin):
-        raise HTTPException(status_code=403, detail="Organization is inactive")
+    require_subscription_access(
+        organization,
+        platform_admin=user.is_platform_admin,
+    )
     db.info["organization_id"] = user.organization_id
     device = None
     device_verified = False
@@ -240,7 +283,9 @@ def require_work_order_execution_scope(db: Session, actor: Actor, work_order_id:
     use the same registered device and claim generation that won the work order.
     """
     require_work_order_scope(db, actor, work_order_id)
-    work_order = db.get(WorkOrder, work_order_id)
+    work_order = db.scalar(
+        select(WorkOrder).where(WorkOrder.id == work_order_id).with_for_update()
+    )
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     if actor.role == UserRole.ADMIN:
@@ -251,7 +296,9 @@ def require_work_order_execution_scope(db: Session, actor: Actor, work_order_id:
 def require_work_order_owner_scope(db: Session, actor: Actor, work_order_id: int) -> WorkOrder:
     """Require the actual claiming engineer for completion attribution."""
     require_work_order_scope(db, actor, work_order_id)
-    work_order = db.get(WorkOrder, work_order_id)
+    work_order = db.scalar(
+        select(WorkOrder).where(WorkOrder.id == work_order_id).with_for_update()
+    )
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
     if actor.auth_method == "test" and actor.role == UserRole.ADMIN:

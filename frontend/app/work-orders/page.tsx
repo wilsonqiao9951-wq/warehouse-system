@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { User, WorkOrder } from "@/types";
+import { User, WorkOrder, WorkOrderFormTemplate } from "@/types";
 import { AppRole, getCurrentRole } from "@/lib/role";
 import ManagerShell from "@/components/manager-shell";
 
@@ -13,10 +13,14 @@ export default function WorkOrdersPage() {
   const searchParams = useSearchParams();
   const [workOrders, setWorkOrders] = useState<WorkOrder[]>([]);
   const [engineers, setEngineers] = useState<User[]>([]);
+  const [formTemplates, setFormTemplates] = useState<WorkOrderFormTemplate[]>([]);
   const [form, setForm] = useState({
     ticket_number: "",
     store_name: "",
     engineer_id: "",
+    form_template_id: "",
+    job_type: "",
+    machine_type: "",
     revenue: "0",
     status: "open"
   });
@@ -44,7 +48,7 @@ export default function WorkOrdersPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [orders, users] = await Promise.all([
+      const [orders, users, templates] = await Promise.all([
         api.listWorkOrders({
           skip: page * pageSize,
           limit: pageSize,
@@ -56,10 +60,12 @@ export default function WorkOrdersPage() {
           date_to: filters.date_to || undefined,
           q: filters.q || undefined
         }),
-        api.listEngineers()
+        api.listEngineers(),
+        api.listWorkOrderFormTemplates()
       ]);
       setWorkOrders(orders);
       setEngineers(users);
+      setFormTemplates(templates);
     } catch (e) {
       setNotice({ type: "error", text: e instanceof Error ? e.message : "Failed to load work orders." });
       setWorkOrders([]);
@@ -112,10 +118,22 @@ export default function WorkOrdersPage() {
         store_name: form.store_name,
         engineer_id: form.engineer_id ? Number(form.engineer_id) : undefined,
         assigned_user_id: form.engineer_id ? Number(form.engineer_id) : undefined,
+        form_template_id: form.form_template_id ? Number(form.form_template_id) : undefined,
+        job_type: form.job_type || undefined,
+        machine_type: form.machine_type || undefined,
         revenue: Number(form.revenue) || 0,
         status: form.status
       });
-      setForm({ ticket_number: "", store_name: "", engineer_id: "", revenue: "0", status: "open" });
+      setForm({
+        ticket_number: "",
+        store_name: "",
+        engineer_id: "",
+        form_template_id: "",
+        job_type: "",
+        machine_type: "",
+        revenue: "0",
+        status: "open"
+      });
       setNotice({ type: "success", text: "Work order created." });
       await load();
     } catch (err) {
@@ -223,6 +241,40 @@ export default function WorkOrdersPage() {
                     </option>
                   ))}
                 </select>
+              </div>
+              <div style={{ marginBottom: 8 }}>
+                <select
+                  value={form.form_template_id}
+                  onChange={(e) => {
+                    const template = formTemplates.find((item) => item.id === Number(e.target.value));
+                    setForm({
+                      ...form,
+                      form_template_id: e.target.value,
+                      status: template?.default_work_order_status || form.status,
+                      job_type: template?.applicable_job_type || form.job_type,
+                      machine_type: template?.applicable_machine_type || form.machine_type
+                    });
+                  }}
+                >
+                  <option value="">No custom form</option>
+                  {formTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name} · {template.fields.length} fields
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="two-col" style={{ marginBottom: 8 }}>
+                <input
+                  placeholder="Job type"
+                  value={form.job_type}
+                  onChange={(e) => setForm({ ...form, job_type: e.target.value })}
+                />
+                <input
+                  placeholder="Machine type"
+                  value={form.machine_type}
+                  onChange={(e) => setForm({ ...form, machine_type: e.target.value })}
+                />
               </div>
               <div style={{ marginBottom: 8 }}>
                 <input

@@ -8,9 +8,10 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -34,13 +35,20 @@ from app.models import (
     Equipment,
     InventoryTransaction,
     InventoryNotification,
+    InventoryCountLine,
+    InventoryCountSession,
     ReplenishmentRequest,
+    VehicleReturnRequest,
     ImportBatch,
     JobStatus,
+    MachineKnowledgeEntry,
+    MachineKnowledgeProfile,
     Organization,
+    OrganizationDomain,
     Part,
     PartMachineAssociation,
-    WorkOrderPartMemory,
+    PartRecognitionCandidate,
+    PartRecognitionObservation,
     QCPicture,
     ReturnEquipment,
     StorageLocation,
@@ -69,10 +77,29 @@ from app.schemas import (
     ReturnEquipmentCreate,
     ReturnEquipmentRead,
     InventoryTransactionCreate,
+    InventoryCountAction,
+    InventoryCountCreate,
+    InventoryCountLineUpsert,
+    InventoryCountRead,
+    InventoryCountLineRead,
     LowStockAlert,
     LocationStockBalance,
     InventoryScanRequest,
     InventoryScanRead,
+    InventoryLocationScanRequest,
+    InventoryLocationScanRead,
+    InventoryLocationLabelRead,
+    MachineKnowledgeEntryAction,
+    MachineKnowledgeEntryCreate,
+    MachineKnowledgeEntryRead,
+    MachineKnowledgeEntryUpdate,
+    MachineKnowledgeDraftGenerate,
+    MachineKnowledgeDraftGenerationRead,
+    MachineKnowledgeEvidenceRead,
+    MachineKnowledgePartRead,
+    MachineKnowledgeProfileCreate,
+    MachineKnowledgeProfileRead,
+    MachineKnowledgeProfileUpdate,
     WorkOrderFlowAction,
     InventoryTransactionRead,
     ImportBatchRead,
@@ -85,11 +112,27 @@ from app.schemas import (
     PartCreate,
     PartRead,
     PartMachineAssociationRead,
+    PartRecognitionCandidateAction,
+    PartRecognitionCandidateRead,
+    PartRecognitionObservationRead,
     WorkOrderPartRecommendation,
     InventoryNotificationRead,
     ReplenishmentRequestRead,
+    ReplenishmentRequestAction,
+    ReplenishmentRequestCreate,
+    ReplenishmentRequestReconcile,
+    VehicleReturnRequestAction,
+    VehicleReturnRequestCreate,
+    VehicleReturnRequestRead,
     OrganizationCreate,
+    OrganizationBrandingRead,
+    OrganizationBrandingUpdate,
+    OrganizationDomainAction,
+    OrganizationDomainRead,
+    OrganizationDomainUpsert,
+    OrganizationEmailIdentityUpdate,
     OrganizationRead,
+    OrganizationSettingsRead,
     OrganizationUpdate,
     PasswordSet,
     StockBalance,
@@ -108,6 +151,7 @@ from app.schemas import (
     WorkOrderRead,
     WorkOrderUpdate,
     WorkOrderServiceContext,
+    WorkOrderServiceIntelligence,
     WorkOrderVoiceNoteRead,
     WarehouseSummary,
 )
@@ -115,11 +159,35 @@ from app.services.inventory import (
     create_transaction,
     get_employee_van_inventory,
     get_stock_quantity,
+    get_available_stock_quantity,
     get_stock_balances,
     get_location_stock_balances,
     get_location_stock_quantity,
     get_work_order_parts_cost,
     use_part_on_work_order,
+    warehouse_is_vehicle,
+    begin_inventory_write,
+)
+from app.services.integration_delivery import enqueue_work_order_event
+from app.services.commercial import (
+    PLAN_DEFAULTS,
+    apply_plan_defaults,
+    consume_monthly_usage,
+    enforce_user_capacity,
+    enforce_warehouse_capacity,
+    lock_organization,
+    organization_usage,
+    require_subscription_access,
+)
+from app.services.recommendations import build_part_recommendations
+from app.services.service_intelligence import build_service_intelligence
+from app.services.visual_recognition import generate_visual_part_candidates
+from app.services.domains import lookup_txt_records, normalize_custom_domain
+from app.services.work_order_forms import (
+    snapshot_template,
+    template_for_assignment,
+    validate_work_order_form_completion,
+    work_order_form_requires_approval,
 )
 
 router = APIRouter()
@@ -192,7 +260,10 @@ def login(
     if (
         not user
         or not user.is_active
-        or (not user.is_platform_admin and (not organization or not organization.is_active))
+        or (
+            not user.is_platform_admin
+            and (not organization or not organization.is_active)
+        )
         or not verify_password(form.password, user.password_hash)
     ):
         raise HTTPException(
@@ -200,6 +271,10 @@ def login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    require_subscription_access(
+        organization,
+        platform_admin=user.is_platform_admin,
+    )
     device_id = None
     if x_device_id or x_device_token:
         if not x_device_id or not x_device_token or not (16 <= len(x_device_id) <= 128) or len(x_device_token) < 32:
@@ -252,8 +327,15 @@ def create_user_invitation(
 ):
     require_roles(actor, UserRole.ADMIN)
     email = payload.email.strip().lower()
+    organization = lock_organization(db, actor.organization_id)
     if db.scalar(select(User.id).where(func.lower(User.email) == email)):
         raise HTTPException(status_code=409, detail="A user with this email already exists")
+    enforce_user_capacity(
+        db,
+        organization,
+        include_pending=True,
+        replacing_email=email,
+    )
     now = datetime.utcnow()
     pending = db.scalars(
         select(UserInvitation).where(
@@ -292,8 +374,10 @@ def _valid_invitation(db: Session, raw_token: str) -> UserInvitation:
     if not invitation or invitation.used_at is not None or invitation.expires_at <= datetime.utcnow():
         raise HTTPException(status_code=400, detail="Invitation is invalid or expired")
     organization = db.get(Organization, invitation.organization_id)
-    if not organization or not organization.is_active:
-        raise HTTPException(status_code=400, detail="Organization is inactive")
+    try:
+        require_subscription_access(organization)
+    except HTTPException as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
     return invitation
 
 
@@ -313,8 +397,27 @@ def invitation_info(token: str, db: Session = Depends(get_db)):
 @router.post("/auth/invitations/accept", response_model=UserRead)
 def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
     invitation = _valid_invitation(db, payload.token)
+    organization = lock_organization(db, invitation.organization_id)
+    db.refresh(invitation)
+    if (
+        invitation.used_at is not None
+        or invitation.expires_at <= datetime.utcnow()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Invitation is invalid or expired",
+        )
+    try:
+        require_subscription_access(organization)
+    except HTTPException as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
     if db.scalar(select(User.id).where(func.lower(User.email) == invitation.email.lower())):
         raise HTTPException(status_code=409, detail="A user with this email already exists")
+    enforce_user_capacity(
+        db,
+        organization,
+        include_pending=False,
+    )
     user = User(
         organization_id=invitation.organization_id,
         name=invitation.name,
@@ -330,19 +433,547 @@ def accept_invitation(payload: InvitationAccept, db: Session = Depends(get_db)):
     return user
 
 
-def _organization_read(db: Session, organization: Organization) -> OrganizationRead:
-    return OrganizationRead(
+def _organization_branding_read(
+    organization: Organization,
+) -> OrganizationBrandingRead:
+    return OrganizationBrandingRead(
+        name=organization.name,
+        slug=organization.slug,
+        brand_logo_url=organization.brand_logo_url,
+        brand_primary_color=organization.brand_primary_color,
+        brand_login_headline=organization.brand_login_headline,
+    )
+
+
+def _organization_settings_read(
+    db: Session,
+    organization: Organization,
+) -> OrganizationSettingsRead:
+    usage = organization_usage(db, organization.id)
+    return OrganizationSettingsRead(
         id=organization.id,
         name=organization.name,
         slug=organization.slug,
         is_active=organization.is_active,
-        total_users=db.scalar(select(func.count(User.id)).where(User.organization_id == organization.id)) or 0,
-        total_parts=db.scalar(select(func.count(Part.id)).where(Part.organization_id == organization.id)) or 0,
+        brand_logo_url=organization.brand_logo_url,
+        brand_primary_color=organization.brand_primary_color,
+        brand_login_headline=organization.brand_login_headline,
+        plan_code=organization.plan_code,
+        subscription_status=organization.subscription_status,
+        trial_ends_at=organization.trial_ends_at,
+        max_users=organization.max_users,
+        max_warehouses=organization.max_warehouses,
+        max_vehicle_warehouses=organization.max_vehicle_warehouses,
+        ai_monthly_limit=organization.ai_monthly_limit,
+        api_monthly_limit=organization.api_monthly_limit,
+        settings_version=organization.settings_version,
+        **usage,
+    )
+
+
+def _organization_read(db: Session, organization: Organization) -> OrganizationRead:
+    settings_read = _organization_settings_read(db, organization)
+    domain = db.scalar(
+        select(OrganizationDomain).where(
+            OrganizationDomain.organization_id == organization.id
+        )
+    )
+    email_sender_address = None
+    if (
+        domain
+        and domain.status == "verified"
+        and domain.email_identity_enabled
+        and domain.email_from_local_part
+    ):
+        email_sender_address = f"{domain.email_from_local_part}@{domain.domain}"
+    return OrganizationRead(
+        **settings_read.model_dump(),
+        total_users=db.scalar(
+            select(func.count(User.id)).where(
+                User.organization_id == organization.id
+            )
+        )
+        or 0,
+        total_parts=db.scalar(
+            select(func.count(Part.id)).where(
+                Part.organization_id == organization.id
+            )
+        )
+        or 0,
         total_work_orders=db.scalar(
-            select(func.count(WorkOrder.id)).where(WorkOrder.organization_id == organization.id)
-        ) or 0,
+            select(func.count(WorkOrder.id)).where(
+                WorkOrder.organization_id == organization.id
+            )
+        )
+        or 0,
+        custom_domain=domain.domain if domain else None,
+        custom_domain_status=domain.status if domain else None,
+        email_sender_address=email_sender_address,
         created_at=organization.created_at,
     )
+
+
+def _platform_audit(
+    db: Session,
+    actor: Actor,
+    organization: Organization,
+    action: str,
+    metadata: dict,
+) -> None:
+    db.add(
+        AuditLog(
+            organization_id=organization.id,
+            user_id=actor.user_id,
+            action=action,
+            entity_type="organization",
+            entity_id=organization.id,
+            metadata_json=json.dumps(
+                {
+                    "actor_role": actor.role.value,
+                    "auth_method": actor.auth_method,
+                    "device_id": actor.device_id,
+                    **metadata,
+                },
+                default=str,
+                separators=(",", ":"),
+            ),
+            timestamp=datetime.utcnow(),
+        )
+    )
+
+
+def _require_custom_domain_feature(organization: Organization) -> None:
+    if organization.plan_code == "starter":
+        raise HTTPException(
+            status_code=403,
+            detail="Custom domains are not included in the Starter plan.",
+        )
+
+
+def _new_domain_challenge(domain: str) -> tuple[str, str, str]:
+    token = secrets.token_urlsafe(24)
+    return (
+        token,
+        f"_openpartsflow-challenge.{domain}",
+        f"openpartsflow-verification={token}",
+    )
+
+
+def _organization_domain_read(row: OrganizationDomain) -> OrganizationDomainRead:
+    sender_address = None
+    if (
+        row.status == "verified"
+        and row.email_identity_enabled
+        and row.email_from_local_part
+    ):
+        sender_address = f"{row.email_from_local_part}@{row.domain}"
+    return OrganizationDomainRead(
+        id=row.id,
+        organization_id=row.organization_id,
+        domain=row.domain,
+        status=row.status,
+        verification_name=row.verification_name,
+        verification_value=row.verification_value,
+        last_checked_at=row.last_checked_at,
+        verification_error=row.verification_error,
+        verified_at=row.verified_at,
+        email_from_name=row.email_from_name,
+        email_from_local_part=row.email_from_local_part,
+        email_identity_enabled=row.email_identity_enabled,
+        email_sender_address=sender_address,
+        login_url=f"https://{row.domain}/login" if row.status == "verified" else None,
+        version=row.version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _organization_domain_or_404(db: Session) -> OrganizationDomain:
+    row = db.scalar(select(OrganizationDomain))
+    if not row:
+        raise HTTPException(status_code=404, detail="Custom domain is not configured")
+    return row
+
+
+@router.get(
+    "/auth/organization-branding/{slug}",
+    response_model=OrganizationBrandingRead,
+)
+def public_organization_branding(
+    slug: str,
+    db: Session = Depends(get_db),
+):
+    organization = db.scalar(
+        select(Organization).where(
+            Organization.slug == slug.strip().lower(),
+            Organization.is_active.is_(True),
+        )
+    )
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _organization_branding_read(organization)
+
+
+@router.get(
+    "/auth/organization-branding/by-domain/{domain}",
+    response_model=OrganizationBrandingRead,
+)
+def public_organization_branding_by_domain(
+    domain: str,
+    db: Session = Depends(get_db),
+):
+    try:
+        normalized = normalize_custom_domain(domain)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Organization not found") from None
+    organization = db.scalar(
+        select(Organization)
+        .join(
+            OrganizationDomain,
+            OrganizationDomain.organization_id == Organization.id,
+        )
+        .where(
+            OrganizationDomain.domain == normalized,
+            OrganizationDomain.status == "verified",
+            Organization.is_active.is_(True),
+            Organization.plan_code.in_(("professional", "enterprise")),
+        )
+    )
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _organization_branding_read(organization)
+
+
+@router.get("/organization/settings", response_model=OrganizationSettingsRead)
+def get_organization_settings(
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _organization_settings_read(db, organization)
+
+
+@router.patch(
+    "/organization/settings/branding",
+    response_model=OrganizationSettingsRead,
+)
+def update_organization_branding(
+    payload: OrganizationBrandingUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    organization = lock_organization(db, actor.organization_id)
+    if organization.settings_version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Organization settings changed; refresh before saving.",
+        )
+    fields = payload.model_fields_set - {"expected_version"}
+    if (
+        "brand_primary_color" in fields
+        and payload.brand_primary_color is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Brand primary color cannot be empty",
+        )
+    for field_name in fields:
+        setattr(organization, field_name, getattr(payload, field_name))
+    organization.settings_version += 1
+    db.add(organization)
+    _audit(
+        db,
+        actor,
+        "organization_branding_updated",
+        "organization",
+        organization.id,
+        {
+            "changed_fields": sorted(fields),
+            "settings_version": organization.settings_version,
+        },
+    )
+    db.commit()
+    db.refresh(organization)
+    return _organization_settings_read(db, organization)
+
+
+@router.get(
+    "/organization/domain",
+    response_model=OrganizationDomainRead | None,
+)
+def get_organization_domain(
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    _require_custom_domain_feature(organization)
+    row = db.scalar(select(OrganizationDomain))
+    return _organization_domain_read(row) if row else None
+
+
+@router.put(
+    "/organization/domain",
+    response_model=OrganizationDomainRead,
+)
+def put_organization_domain(
+    payload: OrganizationDomainUpsert,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = lock_organization(db, actor.organization_id)
+    _require_custom_domain_feature(organization)
+    row = db.scalar(select(OrganizationDomain).with_for_update())
+    now = datetime.utcnow()
+    created = row is None
+    if row:
+        if payload.expected_version is None or row.version != payload.expected_version:
+            raise HTTPException(
+                status_code=409,
+                detail="Custom domain changed; refresh before saving.",
+            )
+        if row.domain == payload.domain:
+            db.commit()
+            return _organization_domain_read(row)
+        token, name, value = _new_domain_challenge(payload.domain)
+        row.domain = payload.domain
+        row.status = "pending"
+        row.verification_token = token
+        row.verification_name = name
+        row.verification_value = value
+        row.last_checked_at = None
+        row.verification_error = None
+        row.verified_at = None
+        row.email_identity_enabled = False
+        row.updated_by = actor.user_id
+        row.version += 1
+    else:
+        if payload.expected_version not in {None, 0}:
+            raise HTTPException(status_code=409, detail="Custom domain does not exist")
+        token, name, value = _new_domain_challenge(payload.domain)
+        row = OrganizationDomain(
+            organization_id=actor.organization_id,
+            domain=payload.domain,
+            status="pending",
+            verification_token=token,
+            verification_name=name,
+            verification_value=value,
+            created_by=actor.user_id,
+            updated_by=actor.user_id,
+        )
+        db.add(row)
+    try:
+        db.flush()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="This custom domain is already assigned to another organization.",
+        ) from exc
+    _audit(
+        db,
+        actor,
+        "organization_domain_created" if created else "organization_domain_changed",
+        "organization_domain",
+        row.id,
+        {"domain": row.domain, "version": row.version, "timestamp": now},
+    )
+    db.commit()
+    db.refresh(row)
+    return _organization_domain_read(row)
+
+
+@router.post(
+    "/organization/domain/verify",
+    response_model=OrganizationDomainRead,
+)
+async def verify_organization_domain(
+    payload: OrganizationDomainAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    _require_custom_domain_feature(organization)
+    row = _organization_domain_or_404(db)
+    if row.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Custom domain version is stale")
+    now = datetime.utcnow()
+    cooldown = max(1, settings.custom_domain_verification_cooldown_seconds)
+    if row.last_checked_at and now - row.last_checked_at < timedelta(seconds=cooldown):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Wait {cooldown} seconds between DNS verification checks.",
+        )
+    expected_name = row.verification_name
+    expected_value = row.verification_value
+    records, resolver_error = await lookup_txt_records(expected_name)
+
+    lock_organization(db, actor.organization_id)
+    row = _organization_domain_or_404(db)
+    if (
+        row.version != payload.expected_version
+        or row.verification_name != expected_name
+        or row.verification_value != expected_value
+    ):
+        raise HTTPException(status_code=409, detail="Custom domain changed during verification")
+    matched = any(
+        secrets.compare_digest(record, expected_value)
+        for record in records
+    )
+    row.last_checked_at = now
+    if matched:
+        row.status = "verified"
+        row.verified_at = row.verified_at or now
+        row.verification_error = None
+    else:
+        row.verification_error = resolver_error or (
+            "Required TXT verification value was not found yet."
+        )
+    row.updated_by = actor.user_id
+    row.version += 1
+    db.add(row)
+    _audit(
+        db,
+        actor,
+        "organization_domain_verification_checked",
+        "organization_domain",
+        row.id,
+        {
+            "domain": row.domain,
+            "verified": matched,
+            "resolver_available": resolver_error is None,
+            "version": row.version,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _organization_domain_read(row)
+
+
+@router.post(
+    "/organization/domain/rotate-challenge",
+    response_model=OrganizationDomainRead,
+)
+def rotate_organization_domain_challenge(
+    payload: OrganizationDomainAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = lock_organization(db, actor.organization_id)
+    _require_custom_domain_feature(organization)
+    row = _organization_domain_or_404(db)
+    if row.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Custom domain version is stale")
+    token, name, value = _new_domain_challenge(row.domain)
+    row.verification_token = token
+    row.verification_name = name
+    row.verification_value = value
+    row.status = "pending"
+    row.last_checked_at = None
+    row.verification_error = None
+    row.verified_at = None
+    row.email_identity_enabled = False
+    row.updated_by = actor.user_id
+    row.version += 1
+    db.add(row)
+    _audit(
+        db,
+        actor,
+        "organization_domain_challenge_rotated",
+        "organization_domain",
+        row.id,
+        {"domain": row.domain, "version": row.version},
+    )
+    db.commit()
+    db.refresh(row)
+    return _organization_domain_read(row)
+
+
+@router.patch(
+    "/organization/domain/email-identity",
+    response_model=OrganizationDomainRead,
+)
+def update_organization_email_identity(
+    payload: OrganizationEmailIdentityUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = lock_organization(db, actor.organization_id)
+    _require_custom_domain_feature(organization)
+    row = _organization_domain_or_404(db)
+    if row.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Custom domain version is stale")
+    if payload.enabled and row.status != "verified":
+        raise HTTPException(
+            status_code=409,
+            detail="Verify domain ownership before enabling its email identity.",
+        )
+    row.email_from_name = payload.from_name
+    row.email_from_local_part = payload.local_part
+    row.email_identity_enabled = payload.enabled
+    row.updated_by = actor.user_id
+    row.version += 1
+    db.add(row)
+    _audit(
+        db,
+        actor,
+        "organization_email_identity_updated",
+        "organization_domain",
+        row.id,
+        {
+            "domain": row.domain,
+            "enabled": row.email_identity_enabled,
+            "version": row.version,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return _organization_domain_read(row)
+
+
+@router.delete(
+    "/organization/domain",
+    status_code=204,
+)
+def delete_organization_domain(
+    payload: OrganizationDomainAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = lock_organization(db, actor.organization_id)
+    _require_custom_domain_feature(organization)
+    row = _organization_domain_or_404(db)
+    if row.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Custom domain version is stale")
+    row_id = row.id
+    row_domain = row.domain
+    _audit(
+        db,
+        actor,
+        "organization_domain_removed",
+        "organization_domain",
+        row_id,
+        {"domain": row_domain, "version": row.version},
+    )
+    db.delete(row)
+    db.commit()
+    return None
 
 
 @router.get("/platform/organizations", response_model=list[OrganizationRead])
@@ -369,6 +1000,15 @@ def create_organization(
         raise HTTPException(status_code=409, detail="Administrator email already exists")
 
     organization = Organization(name=payload.name.strip(), slug=slug)
+    apply_plan_defaults(organization, payload.plan_code)
+    if payload.trial_days:
+        organization.subscription_status = "trialing"
+        organization.trial_ends_at = datetime.utcnow() + timedelta(
+            days=payload.trial_days
+        )
+    else:
+        organization.subscription_status = "active"
+        organization.trial_ends_at = None
     db.add(organization)
     db.flush()
     administrator = User(
@@ -381,6 +1021,19 @@ def create_organization(
         is_platform_admin=False,
     )
     db.add(administrator)
+    db.flush()
+    _platform_audit(
+        db,
+        actor,
+        organization,
+        "organization_created",
+        {
+            "plan_code": organization.plan_code,
+            "subscription_status": organization.subscription_status,
+            "trial_ends_at": organization.trial_ends_at,
+            "administrator_user_id": administrator.id,
+        },
+    )
     db.commit()
     db.refresh(organization)
     return _organization_read(db, organization)
@@ -395,11 +1048,52 @@ def update_organization(
 ):
     require_platform_admin(actor)
     db.info.pop("organization_id", None)
-    organization = db.get(Organization, organization_id)
-    if not organization:
-        raise HTTPException(status_code=404, detail="Organization not found")
-    organization.is_active = payload.is_active
+    organization = lock_organization(db, organization_id)
+    if organization.settings_version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Organization settings changed; refresh before saving.",
+        )
+    fields = payload.model_fields_set - {"expected_version"}
+    audit_fields = set(fields)
+    if payload.plan_code is not None:
+        audit_fields.update(PLAN_DEFAULTS[payload.plan_code])
+    before = {
+        field_name: getattr(organization, field_name)
+        for field_name in audit_fields
+    }
+    if payload.plan_code is not None:
+        apply_plan_defaults(organization, payload.plan_code)
+    for field_name in fields - {"plan_code"}:
+        setattr(organization, field_name, getattr(payload, field_name))
+    if (
+        organization.subscription_status == "trialing"
+        and (
+            organization.trial_ends_at is None
+            or organization.trial_ends_at <= datetime.utcnow()
+        )
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="A trialing organization requires a future trial end.",
+        )
+    organization.settings_version += 1
     db.add(organization)
+    _platform_audit(
+        db,
+        actor,
+        organization,
+        "organization_subscription_updated",
+        {
+            "changed_fields": sorted(audit_fields),
+            "before": before,
+            "after": {
+                field_name: getattr(organization, field_name)
+                for field_name in audit_fields
+            },
+            "settings_version": organization.settings_version,
+        },
+    )
     db.commit()
     db.refresh(organization)
     return _organization_read(db, organization)
@@ -503,6 +1197,36 @@ def _image_extension(data: bytes) -> str | None:
         b"heic", b"heix", b"hevc", b"hevx", b"mif1",
     }:
         return ".heic"
+    return None
+
+
+def _knowledge_media_file_type(data: bytes) -> tuple[str, str, str] | None:
+    image_extension = _image_extension(data)
+    if image_extension:
+        image_mime_types = {
+            ".jpg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".heic": "image/heic",
+        }
+        return "photo", image_extension, image_mime_types[image_extension]
+    if data.startswith(b"\x1aE\xdf\xa3"):
+        return "video", ".webm", "video/webm"
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        brand = data[8:12]
+        if brand == b"qt  ":
+            return "video", ".mov", "video/quicktime"
+        if brand in {
+            b"isom",
+            b"iso2",
+            b"mp41",
+            b"mp42",
+            b"avc1",
+            b"M4V ",
+            b"MSNV",
+        }:
+            return "video", ".mp4", "video/mp4"
     return None
 
 
@@ -613,9 +1337,32 @@ def list_work_order_voice_notes(
 @router.post("/users", response_model=UserRead)
 def create_user(payload: UserCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN)
+    email = (payload.email or "").strip().lower() or None
+    organization = lock_organization(db, actor.organization_id)
+    enforce_user_capacity(
+        db,
+        organization,
+        include_pending=True,
+        replacing_email=email,
+    )
     data = payload.model_dump(exclude={"password"})
+    data["email"] = email
     item = User(**data, password_hash=hash_password(payload.password) if payload.password else None)
     db.add(item)
+    db.flush()
+    if email:
+        now = datetime.utcnow()
+        pending = db.scalars(
+            select(UserInvitation).where(
+                UserInvitation.organization_id == actor.organization_id,
+                func.lower(UserInvitation.email) == email,
+                UserInvitation.used_at.is_(None),
+                UserInvitation.expires_at > now,
+            )
+        ).all()
+        for invitation in pending:
+            invitation.used_at = now
+            db.add(invitation)
     db.commit()
     db.refresh(item)
     return item
@@ -653,6 +1400,23 @@ def create_warehouse(payload: WarehouseCreate, db: Session = Depends(get_db), ac
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     _require_tenant_user(db, payload.assigned_user_id, "assigned_user_id")
     values = payload.model_dump()
+    values["warehouse_type"] = (payload.warehouse_type or "main").strip().lower()
+    owner = db.get(User, payload.assigned_user_id) if payload.assigned_user_id else None
+    if owner and owner.role == UserRole.ENGINEER and values["warehouse_type"] == "main":
+        values["warehouse_type"] = "van"
+    if values["warehouse_type"] not in {"main", "van"}:
+        raise HTTPException(status_code=422, detail="warehouse_type must be main or van")
+    if values["warehouse_type"] == "van" and (
+        not owner or not owner.is_active or owner.role != UserRole.ENGINEER
+    ):
+        raise HTTPException(status_code=422, detail="A van warehouse must be assigned to an active engineer")
+    organization = lock_organization(db, actor.organization_id)
+    if values["is_active"]:
+        enforce_warehouse_capacity(
+            db,
+            organization,
+            values["warehouse_type"],
+        )
     values["code"] = (payload.code or payload.name).strip().upper().replace(" ", "-")
     item = Warehouse(**values)
     db.add(item)
@@ -701,6 +1465,978 @@ def list_storage_locations(
             raise HTTPException(status_code=404, detail="Warehouse not found")
         query = query.where(StorageLocation.warehouse_id == warehouse_id)
     return db.scalars(query).all()
+
+
+def _knowledge_model_key(value: str) -> str:
+    key = value.strip().casefold()
+    if not key:
+        raise HTTPException(status_code=422, detail="Machine model is required")
+    return key
+
+
+def _knowledge_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return value.strip() or None
+
+
+def _knowledge_media_url(value: str | None) -> str | None:
+    cleaned = _knowledge_optional_text(value)
+    if cleaned and not cleaned.lower().startswith(("https://", "http://", "/uploads/")):
+        raise HTTPException(
+            status_code=422,
+            detail="Knowledge media URL must use http(s) or an uploaded /uploads/ path",
+        )
+    return cleaned
+
+
+def _knowledge_part_read(
+    part: Part,
+    association: PartMachineAssociation | None = None,
+) -> MachineKnowledgePartRead:
+    return MachineKnowledgePartRead(
+        id=part.id,
+        part_number=part.part_number,
+        name=part.name,
+        image_url=part.image_url,
+        recognition_source=association.recognition_source if association else None,
+        confidence=association.confidence if association else None,
+        confirmed_count=association.confirmed_count if association else None,
+    )
+
+
+def _knowledge_entry_read(
+    db: Session,
+    actor: Actor,
+    entry: MachineKnowledgeEntry,
+) -> MachineKnowledgeEntryRead:
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    related_part = db.get(Part, entry.related_part_id) if entry.related_part_id else None
+    alternative_for_part = (
+        db.get(Part, entry.alternative_for_part_id)
+        if entry.alternative_for_part_id
+        else None
+    )
+    return MachineKnowledgeEntryRead(
+        id=entry.id,
+        organization_id=entry.organization_id,
+        profile_id=entry.profile_id,
+        entry_type=entry.entry_type,
+        title=entry.title,
+        content=entry.content,
+        fault_code=entry.fault_code,
+        related_part=_knowledge_part_read(related_part) if related_part else None,
+        related_part_role=entry.related_part_role,
+        alternative_for_part=(
+            _knowledge_part_read(alternative_for_part)
+            if alternative_for_part
+            else None
+        ),
+        installation_location=entry.installation_location,
+        source_work_order_id=entry.source_work_order_id,
+        media_url=entry.media_url,
+        media_mime_type=entry.media_mime_type,
+        media_size_bytes=entry.media_size_bytes,
+        sort_order=entry.sort_order,
+        status=entry.status,
+        version=entry.version,
+        created_by=entry.created_by,
+        updated_by=entry.updated_by,
+        published_by=entry.published_by,
+        published_at=entry.published_at,
+        archived_by=entry.archived_by,
+        archived_at=entry.archived_at,
+        can_edit=curator and entry.status == "draft",
+        can_publish=actor.role == UserRole.ADMIN and entry.status == "draft",
+        can_archive=actor.role == UserRole.ADMIN and entry.status in {"draft", "published"},
+        can_reopen=actor.role == UserRole.ADMIN and entry.status == "archived",
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
+    )
+
+
+def _machine_knowledge_profile_read(
+    db: Session,
+    actor: Actor,
+    profile: MachineKnowledgeProfile,
+) -> MachineKnowledgeProfileRead:
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    entries_stmt = select(MachineKnowledgeEntry).where(
+        MachineKnowledgeEntry.profile_id == profile.id
+    )
+    if not curator:
+        entries_stmt = entries_stmt.where(MachineKnowledgeEntry.status == "published")
+    entries = db.scalars(
+        entries_stmt.order_by(
+            MachineKnowledgeEntry.entry_type,
+            MachineKnowledgeEntry.sort_order,
+            MachineKnowledgeEntry.id,
+        )
+    ).all()
+
+    associations = db.execute(
+        select(PartMachineAssociation, Part)
+        .join(Part, Part.id == PartMachineAssociation.part_id)
+        .where(
+            func.lower(func.trim(PartMachineAssociation.machine_model))
+            == profile.model_key
+        )
+        .order_by(
+            PartMachineAssociation.confidence.desc(),
+            PartMachineAssociation.confirmed_count.desc(),
+            Part.part_number,
+        )
+    ).all()
+
+    evidence = db.execute(
+        select(
+            func.count(WorkOrder.id),
+            func.count(WorkOrder.first_time_fix),
+            func.coalesce(
+                func.sum(case((WorkOrder.first_time_fix.is_(True), 1), else_=0)),
+                0,
+            ),
+            func.avg(WorkOrder.repair_duration_minutes),
+            func.max(WorkOrder.completed_at),
+        ).where(
+            WorkOrder.is_locked.is_(True),
+            WorkOrder.completed_at.is_not(None),
+            func.lower(func.trim(WorkOrder.machine_type)) == profile.model_key,
+        )
+    ).one()
+    completed_count = int(evidence[0] or 0)
+    labeled_count = int(evidence[1] or 0)
+    success_count = int(evidence[2] or 0)
+
+    return MachineKnowledgeProfileRead(
+        id=profile.id,
+        organization_id=profile.organization_id,
+        manufacturer=profile.manufacturer,
+        model=profile.model,
+        equipment_type=profile.equipment_type,
+        summary=profile.summary,
+        version=profile.version,
+        is_active=profile.is_active,
+        created_by=profile.created_by,
+        updated_by=profile.updated_by,
+        can_edit=curator,
+        can_add_entry=curator and profile.is_active,
+        entries=[_knowledge_entry_read(db, actor, entry) for entry in entries],
+        related_parts=[
+            _knowledge_part_read(part, association)
+            for association, part in associations
+        ],
+        evidence=MachineKnowledgeEvidenceRead(
+            completed_work_orders=completed_count,
+            labeled_outcomes=labeled_count,
+            first_time_fix_rate=(
+                success_count / labeled_count if labeled_count else None
+            ),
+            average_repair_minutes=(
+                float(evidence[3]) if evidence[3] is not None else None
+            ),
+            latest_completed_at=evidence[4],
+        ),
+        created_at=profile.created_at,
+        updated_at=profile.updated_at,
+    )
+
+
+def _validate_machine_knowledge_links(
+    db: Session,
+    profile: MachineKnowledgeProfile,
+    *,
+    related_part_id: int | None,
+    source_work_order_id: int | None,
+    related_part_role: str | None = None,
+    alternative_for_part_id: int | None = None,
+) -> None:
+    if related_part_id is not None and not db.get(Part, related_part_id):
+        raise HTTPException(
+            status_code=400,
+            detail="related_part_id is not available in this organization",
+        )
+    if related_part_role is not None and related_part_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="A related part is required when a part role is selected",
+        )
+    if alternative_for_part_id is not None:
+        if not db.get(Part, alternative_for_part_id):
+            raise HTTPException(
+                status_code=400,
+                detail="alternative_for_part_id is not available in this organization",
+            )
+        if related_part_role != "alternative":
+            raise HTTPException(
+                status_code=422,
+                detail="alternative_for_part_id is valid only for an alternative part",
+            )
+        if alternative_for_part_id == related_part_id:
+            raise HTTPException(
+                status_code=422,
+                detail="An alternative part must differ from the primary part",
+            )
+    if related_part_role == "alternative" and alternative_for_part_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="An alternative part must identify the primary part it replaces",
+        )
+    if source_work_order_id is None:
+        return
+    work_order = db.get(WorkOrder, source_work_order_id)
+    if not work_order:
+        raise HTTPException(
+            status_code=400,
+            detail="source_work_order_id is not available in this organization",
+        )
+    if not work_order.is_locked or not work_order.completed_at:
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge evidence must reference a completed work order",
+        )
+    if _knowledge_model_key(work_order.machine_type or "") != profile.model_key:
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge evidence work order must use the same machine model",
+        )
+
+
+@router.get(
+    "/machine-knowledge",
+    response_model=list[MachineKnowledgeProfileRead],
+)
+def list_machine_knowledge(
+    q: str | None = Query(default=None, max_length=255),
+    model: str | None = Query(default=None, max_length=255),
+    include_inactive: bool = False,
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    if include_inactive and not curator:
+        raise HTTPException(status_code=403, detail="Inactive knowledge is curator-only")
+    stmt = select(MachineKnowledgeProfile)
+    if not include_inactive:
+        stmt = stmt.where(MachineKnowledgeProfile.is_active.is_(True))
+    if not curator:
+        stmt = stmt.where(
+            MachineKnowledgeProfile.entries.any(
+                MachineKnowledgeEntry.status == "published"
+            )
+        )
+    if model:
+        stmt = stmt.where(
+            MachineKnowledgeProfile.model_key == _knowledge_model_key(model)
+        )
+    if q and q.strip():
+        like = f"%{q.strip().casefold()}%"
+        stmt = stmt.where(
+            or_(
+                func.lower(MachineKnowledgeProfile.model).like(like),
+                func.lower(func.coalesce(MachineKnowledgeProfile.manufacturer, "")).like(like),
+                func.lower(func.coalesce(MachineKnowledgeProfile.equipment_type, "")).like(like),
+                func.lower(func.coalesce(MachineKnowledgeProfile.summary, "")).like(like),
+            )
+        )
+    profiles = db.scalars(
+        stmt.order_by(
+            MachineKnowledgeProfile.manufacturer,
+            MachineKnowledgeProfile.model,
+            MachineKnowledgeProfile.id,
+        ).limit(limit)
+    ).all()
+    return [
+        _machine_knowledge_profile_read(db, actor, profile)
+        for profile in profiles
+    ]
+
+
+@router.get(
+    "/machine-knowledge/{profile_id}",
+    response_model=MachineKnowledgeProfileRead,
+)
+def get_machine_knowledge(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    profile = db.get(MachineKnowledgeProfile, profile_id)
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    if not profile or (not curator and not profile.is_active):
+        raise HTTPException(status_code=404, detail="Machine knowledge profile not found")
+    if not curator and not db.scalar(
+        select(MachineKnowledgeEntry.id).where(
+            MachineKnowledgeEntry.profile_id == profile.id,
+            MachineKnowledgeEntry.status == "published",
+        )
+    ):
+        raise HTTPException(status_code=404, detail="Machine knowledge profile not found")
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.post(
+    "/machine-knowledge",
+    response_model=MachineKnowledgeProfileRead,
+)
+def create_machine_knowledge(
+    payload: MachineKnowledgeProfileCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = MachineKnowledgeProfile(
+        model=payload.model.strip(),
+        model_key=_knowledge_model_key(payload.model),
+        manufacturer=_knowledge_optional_text(payload.manufacturer),
+        equipment_type=_knowledge_optional_text(payload.equipment_type),
+        summary=_knowledge_optional_text(payload.summary),
+        created_by=actor.user_id,
+        updated_by=actor.user_id,
+    )
+    db.add(profile)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A knowledge profile already exists for this machine model",
+        )
+    _audit(
+        db,
+        actor,
+        "create_machine_knowledge_profile",
+        "machine_knowledge_profile",
+        profile.id,
+        {"model": profile.model},
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.patch(
+    "/machine-knowledge/{profile_id}",
+    response_model=MachineKnowledgeProfileRead,
+)
+def update_machine_knowledge(
+    profile_id: int,
+    payload: MachineKnowledgeProfileUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = db.scalar(
+        select(MachineKnowledgeProfile)
+        .where(MachineKnowledgeProfile.id == profile_id)
+        .with_for_update()
+    )
+    if not profile:
+        raise HTTPException(status_code=404, detail="Machine knowledge profile not found")
+    if profile.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Machine knowledge profile changed; refresh before editing",
+        )
+    changes = payload.model_dump(exclude={"expected_version"}, exclude_unset=True)
+    if "model" in changes:
+        changes["model"] = changes["model"].strip()
+        changes["model_key"] = _knowledge_model_key(changes["model"])
+    for field in {"manufacturer", "equipment_type", "summary"} & changes.keys():
+        changes[field] = _knowledge_optional_text(changes[field])
+    for field, value in changes.items():
+        setattr(profile, field, value)
+    profile.updated_by = actor.user_id
+    profile.version += 1
+    db.add(profile)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A knowledge profile already exists for this machine model",
+        )
+    _audit(
+        db,
+        actor,
+        "update_machine_knowledge_profile",
+        "machine_knowledge_profile",
+        profile.id,
+        {"fields": sorted(changes), "version": profile.version},
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.post(
+    "/machine-knowledge/{profile_id}/entries",
+    response_model=MachineKnowledgeProfileRead,
+)
+def create_machine_knowledge_entry(
+    profile_id: int,
+    payload: MachineKnowledgeEntryCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = db.get(MachineKnowledgeProfile, profile_id)
+    if not profile or not profile.is_active:
+        raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
+    _validate_machine_knowledge_links(
+        db,
+        profile,
+        related_part_id=payload.related_part_id,
+        source_work_order_id=payload.source_work_order_id,
+        related_part_role=payload.related_part_role,
+        alternative_for_part_id=payload.alternative_for_part_id,
+    )
+    media_url = _knowledge_media_url(payload.media_url)
+    if payload.entry_type in {"photo", "video"} and not media_url:
+        raise HTTPException(
+            status_code=422,
+            detail="Photo and video knowledge entries require a media URL",
+        )
+    entry = MachineKnowledgeEntry(
+        profile_id=profile.id,
+        entry_type=payload.entry_type,
+        title=payload.title.strip(),
+        content=payload.content.strip(),
+        fault_code=_knowledge_optional_text(payload.fault_code),
+        related_part_id=payload.related_part_id,
+        related_part_role=payload.related_part_role,
+        alternative_for_part_id=payload.alternative_for_part_id,
+        installation_location=_knowledge_optional_text(payload.installation_location),
+        source_work_order_id=payload.source_work_order_id,
+        media_url=media_url,
+        sort_order=payload.sort_order,
+        created_by=actor.user_id,
+        updated_by=actor.user_id,
+    )
+    db.add(entry)
+    db.flush()
+    _audit(
+        db,
+        actor,
+        "create_machine_knowledge_entry",
+        "machine_knowledge_entry",
+        entry.id,
+        {
+            "profile_id": profile.id,
+            "entry_type": entry.entry_type,
+            "source_work_order_id": entry.source_work_order_id,
+        },
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+def _work_order_knowledge_specs(
+    db: Session,
+    work_order: WorkOrder,
+) -> list[dict]:
+    specs: list[dict] = []
+    fault_lines = []
+    if work_order.fault_type:
+        fault_lines.append(f"Fault type: {work_order.fault_type.strip()}")
+    if work_order.error_code:
+        fault_lines.append(f"Error code: {work_order.error_code.strip()}")
+    if work_order.problem_description:
+        fault_lines.append(
+            f"Observed problem: {work_order.problem_description.strip()}"
+        )
+    if work_order.environment_info:
+        fault_lines.append(
+            f"Field conditions: {work_order.environment_info.strip()}"
+        )
+    if fault_lines:
+        fault_name = (
+            _knowledge_optional_text(work_order.fault_type)
+            or _knowledge_optional_text(work_order.error_code)
+            or _knowledge_optional_text(work_order.job_type)
+            or work_order.ticket_number
+        )
+        specs.append(
+            {
+                "origin_key": f"work_order:{work_order.id}:fault",
+                "entry_type": "fault",
+                "title": f"Field fault: {fault_name}"[:255],
+                "content": "\n".join(fault_lines)[:20000],
+                "fault_code": _knowledge_optional_text(work_order.error_code),
+                "sort_order": 100,
+            }
+        )
+
+    if work_order.repair_result:
+        repair_lines = [
+            f"Repair performed and verified: {work_order.repair_result.strip()}"
+        ]
+        if work_order.final_outcome:
+            repair_lines.append(f"Final outcome: {work_order.final_outcome.strip()}")
+        if work_order.repair_duration_minutes is not None:
+            repair_lines.append(
+                f"Recorded field duration: {work_order.repair_duration_minutes} minutes"
+            )
+        repair_lines.append(
+            "Review this draft and convert the result into reusable ordered steps before publishing."
+        )
+        specs.append(
+            {
+                "origin_key": f"work_order:{work_order.id}:repair",
+                "entry_type": "repair_step",
+                "title": f"Verified repair from {work_order.ticket_number}"[:255],
+                "content": "\n".join(repair_lines)[:20000],
+                "sort_order": 200,
+            }
+        )
+
+    part_rows = db.execute(
+        select(WorkOrderPart, Part)
+        .join(Part, Part.id == WorkOrderPart.part_id)
+        .where(WorkOrderPart.work_order_id == work_order.id)
+        .order_by(Part.part_number, WorkOrderPart.id)
+    ).all()
+    part_totals: dict[int, dict] = {}
+    for usage, part in part_rows:
+        aggregate = part_totals.setdefault(
+            part.id,
+            {"part": part, "quantity": 0},
+        )
+        aggregate["quantity"] += usage.quantity
+
+    successful_repair = bool(
+        work_order.first_time_fix is True
+        and not work_order.is_rework
+        and (work_order.final_outcome or "").strip().casefold()
+        in {"repaired", "fixed", "resolved", "success", "successful"}
+    )
+    for position, aggregate in enumerate(part_totals.values(), start=1):
+        part = aggregate["part"]
+        quantity = aggregate["quantity"]
+        part_role = "recommended" if successful_repair else "reference"
+        outcome_note = (
+            "This part came from a labeled successful first-time repair."
+            if successful_repair
+            else "This usage is reference evidence only until a successful outcome is confirmed."
+        )
+        specs.append(
+            {
+                "origin_key": f"work_order:{work_order.id}:part:{part.id}",
+                "entry_type": "note",
+                "title": f"{part.part_number} used on {work_order.ticket_number}"[:255],
+                "content": (
+                    f"Completed work order recorded {quantity} × {part.name}. "
+                    f"{outcome_note}"
+                )[:20000],
+                "related_part_id": part.id,
+                "related_part_role": part_role,
+                "sort_order": 300 + position,
+            }
+        )
+    return specs
+
+
+@router.post(
+    "/machine-knowledge/{profile_id}/drafts/from-work-order",
+    response_model=MachineKnowledgeDraftGenerationRead,
+)
+def generate_machine_knowledge_drafts(
+    profile_id: int,
+    payload: MachineKnowledgeDraftGenerate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = db.scalar(
+        select(MachineKnowledgeProfile)
+        .where(MachineKnowledgeProfile.id == profile_id)
+        .with_for_update()
+    )
+    if not profile or not profile.is_active:
+        raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
+    _validate_machine_knowledge_links(
+        db,
+        profile,
+        related_part_id=None,
+        source_work_order_id=payload.work_order_id,
+    )
+    work_order = db.get(WorkOrder, payload.work_order_id)
+    if not work_order:
+        raise HTTPException(status_code=404, detail="Completed work order not found")
+    specs = _work_order_knowledge_specs(db, work_order)
+    if not specs:
+        raise HTTPException(
+            status_code=409,
+            detail="Completed work order has no reusable fault, repair, or part evidence",
+        )
+    origin_keys = [spec["origin_key"] for spec in specs]
+    existing_keys = set(
+        db.scalars(
+            select(MachineKnowledgeEntry.origin_key).where(
+                MachineKnowledgeEntry.profile_id == profile.id,
+                MachineKnowledgeEntry.origin_key.in_(origin_keys),
+            )
+        ).all()
+    )
+    created_count = 0
+    for spec in specs:
+        if spec["origin_key"] in existing_keys:
+            continue
+        db.add(
+            MachineKnowledgeEntry(
+                profile_id=profile.id,
+                source_work_order_id=work_order.id,
+                created_by=actor.user_id,
+                updated_by=actor.user_id,
+                **spec,
+            )
+        )
+        created_count += 1
+    skipped_count = len(specs) - created_count
+    _audit(
+        db,
+        actor,
+        "generate_machine_knowledge_drafts",
+        "machine_knowledge_profile",
+        profile.id,
+        {
+            "work_order_id": work_order.id,
+            "created_entries": created_count,
+            "skipped_entries": skipped_count,
+            "origin_keys": origin_keys,
+        },
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Knowledge drafts changed concurrently; refresh and retry",
+        )
+    db.refresh(profile)
+    return MachineKnowledgeDraftGenerationRead(
+        profile=_machine_knowledge_profile_read(db, actor, profile),
+        created_entries=created_count,
+        skipped_entries=skipped_count,
+    )
+
+
+@router.post(
+    "/machine-knowledge/{profile_id}/media",
+    response_model=MachineKnowledgeProfileRead,
+)
+async def upload_machine_knowledge_media(
+    profile_id: int,
+    title: str = Form(..., min_length=1, max_length=255),
+    description: str = Form(..., min_length=1, max_length=20000),
+    file: UploadFile = File(...),
+    source_work_order_id: int | None = Form(default=None, ge=1),
+    sort_order: int = Form(default=0, ge=0, le=10000),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    profile = db.get(MachineKnowledgeProfile, profile_id)
+    if not profile or not profile.is_active:
+        raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
+    _validate_machine_knowledge_links(
+        db,
+        profile,
+        related_part_id=None,
+        source_work_order_id=source_work_order_id,
+    )
+    data = await file.read(settings.max_knowledge_media_upload_bytes + 1)
+    if len(data) > settings.max_knowledge_media_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail="Knowledge media exceeds the configured upload limit",
+        )
+    file_type = _knowledge_media_file_type(data)
+    if not file_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported or invalid knowledge photo/video",
+        )
+    entry_type, extension, mime_type = file_type
+    if entry_type == "photo" and len(data) > settings.max_image_upload_bytes:
+        raise HTTPException(status_code=413, detail="Image exceeds the configured upload limit")
+
+    filename = f"{uuid4().hex}{extension}"
+    storage_key = f"machine-knowledge/{actor.organization_id}/{filename}"
+    storage_root = Path("private_uploads")
+    target_path = storage_root / storage_key
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_bytes(data)
+
+    entry = MachineKnowledgeEntry(
+        profile_id=profile.id,
+        entry_type=entry_type,
+        title=title.strip(),
+        content=description.strip(),
+        source_work_order_id=source_work_order_id,
+        media_storage_key=storage_key,
+        media_mime_type=mime_type,
+        media_size_bytes=len(data),
+        sort_order=sort_order,
+        created_by=actor.user_id,
+        updated_by=actor.user_id,
+    )
+    db.add(entry)
+    try:
+        db.flush()
+        entry.media_url = f"/api/machine-knowledge/media/{entry.id}"
+        _audit(
+            db,
+            actor,
+            "upload_machine_knowledge_media",
+            "machine_knowledge_entry",
+            entry.id,
+            {
+                "profile_id": profile.id,
+                "entry_type": entry_type,
+                "mime_type": mime_type,
+                "size_bytes": len(data),
+                "source_work_order_id": source_work_order_id,
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        target_path.unlink(missing_ok=True)
+        raise
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.get("/machine-knowledge/media/{entry_id}")
+def get_machine_knowledge_media(
+    entry_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    entry = db.get(MachineKnowledgeEntry, entry_id)
+    if not entry or not entry.media_storage_key or not entry.media_mime_type:
+        raise HTTPException(status_code=404, detail="Knowledge media not found")
+    profile = db.get(MachineKnowledgeProfile, entry.profile_id)
+    curator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    if not profile or (
+        not curator and (not profile.is_active or entry.status != "published")
+    ):
+        raise HTTPException(status_code=404, detail="Knowledge media not found")
+    storage_root = Path("private_uploads").resolve()
+    target_path = (storage_root / entry.media_storage_key).resolve()
+    if storage_root not in target_path.parents or not target_path.is_file():
+        raise HTTPException(status_code=404, detail="Knowledge media not found")
+    return FileResponse(
+        target_path,
+        media_type=entry.media_mime_type,
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Content-Disposition": f'inline; filename="knowledge-{entry.id}{target_path.suffix}"',
+        },
+    )
+
+
+@router.patch(
+    "/machine-knowledge/entries/{entry_id}",
+    response_model=MachineKnowledgeProfileRead,
+)
+def update_machine_knowledge_entry(
+    entry_id: int,
+    payload: MachineKnowledgeEntryUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    entry = db.scalar(
+        select(MachineKnowledgeEntry)
+        .where(MachineKnowledgeEntry.id == entry_id)
+        .with_for_update()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Machine knowledge entry not found")
+    if entry.status != "draft":
+        raise HTTPException(
+            status_code=409,
+            detail="Published or archived knowledge is immutable; archive and create a new draft",
+        )
+    if entry.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Machine knowledge entry changed; refresh before editing",
+        )
+    profile = db.get(MachineKnowledgeProfile, entry.profile_id)
+    if not profile or not profile.is_active:
+        raise HTTPException(status_code=404, detail="Active machine knowledge profile not found")
+    changes = payload.model_dump(exclude={"expected_version"}, exclude_unset=True)
+    related_part_id = changes.get("related_part_id", entry.related_part_id)
+    related_part_role = changes.get("related_part_role", entry.related_part_role)
+    alternative_for_part_id = changes.get(
+        "alternative_for_part_id",
+        entry.alternative_for_part_id,
+    )
+    source_work_order_id = changes.get(
+        "source_work_order_id",
+        entry.source_work_order_id,
+    )
+    _validate_machine_knowledge_links(
+        db,
+        profile,
+        related_part_id=related_part_id,
+        source_work_order_id=source_work_order_id,
+        related_part_role=related_part_role,
+        alternative_for_part_id=alternative_for_part_id,
+    )
+    for field in {
+        "title",
+        "content",
+        "fault_code",
+        "installation_location",
+    } & changes.keys():
+        changes[field] = _knowledge_optional_text(changes[field])
+    if changes.get("title") is None and "title" in changes:
+        raise HTTPException(status_code=422, detail="Knowledge title is required")
+    if changes.get("content") is None and "content" in changes:
+        raise HTTPException(status_code=422, detail="Knowledge content is required")
+    if entry.media_storage_key and (
+        ("entry_type" in changes and changes["entry_type"] != entry.entry_type)
+        or (
+            "media_url" in changes
+            and changes["media_url"] != entry.media_url
+        )
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Uploaded media type and protected URL cannot be replaced in place",
+        )
+    if entry.media_storage_key:
+        changes.pop("media_url", None)
+    elif "media_url" in changes:
+        changes["media_url"] = _knowledge_media_url(changes["media_url"])
+    entry_type = changes.get("entry_type", entry.entry_type)
+    media_url = changes.get("media_url", entry.media_url)
+    if entry_type in {"photo", "video"} and not media_url:
+        raise HTTPException(
+            status_code=422,
+            detail="Photo and video knowledge entries require a media URL",
+        )
+    for field, value in changes.items():
+        setattr(entry, field, value)
+    entry.updated_by = actor.user_id
+    entry.version += 1
+    db.add(entry)
+    _audit(
+        db,
+        actor,
+        "update_machine_knowledge_entry",
+        "machine_knowledge_entry",
+        entry.id,
+        {"fields": sorted(changes), "version": entry.version},
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
+
+
+@router.post(
+    "/machine-knowledge/entries/{entry_id}/actions",
+    response_model=MachineKnowledgeProfileRead,
+)
+def act_on_machine_knowledge_entry(
+    entry_id: int,
+    payload: MachineKnowledgeEntryAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    entry = db.scalar(
+        select(MachineKnowledgeEntry)
+        .where(MachineKnowledgeEntry.id == entry_id)
+        .with_for_update()
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Machine knowledge entry not found")
+    if entry.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Machine knowledge entry changed; refresh before acting",
+        )
+    profile = db.get(MachineKnowledgeProfile, entry.profile_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Machine knowledge profile not found")
+    now = datetime.utcnow()
+    previous_status = entry.status
+    if payload.action == "publish":
+        if entry.status != "draft" or not profile.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail="Only draft knowledge on an active profile can be published",
+            )
+        entry.status = "published"
+        entry.published_by = actor.user_id
+        entry.published_at = now
+        entry.archived_by = None
+        entry.archived_at = None
+    elif payload.action == "archive":
+        if entry.status not in {"draft", "published"}:
+            raise HTTPException(status_code=409, detail="Knowledge entry is already archived")
+        entry.status = "archived"
+        entry.archived_by = actor.user_id
+        entry.archived_at = now
+    elif payload.action == "reopen":
+        if entry.status != "archived" or not profile.is_active:
+            raise HTTPException(
+                status_code=409,
+                detail="Only archived knowledge on an active profile can be reopened",
+            )
+        entry.status = "draft"
+        entry.archived_by = None
+        entry.archived_at = None
+    entry.updated_by = actor.user_id
+    entry.version += 1
+    db.add(entry)
+    _audit(
+        db,
+        actor,
+        f"{payload.action}_machine_knowledge_entry",
+        "machine_knowledge_entry",
+        entry.id,
+        {
+            "profile_id": profile.id,
+            "previous_status": previous_status,
+            "new_status": entry.status,
+            "version": entry.version,
+        },
+    )
+    db.commit()
+    db.refresh(profile)
+    return _machine_knowledge_profile_read(db, actor, profile)
 
 
 @router.post("/parts", response_model=PartRead)
@@ -768,6 +2504,447 @@ def part_recognition_suggestions(machine_model: str, db: Session = Depends(get_d
     return db.scalars(select(PartMachineAssociation).where(PartMachineAssociation.machine_model.ilike(f"%{machine_model.strip()}%")).order_by(PartMachineAssociation.confirmed_count.desc())).all()
 
 
+_PART_RECOGNITION_STATUSES = {
+    "ai_candidate",
+    "employee_confirmed",
+    "admin_confirmed",
+    "usage_verified",
+    "trusted",
+    "rejected",
+}
+
+
+def _part_recognition_observation_read(
+    db: Session,
+    actor: Actor,
+    observation: PartRecognitionObservation,
+) -> PartRecognitionObservationRead:
+    work_order = db.get(WorkOrder, observation.work_order_id) if observation.work_order_id else None
+    linked_employee_access = (
+        observation.work_order_id is None
+        or actor.role == UserRole.ADMIN
+        or (
+            actor.role == UserRole.ENGINEER
+            and work_order is not None
+            and work_order.claimed_by_id == actor.user_id
+        )
+    )
+    rows = db.scalars(
+        select(PartRecognitionCandidate)
+        .where(PartRecognitionCandidate.observation_id == observation.id)
+        .order_by(PartRecognitionCandidate.rank, PartRecognitionCandidate.id)
+    ).all()
+    selected_candidate_id = next(
+        (
+            row.id
+            for row in rows
+            if row.status
+            in {
+                "employee_confirmed",
+                "admin_confirmed",
+                "usage_verified",
+                "trusted",
+            }
+        ),
+        None,
+    )
+    candidates: list[PartRecognitionCandidateRead] = []
+    for row in rows:
+        part = db.get(Part, row.part_id)
+        if not part:
+            continue
+        candidates.append(
+            PartRecognitionCandidateRead(
+                id=row.id,
+                organization_id=row.organization_id,
+                observation_id=row.observation_id,
+                part_id=row.part_id,
+                part=PartRead.model_validate(part),
+                rank=row.rank,
+                confidence=row.confidence,
+                reason=row.reason,
+                status=row.status,
+                version=row.version,
+                employee_confirmed_by=row.employee_confirmed_by,
+                employee_confirmed_at=row.employee_confirmed_at,
+                admin_confirmed_by=row.admin_confirmed_by,
+                admin_confirmed_at=row.admin_confirmed_at,
+                usage_verified_by=row.usage_verified_by,
+                usage_verified_at=row.usage_verified_at,
+                trusted_at=row.trusted_at,
+                rejected_by=row.rejected_by,
+                rejected_at=row.rejected_at,
+                rejection_reason=row.rejection_reason,
+                can_employee_confirm=(
+                    row.status == "ai_candidate"
+                    and selected_candidate_id is None
+                    and linked_employee_access
+                    and actor.role
+                    in {
+                        UserRole.ADMIN,
+                        UserRole.MANAGER,
+                        UserRole.WAREHOUSE,
+                        UserRole.ENGINEER,
+                    }
+                ),
+                can_admin_confirm=(
+                    row.status == "employee_confirmed" and actor.role == UserRole.ADMIN
+                ),
+                can_verify_usage=(
+                    row.status == "admin_confirmed" and actor.role == UserRole.ADMIN
+                ),
+                can_promote_trusted=(
+                    row.status == "usage_verified" and actor.role == UserRole.ADMIN
+                ),
+                can_reject=(
+                    row.status not in {"trusted", "rejected"} and actor.role == UserRole.ADMIN
+                ),
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+            )
+        )
+    return PartRecognitionObservationRead(
+        id=observation.id,
+        organization_id=observation.organization_id,
+        work_order_id=observation.work_order_id,
+        machine_model=observation.machine_model,
+        label_text=observation.label_text,
+        image_url=observation.image_url,
+        notes=observation.notes,
+        created_by=observation.created_by,
+        created_at=observation.created_at,
+        updated_at=observation.updated_at,
+        candidates=candidates,
+    )
+
+
+@router.post(
+    "/parts/recognition/candidates",
+    response_model=PartRecognitionObservationRead,
+)
+async def create_part_recognition_candidates(
+    file: UploadFile = File(...),
+    machine_model: str | None = Form(default=None, max_length=255),
+    label_text: str | None = Form(default=None, max_length=4000),
+    work_order_id: int | None = Form(default=None, ge=1),
+    notes: str | None = Form(default=None, max_length=4000),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    work_order = None
+    if work_order_id is not None:
+        if actor.role == UserRole.ENGINEER:
+            work_order = require_work_order_execution_scope(db, actor, work_order_id)
+        elif actor.role == UserRole.ADMIN:
+            require_work_order_scope(db, actor, work_order_id)
+            work_order = db.get(WorkOrder, work_order_id)
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the claiming engineer or an administrator can attach recognition evidence to a work order",
+            )
+    machine_value = (machine_model or (work_order.machine_type if work_order else None) or "").strip() or None
+    label_value = (label_text or "").strip() or None
+    notes_value = (notes or "").strip() or None
+    if not machine_value and not label_value and work_order is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a machine model, visible label text, or work-order context",
+        )
+
+    data = await file.read(settings.max_image_upload_bytes + 1)
+    if len(data) > settings.max_image_upload_bytes:
+        raise HTTPException(status_code=413, detail="Image exceeds the configured upload limit")
+    extension = _image_extension(data)
+    if not extension:
+        raise HTTPException(status_code=400, detail="Unsupported or invalid image file")
+    consume_monthly_usage(db, actor.organization_id, ai_requests=1)
+    target_dir = Path("uploads/part-recognition")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid4().hex}{extension}"
+    (target_dir / filename).write_bytes(data)
+    image_url = f"/uploads/part-recognition/{filename}"
+
+    observation = PartRecognitionObservation(
+        work_order_id=work_order_id,
+        machine_model=machine_value,
+        label_text=label_value,
+        image_url=image_url,
+        notes=notes_value,
+        created_by=actor.user_id,
+    )
+    db.add(observation)
+    db.flush()
+    suggestions = generate_visual_part_candidates(
+        db,
+        machine_model=machine_value,
+        label_text=label_value,
+        work_order=work_order,
+    )
+    for rank, suggestion in enumerate(suggestions, start=1):
+        db.add(
+            PartRecognitionCandidate(
+                observation_id=observation.id,
+                part_id=suggestion.part.id,
+                rank=rank,
+                confidence=suggestion.confidence,
+                reason=suggestion.reason,
+            )
+        )
+    _audit(
+        db,
+        actor,
+        "create_part_recognition_candidates",
+        "part_recognition_observation",
+        observation.id,
+        {
+            "work_order_id": work_order_id,
+            "machine_model": machine_value,
+            "candidate_count": len(suggestions),
+        },
+    )
+    db.commit()
+    db.refresh(observation)
+    return _part_recognition_observation_read(db, actor, observation)
+
+
+@router.get(
+    "/parts/recognition/candidates",
+    response_model=list[PartRecognitionObservationRead],
+)
+def list_part_recognition_candidates(
+    status: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    if status is not None and status not in _PART_RECOGNITION_STATUSES:
+        raise HTTPException(status_code=422, detail="Unknown recognition candidate status")
+    query = select(PartRecognitionObservation).order_by(
+        PartRecognitionObservation.id.desc()
+    )
+    if status is not None:
+        matching_observations = select(PartRecognitionCandidate.observation_id).where(
+            PartRecognitionCandidate.status == status
+        )
+        query = query.where(PartRecognitionObservation.id.in_(matching_observations))
+    observations = db.scalars(query.limit(limit)).all()
+    return [
+        _part_recognition_observation_read(db, actor, observation)
+        for observation in observations
+    ]
+
+
+@router.post(
+    "/parts/recognition/candidates/{candidate_id}/actions",
+    response_model=PartRecognitionObservationRead,
+)
+def act_on_part_recognition_candidate(
+    candidate_id: int,
+    payload: PartRecognitionCandidateAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    candidate = db.scalar(
+        select(PartRecognitionCandidate)
+        .where(PartRecognitionCandidate.id == candidate_id)
+        .with_for_update()
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Recognition candidate not found")
+    observation = db.get(PartRecognitionObservation, candidate.observation_id)
+    if not observation:
+        raise HTTPException(status_code=404, detail="Recognition observation not found")
+    if candidate.version != payload.expected_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Recognition candidate changed; refresh before continuing",
+        )
+    if payload.work_order_id is not None and payload.work_order_id != observation.work_order_id:
+        raise HTTPException(status_code=409, detail="Recognition work-order context does not match")
+
+    previous_status = candidate.status
+    now = datetime.utcnow()
+    if payload.action == "employee_confirm":
+        require_roles(
+            actor,
+            UserRole.ADMIN,
+            UserRole.MANAGER,
+            UserRole.WAREHOUSE,
+            UserRole.ENGINEER,
+        )
+        if candidate.status != "ai_candidate":
+            raise HTTPException(status_code=409, detail="Only an AI candidate can be employee-confirmed")
+        if observation.work_order_id is not None:
+            if actor.role == UserRole.ENGINEER:
+                if payload.work_order_id is None:
+                    raise HTTPException(status_code=422, detail="work_order_id is required")
+                require_work_order_execution_scope(db, actor, observation.work_order_id)
+            elif actor.role != UserRole.ADMIN:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the claiming engineer or an administrator can confirm this work-order candidate",
+                )
+        selected = db.scalar(
+            select(PartRecognitionCandidate).where(
+                PartRecognitionCandidate.observation_id == observation.id,
+                PartRecognitionCandidate.id != candidate.id,
+                PartRecognitionCandidate.status.in_(
+                    {
+                        "employee_confirmed",
+                        "admin_confirmed",
+                        "usage_verified",
+                        "trusted",
+                    }
+                ),
+            )
+        )
+        if selected:
+            raise HTTPException(
+                status_code=409,
+                detail="Another candidate is already selected for this observation",
+            )
+        candidate.status = "employee_confirmed"
+        candidate.employee_confirmed_by = actor.user_id
+        candidate.employee_confirmed_at = now
+
+    elif payload.action == "admin_confirm":
+        require_roles(actor, UserRole.ADMIN)
+        if candidate.status != "employee_confirmed":
+            raise HTTPException(
+                status_code=409,
+                detail="Administrator confirmation requires employee confirmation first",
+            )
+        if (
+            actor.user_id is not None
+            and candidate.employee_confirmed_by == actor.user_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Administrator confirmation must use a different account from employee confirmation",
+            )
+        candidate.status = "admin_confirmed"
+        candidate.admin_confirmed_by = actor.user_id
+        candidate.admin_confirmed_at = now
+
+    elif payload.action == "verify_usage":
+        require_roles(actor, UserRole.ADMIN)
+        if candidate.status != "admin_confirmed":
+            raise HTTPException(
+                status_code=409,
+                detail="Usage verification requires administrator confirmation first",
+            )
+        if observation.work_order_id is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Usage verification requires a linked work order",
+            )
+        usage = db.scalar(
+            select(WorkOrderPart).where(
+                WorkOrderPart.work_order_id == observation.work_order_id,
+                WorkOrderPart.part_id == candidate.part_id,
+            )
+        )
+        if not usage:
+            raise HTTPException(
+                status_code=409,
+                detail="The linked work order has not recorded use of this part",
+            )
+        candidate.status = "usage_verified"
+        candidate.usage_verified_by = actor.user_id
+        candidate.usage_verified_at = now
+
+    elif payload.action == "promote_trusted":
+        require_roles(actor, UserRole.ADMIN)
+        if candidate.status != "usage_verified":
+            raise HTTPException(
+                status_code=409,
+                detail="Trusted knowledge requires verified work-order usage",
+            )
+        if not observation.machine_model:
+            raise HTTPException(
+                status_code=409,
+                detail="A machine model is required before promotion to trusted knowledge",
+            )
+        association = db.scalar(
+            select(PartMachineAssociation).where(
+                func.lower(PartMachineAssociation.machine_model)
+                == observation.machine_model.casefold(),
+                PartMachineAssociation.part_id == candidate.part_id,
+            )
+        )
+        if association:
+            association.confirmed_count += 1
+            association.last_confirmed_at = now
+            association.photo_url = observation.image_url
+            association.recognition_source = "verified_visual"
+            association.confidence = max(association.confidence, 0.99)
+        else:
+            db.add(
+                PartMachineAssociation(
+                    machine_model=observation.machine_model,
+                    part_id=candidate.part_id,
+                    photo_url=observation.image_url,
+                    recognition_source="verified_visual",
+                    confidence=0.99,
+                    confirmed_count=1,
+                    last_confirmed_at=now,
+                )
+            )
+        candidate.status = "trusted"
+        candidate.trusted_at = now
+
+    else:
+        require_roles(actor, UserRole.ADMIN)
+        if candidate.status in {"trusted", "rejected"}:
+            raise HTTPException(status_code=409, detail="This candidate can no longer be rejected")
+        reason = (payload.reason or "").strip()
+        if len(reason) < 3:
+            raise HTTPException(
+                status_code=422,
+                detail="Rejection reason must be at least 3 characters",
+            )
+        candidate.status = "rejected"
+        candidate.rejected_by = actor.user_id
+        candidate.rejected_at = now
+        candidate.rejection_reason = reason
+
+    candidate.version += 1
+    _audit(
+        db,
+        actor,
+        f"part_recognition_{payload.action}",
+        "part_recognition_candidate",
+        candidate.id,
+        {
+            "observation_id": observation.id,
+            "part_id": candidate.part_id,
+            "work_order_id": observation.work_order_id,
+            "from_status": previous_status,
+            "to_status": candidate.status,
+            "previous_version": payload.expected_version,
+            "new_version": candidate.version,
+        },
+    )
+    db.commit()
+    db.refresh(observation)
+    return _part_recognition_observation_read(db, actor, observation)
+
+
 @router.get("/parts", response_model=list[PartRead])
 def list_parts(
     skip: int = Query(default=0, ge=0),
@@ -818,6 +2995,19 @@ def create_work_order(payload: WorkOrderCreate, db: Session = Depends(get_db), a
         data["engineer_id"] = data["assigned_user_id"]
     if not data.get("assigned_user_id") and data.get("engineer_id"):
         data["assigned_user_id"] = data["engineer_id"]
+    if data.get("form_template_id"):
+        template = template_for_assignment(
+            db,
+            template_id=data["form_template_id"],
+            machine_type=data.get("machine_type"),
+            job_type=data.get("job_type"),
+        )
+        form_schema_json, form_data_json = snapshot_template(template)
+        data["form_template_version"] = template.version
+        data["form_schema_json"] = form_schema_json
+        data["form_data_json"] = form_data_json
+        if "status" not in payload.model_fields_set:
+            data["status"] = template.default_work_order_status
     item = WorkOrder(**data)
     db.add(item)
     db.commit()
@@ -870,6 +3060,19 @@ def list_work_orders(
         stmt = stmt.where(WorkOrder.schedule_date <= date_to)
     rows = db.scalars(stmt.offset(skip).limit(limit)).all()
     return [_work_order_read_for_actor(db, actor, item) for item in rows]
+
+
+@router.get("/work-orders/{work_order_id}", response_model=WorkOrderRead)
+def get_work_order(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    item = db.get(WorkOrder, work_order_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    return _work_order_read_for_actor(db, actor, item)
 
 
 @router.post("/work-orders/{work_order_id}/claim", response_model=WorkOrderRead)
@@ -1038,6 +3241,13 @@ def get_work_order_service_context(
             "job_type": row.job_type,
             "problem_description": row.problem_description,
             "repair_result": row.repair_result,
+            "fault_type": row.fault_type,
+            "error_code": row.error_code,
+            "environment_info": row.environment_info,
+            "final_outcome": row.final_outcome,
+            "first_time_fix": row.first_time_fix,
+            "is_rework": row.is_rework,
+            "repair_duration_minutes": row.repair_duration_minutes,
             "status": row.status,
             "completed_at": row.completed_at,
             "engineer_id": row.engineer_id,
@@ -1054,6 +3264,25 @@ def get_work_order_service_context(
         "fallback_equipment_model": current.machine_type,
         "history": history,
     }
+
+
+@router.get(
+    "/work-orders/{work_order_id}/service-intelligence",
+    response_model=WorkOrderServiceIntelligence,
+)
+def get_work_order_service_intelligence(
+    work_order_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_work_order_scope(db, actor, work_order_id)
+    current = db.get(WorkOrder, work_order_id)
+    if not current:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    consume_monthly_usage(db, actor.organization_id, ai_requests=1)
+    result = build_service_intelligence(db, current, actor.organization_id)
+    db.commit()
+    return result
 
 
 @router.patch("/work-orders/{work_order_id}", response_model=WorkOrderRead)
@@ -1109,10 +3338,26 @@ def update_work_order(
     if customer and equipment and equipment.customer_id not in {None, customer.id}:
         raise HTTPException(status_code=400, detail="Equipment does not belong to the selected customer")
 
+    previous_status = item.status
     for key, value in updates.items():
         setattr(item, key, value)
 
     db.add(item)
+    if item.status != previous_status:
+        status_event = JobStatus(
+            work_order_id=work_order_id,
+            status=item.status,
+            timestamp=datetime.utcnow(),
+        )
+        db.add(status_event)
+        db.flush()
+        enqueue_work_order_event(
+            db,
+            item,
+            "work_order.status_changed",
+            f"work-order:{work_order_id}:job-status:{status_event.id}",
+            {"status": item.status},
+        )
     _audit(db, actor, "update_work_order", "work_order", work_order_id, {"changed_fields": sorted(updates)})
     db.commit()
     db.refresh(item)
@@ -1134,7 +3379,16 @@ def start_work_order(
     item.status = "IN_PROGRESS"
     item.started_at = item.started_at or datetime.utcnow()
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="IN_PROGRESS", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="IN_PROGRESS", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        f"work-order:{work_order_id}:job-status:{status_event.id}",
+        {"status": item.status},
+    )
     _audit(db, actor, "start_job", "work_order", work_order_id)
     db.commit()
     db.refresh(item)
@@ -1153,14 +3407,24 @@ def complete_work_order(
     if item.is_locked:
         raise HTTPException(status_code=400, detail="Work order already completed")
     _apply_completion_payload(item, payload)
-    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    _capture_repair_duration(item, datetime.utcnow())
+    policy = _completion_policy_for_work_order(db, item)
     _validate_completion_evidence(db, item, policy)
     if policy.get("require_manager_approval") and actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
         item.status = "PENDING_APPROVAL"
         item.completion_requested_by = actor.user_id
         item.completion_requested_at = datetime.utcnow()
         db.add(item)
-        db.add(JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow()))
+        status_event = JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow())
+        db.add(status_event)
+        db.flush()
+        enqueue_work_order_event(
+            db,
+            item,
+            "work_order.status_changed",
+            f"work-order:{work_order_id}:job-status:{status_event.id}",
+            {"status": item.status},
+        )
         _audit(db, actor, "request_completion", "work_order", work_order_id, {"policy": policy})
         db.commit()
         db.refresh(item)
@@ -1214,9 +3478,34 @@ def _effective_completion_policy(db: Session, organization_id: int, job_type: st
     return _policy_dict(policy, organization_id, source)
 
 
+def _completion_policy_for_work_order(
+    db: Session,
+    item: WorkOrder,
+) -> dict:
+    policy = _effective_completion_policy(
+        db,
+        item.organization_id,
+        item.job_type,
+    )
+    if work_order_form_requires_approval(item):
+        policy = {
+            **policy,
+            "require_manager_approval": True,
+        }
+    return policy
+
+
 def _apply_completion_payload(item: WorkOrder, payload: WorkOrderFlowAction) -> None:
     if payload.repair_result is not None:
         item.repair_result = payload.repair_result.strip() or None
+    for field in ("fault_type", "error_code", "environment_info", "final_outcome"):
+        value = getattr(payload, field)
+        if value is not None:
+            setattr(item, field, value.strip() or None)
+    if payload.first_time_fix is not None:
+        item.first_time_fix = payload.first_time_fix
+    if payload.is_rework is not None:
+        item.is_rework = payload.is_rework
     if payload.checklist_json is not None:
         item.checklist_json = payload.checklist_json
     if payload.customer_signature_name is not None:
@@ -1224,6 +3513,15 @@ def _apply_completion_payload(item: WorkOrder, payload: WorkOrderFlowAction) -> 
     if payload.customer_signature_data is not None:
         item.customer_signature_data = payload.customer_signature_data
     item.customer_signed_at = datetime.utcnow() if item.customer_signature_name and item.customer_signature_data else None
+
+
+def _capture_repair_duration(item: WorkOrder, finished_at: datetime) -> None:
+    if item.repair_duration_minutes is None and item.started_at:
+        item.repair_duration_minutes = max(0, int((finished_at - item.started_at).total_seconds() // 60))
+    if not item.final_outcome:
+        item.final_outcome = "repaired" if (item.repair_result or "").strip() else "completed"
+    if not item.fault_type and item.job_type:
+        item.fault_type = item.job_type.strip() or None
 
 
 def _validate_completion_evidence(db: Session, item: WorkOrder, policy: dict) -> None:
@@ -1254,6 +3552,7 @@ def _validate_completion_evidence(db: Session, item: WorkOrder, policy: dict) ->
         missing.append("parts_usage")
     if missing:
         raise HTTPException(status_code=422, detail={"message": "Completion evidence is incomplete", "missing": missing})
+    validate_work_order_form_completion(item)
 
 
 def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrderRead:
@@ -1265,13 +3564,39 @@ def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrde
         completed_device_id = actor.device_record_id
     if actor.auth_method != "test" and (completed_by_id is None or completed_device_id is None):
         raise HTTPException(status_code=409, detail="Work order has no authenticated engineer claim")
+    finished_at = datetime.utcnow()
+    _capture_repair_duration(item, finished_at)
     item.completed_by_id = completed_by_id
     item.completed_device_id = completed_device_id
     item.status = "COMPLETED"
-    item.completed_at = datetime.utcnow()
+    item.completed_at = finished_at
     item.is_locked = True
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="COMPLETED", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="COMPLETED", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    status_event_key = f"work-order:{work_order_id}:job-status:{status_event.id}"
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        status_event_key,
+        {"status": item.status},
+    )
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.completed",
+        f"{status_event_key}:completed",
+        {
+            "completed_by_id": completed_by_id,
+            "completed_device_id": completed_device_id,
+            "final_outcome": item.final_outcome,
+            "first_time_fix": item.first_time_fix,
+            "is_rework": item.is_rework,
+            "repair_duration_minutes": item.repair_duration_minutes,
+        },
+    )
     _audit(
         db,
         actor,
@@ -1283,6 +3608,12 @@ def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrde
             "completed_by_id": completed_by_id,
             "completed_device_id": completed_device_id,
             "claim_version": item.claim_version,
+            "fault_type": item.fault_type,
+            "error_code": item.error_code,
+            "final_outcome": item.final_outcome,
+            "first_time_fix": item.first_time_fix,
+            "is_rework": item.is_rework,
+            "repair_duration_minutes": item.repair_duration_minutes,
         },
     )
     db.commit()
@@ -1367,7 +3698,7 @@ def get_work_order_completion_policy(
     item = db.get(WorkOrder, work_order_id)
     if not item:
         raise HTTPException(status_code=404, detail="Work order not found")
-    return _effective_completion_policy(db, actor.organization_id, item.job_type)
+    return _completion_policy_for_work_order(db, item)
 
 
 @router.post("/work-orders/{work_order_id}/request-completion", response_model=WorkOrderRead)
@@ -1383,16 +3714,26 @@ def request_work_order_completion(
         raise HTTPException(status_code=400, detail="Work order cannot request completion")
     if item.status == "PENDING_APPROVAL":
         raise HTTPException(status_code=409, detail="Completion approval is already pending")
-    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    policy = _completion_policy_for_work_order(db, item)
     if not policy.get("require_manager_approval"):
         raise HTTPException(status_code=409, detail="This work order does not require manager approval")
     _apply_completion_payload(item, payload)
+    _capture_repair_duration(item, datetime.utcnow())
     _validate_completion_evidence(db, item, policy)
     item.status = "PENDING_APPROVAL"
     item.completion_requested_by = actor.user_id
     item.completion_requested_at = datetime.utcnow()
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="PENDING_APPROVAL", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        f"work-order:{work_order_id}:job-status:{status_event.id}",
+        {"status": item.status},
+    )
     _audit(db, actor, "request_completion", "work_order", work_order_id)
     db.commit()
     db.refresh(item)
@@ -1408,7 +3749,7 @@ def approve_work_order_completion(
     item = db.get(WorkOrder, work_order_id)
     if not item or item.status != "PENDING_APPROVAL" or item.is_locked:
         raise HTTPException(status_code=409, detail="Work order is not pending completion approval")
-    policy = _effective_completion_policy(db, actor.organization_id, item.job_type)
+    policy = _completion_policy_for_work_order(db, item)
     _validate_completion_evidence(db, item, policy)
     item.completion_approved_by = actor.user_id
     item.completion_approved_at = datetime.utcnow()
@@ -1429,8 +3770,18 @@ def reject_work_order_completion(
     if not item or item.status != "PENDING_APPROVAL" or item.is_locked:
         raise HTTPException(status_code=409, detail="Work order is not pending completion approval")
     item.status = "APPROVAL_REJECTED"
+    item.repair_duration_minutes = None
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="APPROVAL_REJECTED", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="APPROVAL_REJECTED", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        f"work-order:{work_order_id}:job-status:{status_event.id}",
+        {"status": item.status},
+    )
     _audit(db, actor, "reject_completion", "work_order", work_order_id, {"notes": payload.notes})
     db.commit()
     db.refresh(item)
@@ -1494,7 +3845,16 @@ def pause_work_order(
     item.status = "PAUSED"
     item.paused_at = datetime.utcnow()
     db.add(item)
-    db.add(JobStatus(work_order_id=work_order_id, status="PAUSED", timestamp=datetime.utcnow()))
+    status_event = JobStatus(work_order_id=work_order_id, status="PAUSED", timestamp=datetime.utcnow())
+    db.add(status_event)
+    db.flush()
+    enqueue_work_order_event(
+        db,
+        item,
+        "work_order.status_changed",
+        f"work-order:{work_order_id}:job-status:{status_event.id}",
+        {"status": item.status},
+    )
     _audit(db, actor, "pause_job", "work_order", work_order_id, {"notes": payload.notes})
     db.commit()
     db.refresh(item)
@@ -1506,17 +3866,18 @@ def add_inventory_transaction(
     payload: InventoryTransactionCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
-    tx = create_transaction(db, payload)
-    if str(payload.transaction_type).lower().endswith("transfer"):
-        _audit(
-            db,
-            actor,
-            "inventory_transfer",
-            "inventory_transaction",
-            tx.id,
-            {"part_id": payload.part_id, "qty": payload.quantity, "from": payload.from_warehouse_id, "to": payload.to_warehouse_id},
-        )
-        db.commit()
+    effective_payload = payload.model_copy(update={"user_id": actor.user_id}) if actor.user_id else payload
+    tx = create_transaction(db, effective_payload)
+    _audit(
+        db,
+        actor,
+        f"inventory_{payload.transaction_type.value}",
+        "inventory_transaction",
+        tx.id,
+        {"part_id": payload.part_id, "qty": payload.quantity, "from": payload.from_warehouse_id, "to": payload.to_warehouse_id},
+    )
+    db.commit()
+    db.refresh(tx)
     return tx
 
 
@@ -1557,6 +3918,98 @@ def inventory_location_balances(
     return get_location_stock_balances(db, warehouse_id)
 
 
+def _warehouse_label_token(warehouse: Warehouse) -> str:
+    return f"OPF:WH:{warehouse.id}:{warehouse.code or ''}"
+
+
+def _location_label_token(location: StorageLocation) -> str:
+    return f"OPF:LOC:{location.id}:{location.code}"
+
+
+@router.get("/inventory/location-labels", response_model=list[InventoryLocationLabelRead])
+def inventory_location_labels(
+    warehouse_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    warehouse = db.get(Warehouse, warehouse_id)
+    if not warehouse or not warehouse.is_active:
+        raise HTTPException(status_code=404, detail="Active warehouse not found")
+    rows = [InventoryLocationLabelRead(
+        label_token=_warehouse_label_token(warehouse), warehouse_id=warehouse.id,
+        warehouse_code=warehouse.code or "", warehouse_name=warehouse.name,
+    )]
+    locations = db.scalars(select(StorageLocation).where(
+        StorageLocation.warehouse_id == warehouse.id,
+        StorageLocation.is_active.is_(True),
+    ).order_by(StorageLocation.code)).all()
+    rows.extend(InventoryLocationLabelRead(
+        label_token=_location_label_token(location), warehouse_id=warehouse.id,
+        warehouse_code=warehouse.code or "", warehouse_name=warehouse.name,
+        location_id=location.id, location_code=location.code, location_name=location.name, zone=location.zone,
+    ) for location in locations)
+    return rows
+
+
+@router.post("/inventory/location-scan", response_model=InventoryLocationScanRead)
+def scan_inventory_location(
+    payload: InventoryLocationScanRequest,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    label = payload.label.strip()
+    if not label:
+        raise HTTPException(status_code=422, detail="Scan label cannot be blank")
+    warehouse: Warehouse | None = None
+    location: StorageLocation | None = None
+    pieces = label.split(":", 3)
+    if len(pieces) == 4 and pieces[0].upper() == "OPF" and pieces[2].isdigit():
+        entity_id, printed_code = int(pieces[2]), pieces[3]
+        if pieces[1].upper() == "WH":
+            warehouse = db.get(Warehouse, entity_id)
+            if warehouse and (warehouse.code or "") != printed_code:
+                raise HTTPException(status_code=409, detail="Warehouse label is stale or invalid")
+        elif pieces[1].upper() == "LOC":
+            location = db.get(StorageLocation, entity_id)
+            if location and location.code != printed_code:
+                raise HTTPException(status_code=409, detail="Location label is stale or invalid")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported OpenPartsFlow label type")
+    else:
+        warehouse = db.scalar(select(Warehouse).where(func.lower(Warehouse.code) == label.lower()))
+        if not warehouse:
+            location_stmt = select(StorageLocation).where(func.lower(StorageLocation.code) == label.lower())
+            if payload.expected_warehouse_id:
+                location_stmt = location_stmt.where(StorageLocation.warehouse_id == payload.expected_warehouse_id)
+            matches = db.scalars(location_stmt.limit(2)).all()
+            if len(matches) > 1:
+                raise HTTPException(status_code=409, detail="Location code is ambiguous; scan its warehouse first")
+            location = matches[0] if matches else None
+    if location:
+        warehouse = db.get(Warehouse, location.warehouse_id)
+    if not warehouse:
+        raise HTTPException(status_code=404, detail="Warehouse or location label not found")
+    if not warehouse.is_active or (location and not location.is_active):
+        raise HTTPException(status_code=409, detail="Scanned warehouse or location is inactive")
+    if payload.expected_warehouse_id and warehouse.id != payload.expected_warehouse_id:
+        raise HTTPException(status_code=409, detail="Location belongs to a different warehouse")
+    scan_type = "location" if location else "warehouse"
+    label_token = _location_label_token(location) if location else _warehouse_label_token(warehouse)
+    _audit(db, actor, f"inventory_{scan_type}_scanned", scan_type, location.id if location else warehouse.id, {
+        "label_token": label_token, "warehouse_id": warehouse.id,
+        "location_id": location.id if location else None,
+    })
+    db.commit()
+    return InventoryLocationScanRead(
+        scan_type=scan_type, label_token=label_token, warehouse_id=warehouse.id,
+        warehouse_code=warehouse.code or "", warehouse_name=warehouse.name,
+        location_id=location.id if location else None, location_code=location.code if location else None,
+        location_name=location.name if location else None, zone=location.zone if location else None,
+    )
+
+
 @router.post("/inventory/scan", response_model=InventoryScanRead)
 def scan_inventory(
     payload: InventoryScanRequest,
@@ -1578,25 +4031,40 @@ def scan_inventory(
         return InventoryScanRead(
             matched=False, confidence=0.0, recognition_method=method,
             quantity_requested=payload.quantity, warehouse_id=payload.warehouse_id,
-            location_id=payload.location_id, feedback="未匹配到物料，请拍摄清晰标签或人工选择物料。",
+            location_id=payload.location_id, feedback="Part label was not recognized. Scan a clear barcode or select the part manually.",
         )
+    effective_warehouse_id = payload.warehouse_id
     if payload.location_id:
         location = db.get(StorageLocation, payload.location_id)
-        if not location or (payload.warehouse_id and location.warehouse_id != payload.warehouse_id):
+        if not location or not location.is_active or (payload.warehouse_id and location.warehouse_id != payload.warehouse_id):
             raise HTTPException(status_code=400, detail="Location does not belong to warehouse")
+        effective_warehouse_id = location.warehouse_id
+        warehouse = db.get(Warehouse, location.warehouse_id)
+        if not warehouse or not warehouse.is_active:
+            raise HTTPException(status_code=409, detail="Location warehouse is inactive")
         current = get_location_stock_quantity(db, part.id, payload.location_id)
     elif payload.warehouse_id:
+        warehouse = db.get(Warehouse, payload.warehouse_id)
+        if not warehouse or not warehouse.is_active:
+            raise HTTPException(status_code=404, detail="Active warehouse not found")
         current = get_stock_quantity(db, part.id, payload.warehouse_id)
     else:
         current = None
+    if actor.role == UserRole.ENGINEER and effective_warehouse_id is not None:
+        warehouse = db.get(Warehouse, effective_warehouse_id)
+        if not warehouse or not warehouse_is_vehicle(db, warehouse) or warehouse.assigned_user_id != actor.user_id:
+            raise HTTPException(status_code=403, detail="Engineers can only scan stock in their assigned vehicle")
     projected = current - payload.quantity if current is not None else None
-    feedback = "识别成功，库存充足。" if projected is None or projected >= 0 else f"库存不足，还差 {abs(projected)} 件。"
-    _audit(db, actor, "inventory_scan", "part", part.id, {"method": method, "quantity": payload.quantity})
+    feedback = "Part recognized and the checked quantity is available." if projected is None or projected >= 0 else f"Insufficient stock by {abs(projected)} unit(s)."
+    _audit(db, actor, "inventory_scan", "part", part.id, {
+        "method": method, "quantity": payload.quantity, "warehouse_id": effective_warehouse_id,
+        "location_id": payload.location_id, "current_quantity": current,
+    })
     db.commit()
     return InventoryScanRead(
         matched=True, confidence=1.0 if method == "barcode" else 0.95,
         recognition_method=method, part=PartRead.model_validate(part),
-        quantity_requested=payload.quantity, warehouse_id=payload.warehouse_id,
+        quantity_requested=payload.quantity, warehouse_id=effective_warehouse_id,
         location_id=payload.location_id, current_quantity=current,
         projected_quantity=projected, feedback=feedback,
     )
@@ -1617,6 +4085,17 @@ def employee_van_inventory(
     return rows[skip : skip + limit]
 
 
+@router.get("/inventory/my-van", response_model=list[StockBalance])
+def my_van_inventory(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.role != UserRole.ENGINEER or actor.user_id is None:
+        raise HTTPException(status_code=403, detail="Engineer access required")
+    return get_employee_van_inventory(db, actor.user_id)[:limit]
+
+
 @router.post(
     "/work-order-parts",
     response_model=WorkOrderPartRead,
@@ -1628,6 +4107,7 @@ def add_work_order_part(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
+    begin_inventory_write(db)
     require_work_order_execution_scope(db, actor, payload.work_order_id)
     return use_part_for_work_order(payload.work_order_id, payload, db, actor)
 
@@ -1643,11 +4123,20 @@ def use_part_for_work_order(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
+    begin_inventory_write(db)
     work_order = require_work_order_execution_scope(db, actor, work_order_id)
     if not work_order or work_order.is_locked or work_order.status == "PENDING_APPROVAL":
         raise HTTPException(status_code=409, detail="Work order cannot accept parts in its current state")
     if payload.work_order_id != work_order_id:
         raise HTTPException(status_code=400, detail="Path work order ID must match payload work_order_id")
+    if actor.role == UserRole.ENGINEER:
+        source_warehouse = db.get(Warehouse, payload.warehouse_id)
+        if (
+            not source_warehouse
+            or not warehouse_is_vehicle(db, source_warehouse)
+            or source_warehouse.assigned_user_id != actor.user_id
+        ):
+            raise HTTPException(status_code=403, detail="Engineers can only use parts from their own assigned van")
     effective_payload = payload.model_copy(update={"user_id": actor.user_id}) if actor.user_id else payload
     usage = use_part_on_work_order(db, effective_payload)
     part = db.get(Part, payload.part_id)
@@ -1664,6 +4153,22 @@ def use_part_for_work_order(
                 part_id=part.id, warehouse_id=payload.warehouse_id, work_order_id=work_order_id,
                 message=f"{part.part_number} 使用后库存为 {warehouse_quantity}，已达到补货阈值 {threshold}。",
             ))
+    source_warehouse = db.get(Warehouse, payload.warehouse_id)
+    enqueue_work_order_event(
+        db,
+        work_order,
+        "work_order.part_used",
+        f"work-order-part:{usage.id}:created",
+        {
+            "usage_id": usage.id,
+            "part_number": part.part_number if part else None,
+            "part_name": part.name if part else None,
+            "quantity": usage.quantity,
+            "unit": part.unit if part else None,
+            "warehouse_code": source_warehouse.code if source_warehouse else None,
+            "used_by_id": usage.user_id,
+        },
+    )
     _audit(db, actor, "use_part", "work_order_part", usage.id, {"work_order_id": work_order_id, "part_id": payload.part_id, "qty": payload.quantity})
     db.commit()
     return usage
@@ -1688,54 +4193,1215 @@ def update_inventory_notification(
     notification = db.get(InventoryNotification, notification_id)
     if not notification:
         raise HTTPException(status_code=404, detail="Inventory notification not found")
+    previous_status = notification.status
     notification.status = status
+    _audit(
+        db,
+        actor,
+        "inventory_notification_status_changed",
+        "inventory_notification",
+        notification.id,
+        {"from_status": previous_status, "to_status": status},
+    )
     db.commit()
     db.refresh(notification)
     return notification
+
+
+def _replenishment_read_for_actor(
+    db: Session,
+    actor: Actor,
+    item: ReplenishmentRequest,
+) -> ReplenishmentRequestRead:
+    payload = ReplenishmentRequestRead.model_validate(item).model_dump()
+    part = db.get(Part, item.part_id)
+    source = db.get(Warehouse, item.source_warehouse_id) if item.source_warehouse_id else None
+    destination = db.get(Warehouse, item.destination_warehouse_id)
+    target = db.get(User, item.target_user_id) if item.target_user_id else None
+    received_device = db.get(UserDevice, item.received_device_id) if item.received_device_id else None
+    work_order = db.get(WorkOrder, item.work_order_id) if item.work_order_id else None
+
+    def user_name(user_id: int | None) -> str | None:
+        user = db.get(User, user_id) if user_id else None
+        return user.name if user else None
+
+    warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    can_receive = False
+    if item.status == "shipped":
+        if item.target_user_id is not None:
+            can_receive = bool(
+                actor.role == UserRole.ENGINEER
+                and actor.user_id == item.target_user_id
+                and actor.device_verified
+            )
+        else:
+            can_receive = warehouse_operator
+    payload.update(
+        part_number=part.part_number if part else None,
+        part_name=part.name if part else None,
+        source_warehouse_name=source.name if source else None,
+        destination_warehouse_name=destination.name if destination else None,
+        target_user_name=target.name if target else None,
+        requested_by_name=user_name(item.requested_by),
+        approved_by_name=user_name(item.approved_by),
+        rejected_by_name=user_name(item.rejected_by),
+        picking_by_name=user_name(item.picking_by),
+        shipped_by_name=user_name(item.shipped_by),
+        received_by_name=user_name(item.received_by),
+        received_device_name=received_device.device_name if received_device else None,
+        completed_by_name=user_name(item.completed_by),
+        cancelled_by_name=user_name(item.cancelled_by),
+        work_order_ticket_number=work_order.ticket_number if work_order else None,
+        source_available_quantity=(
+            get_available_stock_quantity(db, item.part_id, item.source_warehouse_id)
+            if item.source_warehouse_id
+            else None
+        ),
+        destination_quantity=(
+            get_stock_quantity(db, item.part_id, item.destination_warehouse_id)
+            if destination
+            else 0
+        ),
+        can_approve=(actor.role in {UserRole.ADMIN, UserRole.MANAGER} and not item.requires_reconciliation
+                     and item.status == "requested" and item.approval_status == "pending"),
+        can_reject=(actor.role in {UserRole.ADMIN, UserRole.MANAGER} and not item.requires_reconciliation
+                    and item.status == "requested" and item.approval_status == "pending"),
+        can_start_picking=(warehouse_operator and not item.requires_reconciliation and item.status == "requested"
+                           and item.approval_status == "approved"),
+        can_ship=warehouse_operator and not item.requires_reconciliation and item.status == "picking",
+        can_receive=can_receive and not item.requires_reconciliation,
+        can_complete=warehouse_operator and not item.requires_reconciliation and item.status == "received",
+        can_cancel=warehouse_operator and not item.requires_reconciliation and item.status in {"requested", "picking"},
+        can_reconcile=actor.role == UserRole.ADMIN and item.requires_reconciliation,
+    )
+    return ReplenishmentRequestRead(**payload)
+
+
+def _validate_replenishment_destination(
+    db: Session,
+    destination: Warehouse,
+) -> int | None:
+    if not destination.is_active:
+        raise HTTPException(status_code=409, detail="Destination warehouse is inactive")
+    if not warehouse_is_vehicle(db, destination):
+        return None
+    target = db.get(User, destination.assigned_user_id) if destination.assigned_user_id else None
+    if not target or not target.is_active or target.role != UserRole.ENGINEER:
+        raise HTTPException(status_code=422, detail="A van destination must be assigned to an active engineer")
+    return target.id
+
+
+def _validate_replenishment_source(
+    db: Session,
+    source: Warehouse,
+    destination: Warehouse,
+) -> None:
+    if not source.is_active or source.id == destination.id:
+        raise HTTPException(status_code=400, detail="Source warehouse must be active and different from destination")
+    if warehouse_is_vehicle(db, source):
+        raise HTTPException(
+            status_code=409,
+            detail="A vehicle cannot be used as a replenishment source; use the authenticated return workflow",
+        )
 
 
 @router.post("/inventory/notifications/{notification_id}/create-request", response_model=ReplenishmentRequestRead)
 def create_replenishment_request(
     notification_id: int,
     quantity: int = Query(default=1, ge=1),
-    source_warehouse_id: int | None = Query(default=None),
-    db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor),
+    source_warehouse_id: int | None = Query(default=None, ge=1),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     notification = db.get(InventoryNotification, notification_id)
     if not notification:
         raise HTTPException(status_code=404, detail="Inventory notification not found")
-    request = ReplenishmentRequest(
-        part_id=notification.part_id, destination_warehouse_id=notification.warehouse_id,
-        source_warehouse_id=source_warehouse_id, quantity=quantity,
-        work_order_id=notification.work_order_id, requested_by=actor.user_id,
+    existing = db.scalar(
+        select(ReplenishmentRequest).where(ReplenishmentRequest.notification_id == notification_id)
+    )
+    if existing:
+        return _replenishment_read_for_actor(db, actor, existing)
+    destination = db.get(Warehouse, notification.warehouse_id)
+    if not destination:
+        raise HTTPException(status_code=404, detail="Destination warehouse not found")
+    target_user_id = _validate_replenishment_destination(db, destination)
+    source = db.get(Warehouse, source_warehouse_id) if source_warehouse_id else None
+    if source_warehouse_id and not source:
+        raise HTTPException(status_code=404, detail="Source warehouse not found")
+    if source:
+        _validate_replenishment_source(db, source, destination)
+    item = ReplenishmentRequest(
+        notification_id=notification.id,
+        part_id=notification.part_id,
+        destination_warehouse_id=notification.warehouse_id,
+        source_warehouse_id=source.id if source else None,
+        target_user_id=target_user_id,
+        quantity=quantity,
+        work_order_id=notification.work_order_id,
+        requested_by=actor.user_id,
     )
     notification.status = "acknowledged"
-    db.add(request); db.commit(); db.refresh(request)
-    return request
+    try:
+        db.add(item)
+        db.flush()
+        _audit(
+            db,
+            actor,
+            "replenishment_requested",
+            "replenishment_request",
+            item.id,
+            {
+                "notification_id": notification.id,
+                "part_id": item.part_id,
+                "quantity": item.quantity,
+                "source_warehouse_id": item.source_warehouse_id,
+                "destination_warehouse_id": item.destination_warehouse_id,
+                "target_user_id": item.target_user_id,
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.scalar(
+            select(ReplenishmentRequest).where(ReplenishmentRequest.notification_id == notification_id)
+        )
+        if existing:
+            return _replenishment_read_for_actor(db, actor, existing)
+        raise HTTPException(status_code=409, detail="Replenishment request could not be created") from exc
+    db.refresh(item)
+    return _replenishment_read_for_actor(db, actor, item)
+
+
+@router.post("/inventory/replenishment-requests", response_model=ReplenishmentRequestRead)
+def create_manual_replenishment_request(
+    payload: ReplenishmentRequestCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    client_request_id = payload.client_request_id.strip()
+    request_reason = payload.reason.strip()
+    if len(request_reason) < 3:
+        raise HTTPException(status_code=422, detail="Request reason must be at least 3 non-whitespace characters")
+
+    def matches_existing(candidate: ReplenishmentRequest) -> bool:
+        return (
+            candidate.part_id == payload.part_id
+            and candidate.destination_warehouse_id == payload.destination_warehouse_id
+            and candidate.source_warehouse_id == payload.source_warehouse_id
+            and candidate.quantity == payload.quantity
+            and (candidate.request_reason or "") == request_reason
+        )
+
+    existing = db.scalar(
+        select(ReplenishmentRequest).where(
+            ReplenishmentRequest.client_request_id == client_request_id,
+        )
+    )
+    if existing:
+        if not matches_existing(existing):
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another request")
+        return _replenishment_read_for_actor(db, actor, existing)
+
+    part = db.get(Part, payload.part_id)
+    destination = db.get(Warehouse, payload.destination_warehouse_id)
+    source = db.get(Warehouse, payload.source_warehouse_id) if payload.source_warehouse_id else None
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    if not destination:
+        raise HTTPException(status_code=404, detail="Destination warehouse not found")
+    target_user_id = _validate_replenishment_destination(db, destination)
+    if target_user_id is None:
+        raise HTTPException(status_code=422, detail="Manual replenishment destination must be an assigned vehicle")
+    if payload.source_warehouse_id and not source:
+        raise HTTPException(status_code=404, detail="Source warehouse not found")
+    if source:
+        _validate_replenishment_source(db, source, destination)
+
+    item = ReplenishmentRequest(
+        client_request_id=client_request_id,
+        request_reason=request_reason,
+        part_id=part.id,
+        destination_warehouse_id=destination.id,
+        source_warehouse_id=source.id if source else None,
+        target_user_id=target_user_id,
+        quantity=payload.quantity,
+        requested_by=actor.user_id,
+    )
+    try:
+        db.add(item)
+        db.flush()
+        _audit(
+            db,
+            actor,
+            "replenishment_requested",
+            "replenishment_request",
+            item.id,
+            {
+                "origin": "manual",
+                "client_request_id": client_request_id,
+                "reason": item.request_reason,
+                "part_id": item.part_id,
+                "quantity": item.quantity,
+                "source_warehouse_id": item.source_warehouse_id,
+                "destination_warehouse_id": item.destination_warehouse_id,
+                "target_user_id": item.target_user_id,
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.scalar(
+            select(ReplenishmentRequest).where(
+                ReplenishmentRequest.client_request_id == client_request_id,
+            )
+        )
+        if existing:
+            if matches_existing(existing):
+                return _replenishment_read_for_actor(db, actor, existing)
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another request")
+        raise HTTPException(status_code=409, detail="Replenishment request could not be created") from exc
+    db.refresh(item)
+    return _replenishment_read_for_actor(db, actor, item)
 
 
 @router.get("/inventory/replenishment-requests", response_model=list[ReplenishmentRequestRead])
-def list_replenishment_requests(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
-    return db.scalars(select(ReplenishmentRequest).order_by(ReplenishmentRequest.id.desc()).limit(100)).all()
-
-
-@router.patch("/inventory/replenishment-requests/{request_id}", response_model=ReplenishmentRequestRead)
-def update_replenishment_request(
-    request_id: int,
-    status: str = Query(..., pattern="^(requested|picking|shipped|received|completed|cancelled)$"),
-    db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor),
+def list_replenishment_requests(
+    status: str | None = Query(default=None, pattern="^(requested|picking|shipped|received|completed|cancelled|rejected)$"),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
-    request = db.get(ReplenishmentRequest, request_id)
-    if not request:
+    stmt = select(ReplenishmentRequest).order_by(ReplenishmentRequest.id.desc())
+    if actor.role == UserRole.ENGINEER:
+        stmt = stmt.where(ReplenishmentRequest.target_user_id == actor.user_id)
+    if status:
+        stmt = stmt.where(ReplenishmentRequest.status == status)
+    rows = db.scalars(stmt.limit(limit)).all()
+    return [_replenishment_read_for_actor(db, actor, item) for item in rows]
+
+
+@router.post(
+    "/inventory/replenishment-requests/{request_id}/reconcile",
+    response_model=ReplenishmentRequestRead,
+)
+def reconcile_replenishment_request(
+    request_id: int,
+    payload: ReplenishmentRequestReconcile,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    begin_inventory_write(db)
+    item = db.scalar(
+        select(ReplenishmentRequest)
+        .where(
+            ReplenishmentRequest.id == request_id,
+            ReplenishmentRequest.organization_id == actor.organization_id,
+        )
+        .with_for_update()
+    )
+    if not item:
         raise HTTPException(status_code=404, detail="Replenishment request not found")
-    if actor.role == UserRole.ENGINEER and status not in {"received"}:
-        raise HTTPException(status_code=403, detail="Engineers can only confirm receipt")
-    request.status = status
-    db.commit(); db.refresh(request)
-    return request
+    if not item.requires_reconciliation:
+        return _replenishment_read_for_actor(db, actor, item)
+    if item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Replenishment request changed; refresh before reconciling")
+    reason = payload.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(status_code=422, detail="Reconciliation reason must be at least 3 characters")
+    _require_account_reauthentication(db, actor, payload.account_password)
+    linked_movements = db.scalars(
+        select(InventoryTransaction).where(InventoryTransaction.replenishment_request_id == item.id)
+    ).all()
+    if linked_movements:
+        raise HTTPException(
+            status_code=409,
+            detail="Linked inventory movements require a dedicated stock correction, not historical reconciliation",
+        )
+    if payload.resolution == "reset_requested":
+        if item.status != "requested":
+            raise HTTPException(status_code=409, detail="Only a reopened requested record can use reset_requested")
+        if item.notification_id:
+            notification = db.get(InventoryNotification, item.notification_id)
+            if notification:
+                notification.status = "open"
+    elif item.status != "completed":
+        raise HTTPException(status_code=409, detail="accept_historical is only valid for a legacy completed record")
+    elif item.notification_id:
+        notification = db.get(InventoryNotification, item.notification_id)
+        if notification:
+            notification.status = "resolved"
+
+    previous_version = item.version
+    item.requires_reconciliation = False
+    item.version += 1
+    _audit(
+        db,
+        actor,
+        "replenishment_reconciled",
+        "replenishment_request",
+        item.id,
+        {
+            "resolution": payload.resolution,
+            "reason": reason,
+            "previous_version": previous_version,
+            "new_version": item.version,
+            "status": item.status,
+        },
+    )
+    db.commit()
+    db.refresh(item)
+    return _replenishment_read_for_actor(db, actor, item)
+
+
+@router.post("/inventory/replenishment-requests/{request_id}/actions", response_model=ReplenishmentRequestRead)
+def act_on_replenishment_request(
+    request_id: int,
+    payload: ReplenishmentRequestAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    begin_inventory_write(db)
+    item = db.scalar(
+        select(ReplenishmentRequest)
+        .where(
+            ReplenishmentRequest.id == request_id,
+            ReplenishmentRequest.organization_id == actor.organization_id,
+        )
+        .with_for_update()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Replenishment request not found")
+    if item.requires_reconciliation:
+        raise HTTPException(
+            status_code=409,
+            detail="Historical replenishment requires administrator reconciliation before workflow actions",
+        )
+    target_status = {
+        "approve": "requested",
+        "reject": "rejected",
+        "start_picking": "picking",
+        "ship": "shipped",
+        "receive": "received",
+        "complete": "completed",
+        "cancel": "cancelled",
+    }[payload.action]
+    warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    approval_operator = actor.role in {UserRole.ADMIN, UserRole.MANAGER}
+    if payload.action in {"approve", "reject"} and not approval_operator:
+        raise HTTPException(status_code=403, detail="Manager or administrator approval access required")
+    if payload.action in {"start_picking", "ship", "complete", "cancel"} and not warehouse_operator:
+        raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+    if payload.action == "receive":
+        if item.target_user_id is not None:
+            if actor.role != UserRole.ENGINEER or actor.user_id != item.target_user_id:
+                raise HTTPException(status_code=403, detail="Only the destination engineer can receive this shipment")
+            require_bound_device(actor)
+            if item.status == "received" and item.received_device_id != actor.device_record_id:
+                raise HTTPException(status_code=403, detail="Shipment was received on another registered device")
+        elif not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+    if payload.action == "approve" and item.approval_status == "approved":
+        return _replenishment_read_for_actor(db, actor, item)
+    if payload.action == "reject" and item.status == "rejected":
+        return _replenishment_read_for_actor(db, actor, item)
+    if payload.action not in {"approve", "reject"} and item.status == target_status:
+        return _replenishment_read_for_actor(db, actor, item)
+    if item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Replenishment request changed; refresh before continuing")
+
+    previous_status = item.status
+    transaction_id: int | None = None
+    now = datetime.utcnow()
+    if payload.action == "approve":
+        if item.status != "requested" or item.approval_status != "pending":
+            raise HTTPException(status_code=409, detail="Only a pending replenishment request can be approved")
+        item.approval_status = "approved"
+        item.approved_by = actor.user_id
+        item.approved_at = now
+
+    elif payload.action == "reject":
+        if item.status != "requested" or item.approval_status != "pending":
+            raise HTTPException(status_code=409, detail="Only a pending replenishment request can be rejected")
+        if not payload.reason or len(payload.reason.strip()) < 3:
+            raise HTTPException(status_code=422, detail="Rejection reason must be at least 3 characters")
+        item.approval_status = "rejected"
+        item.rejected_by = actor.user_id
+        item.rejected_at = now
+        item.rejection_reason = payload.reason.strip()
+        if item.notification_id:
+            notification = db.get(InventoryNotification, item.notification_id)
+            if notification:
+                notification.status = "resolved"
+
+    elif payload.action == "start_picking":
+        if not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        if item.status != "requested" or item.approval_status != "approved":
+            raise HTTPException(status_code=409, detail="Only an approved replenishment can start picking")
+        if (
+            item.source_warehouse_id is not None
+            and payload.source_warehouse_id is not None
+            and payload.source_warehouse_id != item.source_warehouse_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="The assigned source warehouse cannot be replaced during picking; cancel and recreate the request",
+            )
+        source_id = item.source_warehouse_id or payload.source_warehouse_id
+        source = db.get(Warehouse, source_id) if source_id else None
+        destination = db.get(Warehouse, item.destination_warehouse_id)
+        if not source:
+            raise HTTPException(status_code=422, detail="Select a source warehouse before picking")
+        if not destination:
+            raise HTTPException(status_code=404, detail="Destination warehouse not found")
+        _validate_replenishment_source(db, source, destination)
+        db.scalar(select(Part).where(Part.id == item.part_id).with_for_update())
+        if get_available_stock_quantity(db, item.part_id, source.id) < item.quantity:
+            raise HTTPException(status_code=409, detail="Insufficient unreserved source stock")
+        current_target = _validate_replenishment_destination(db, destination)
+        if item.target_user_id not in {None, current_target}:
+            raise HTTPException(status_code=409, detail="Destination van ownership changed; cancel and recreate the request")
+        item.source_warehouse_id = source.id
+        item.target_user_id = current_target
+        item.picking_by = actor.user_id
+        item.picking_at = now
+
+    elif payload.action == "ship":
+        if not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        if item.status != "picking" or not item.source_warehouse_id:
+            raise HTTPException(status_code=409, detail="Only a picking request with a source can be shipped")
+        source = db.get(Warehouse, item.source_warehouse_id)
+        destination = db.get(Warehouse, item.destination_warehouse_id)
+        if not source or not source.is_active:
+            raise HTTPException(status_code=409, detail="Source warehouse is no longer active")
+        if not destination:
+            raise HTTPException(status_code=404, detail="Destination warehouse not found")
+        _validate_replenishment_source(db, source, destination)
+        current_target = _validate_replenishment_destination(db, destination)
+        if current_target != item.target_user_id:
+            raise HTTPException(status_code=409, detail="Destination custody changed; cancel and recreate the request")
+        part = db.scalar(select(Part).where(Part.id == item.part_id).with_for_update())
+        if not part:
+            raise HTTPException(status_code=404, detail="Part not found")
+        if get_stock_quantity(db, item.part_id, item.source_warehouse_id) < item.quantity:
+            raise HTTPException(status_code=409, detail="Source stock is no longer sufficient")
+        transaction = InventoryTransaction(
+            part_id=item.part_id,
+            transaction_type=TransactionType.OUTBOUND,
+            quantity=item.quantity,
+            from_warehouse_id=item.source_warehouse_id,
+            work_order_id=item.work_order_id,
+            replenishment_request_id=item.id,
+            movement_stage="ship",
+            user_id=actor.user_id,
+            unit_cost=part.default_cost,
+            notes=f"Replenishment #{item.id} shipped",
+        )
+        db.add(transaction)
+        db.flush()
+        transaction_id = transaction.id
+        item.shipment_transaction_id = transaction.id
+        item.shipped_by = actor.user_id
+        item.shipped_at = now
+
+    elif payload.action == "receive":
+        if item.status != "shipped":
+            raise HTTPException(status_code=409, detail="Only shipped replenishments can be received")
+        destination = db.get(Warehouse, item.destination_warehouse_id)
+        if not destination:
+            raise HTTPException(status_code=404, detail="Destination warehouse not found")
+        current_target = _validate_replenishment_destination(db, destination)
+        if current_target != item.target_user_id:
+            raise HTTPException(status_code=409, detail="Destination custody changed after shipment; warehouse reconciliation is required")
+        if item.target_user_id is not None:
+            if actor.role != UserRole.ENGINEER or actor.user_id != item.target_user_id:
+                raise HTTPException(status_code=403, detail="Only the destination engineer can receive this shipment")
+            require_bound_device(actor)
+            if destination.assigned_user_id != actor.user_id:
+                raise HTTPException(status_code=409, detail="Destination van is no longer assigned to this engineer")
+            _require_account_reauthentication(db, actor, payload.account_password)
+        elif not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        shipment_transaction = (
+            db.get(InventoryTransaction, item.shipment_transaction_id)
+            if item.shipment_transaction_id
+            else None
+        )
+        if (
+            not shipment_transaction
+            or shipment_transaction.replenishment_request_id != item.id
+            or shipment_transaction.movement_stage != "ship"
+            or shipment_transaction.transaction_type != TransactionType.OUTBOUND
+            or shipment_transaction.part_id != item.part_id
+            or shipment_transaction.quantity != item.quantity
+            or shipment_transaction.from_warehouse_id != item.source_warehouse_id
+        ):
+            raise HTTPException(status_code=409, detail="Shipment ledger is incomplete; warehouse reconciliation is required")
+        part = db.scalar(select(Part).where(Part.id == item.part_id).with_for_update())
+        if not part:
+            raise HTTPException(status_code=404, detail="Part not found")
+        transaction = InventoryTransaction(
+            part_id=item.part_id,
+            transaction_type=TransactionType.INBOUND,
+            quantity=item.quantity,
+            to_warehouse_id=item.destination_warehouse_id,
+            work_order_id=item.work_order_id,
+            replenishment_request_id=item.id,
+            movement_stage="receive",
+            user_id=actor.user_id,
+            unit_cost=shipment_transaction.unit_cost,
+            notes=f"Replenishment #{item.id} received",
+        )
+        db.add(transaction)
+        db.flush()
+        transaction_id = transaction.id
+        item.receipt_transaction_id = transaction.id
+        item.received_by = actor.user_id
+        item.received_device_id = actor.device_record_id
+        item.received_at = now
+
+    elif payload.action == "complete":
+        if not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        if item.status != "received" or item.receipt_transaction_id is None:
+            raise HTTPException(status_code=409, detail="Only a received shipment can be completed")
+        receipt_transaction = db.get(InventoryTransaction, item.receipt_transaction_id)
+        if (
+            not receipt_transaction
+            or receipt_transaction.replenishment_request_id != item.id
+            or receipt_transaction.movement_stage != "receive"
+            or receipt_transaction.transaction_type != TransactionType.INBOUND
+            or receipt_transaction.part_id != item.part_id
+            or receipt_transaction.quantity != item.quantity
+            or receipt_transaction.to_warehouse_id != item.destination_warehouse_id
+        ):
+            raise HTTPException(status_code=409, detail="Receipt ledger is incomplete; warehouse reconciliation is required")
+        item.completed_by = actor.user_id
+        item.completed_at = now
+        if item.notification_id:
+            notification = db.get(InventoryNotification, item.notification_id)
+            if notification:
+                notification.status = "resolved"
+
+    else:
+        if not warehouse_operator:
+            raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+        if item.status not in {"requested", "picking"}:
+            raise HTTPException(status_code=409, detail="Only requested or picking replenishments can be cancelled")
+        if not payload.reason or len(payload.reason.strip()) < 3:
+            raise HTTPException(status_code=422, detail="Cancellation reason must be at least 3 characters")
+        item.cancelled_by = actor.user_id
+        item.cancelled_at = now
+        item.cancellation_reason = payload.reason.strip()
+        if item.notification_id:
+            notification = db.get(InventoryNotification, item.notification_id)
+            if notification:
+                notification.status = "resolved"
+
+    if payload.action == "approve":
+        item.status = "requested"
+    else:
+        item.status = target_status
+        item.version += 1
+    db.add(item)
+    _audit(
+        db,
+        actor,
+        f"replenishment_{payload.action}",
+        "replenishment_request",
+        item.id,
+        {
+            "from_status": previous_status,
+            "to_status": target_status,
+            "previous_version": payload.expected_version,
+            "new_version": item.version,
+            "part_id": item.part_id,
+            "quantity": item.quantity,
+            "source_warehouse_id": item.source_warehouse_id,
+            "destination_warehouse_id": item.destination_warehouse_id,
+            "target_user_id": item.target_user_id,
+            "inventory_transaction_id": transaction_id,
+            "approval_status": item.approval_status,
+            "reason": item.rejection_reason if payload.action == "reject" else None,
+        },
+    )
+    db.commit()
+    db.refresh(item)
+    return _replenishment_read_for_actor(db, actor, item)
+
+
+@router.patch(
+    "/inventory/replenishment-requests/{request_id}",
+    response_model=ReplenishmentRequestRead,
+    deprecated=True,
+)
+def update_replenishment_request(request_id: int):
+    raise HTTPException(status_code=410, detail="Use the authenticated replenishment action endpoint")
+
+
+def _validate_vehicle_return_warehouses(
+    db: Session,
+    source: Warehouse,
+    destination: Warehouse,
+    engineer_id: int,
+) -> None:
+    if not source.is_active or not warehouse_is_vehicle(db, source):
+        raise HTTPException(status_code=409, detail="Return source must be an active engineer vehicle")
+    if source.assigned_user_id != engineer_id:
+        raise HTTPException(status_code=403, detail="Return source is not assigned to this engineer")
+    if not destination.is_active or warehouse_is_vehicle(db, destination):
+        raise HTTPException(status_code=409, detail="Return destination must be an active non-vehicle warehouse")
+    if source.id == destination.id:
+        raise HTTPException(status_code=400, detail="Return source and destination must be different")
+
+
+def _vehicle_return_read_for_actor(
+    db: Session,
+    actor: Actor,
+    item: VehicleReturnRequest,
+) -> VehicleReturnRequestRead:
+    payload = VehicleReturnRequestRead.model_validate(item).model_dump()
+    part = db.get(Part, item.part_id)
+    source = db.get(Warehouse, item.source_warehouse_id)
+    destination = db.get(Warehouse, item.destination_warehouse_id)
+    requested_device = db.get(UserDevice, item.requested_device_id)
+    shipped_device = db.get(UserDevice, item.shipped_device_id) if item.shipped_device_id else None
+
+    def user_name(user_id: int | None) -> str | None:
+        user = db.get(User, user_id) if user_id else None
+        return user.name if user else None
+
+    warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    is_engineer_owner = bool(actor.role == UserRole.ENGINEER and actor.user_id == item.engineer_id)
+    payload.update(
+        part_number=part.part_number if part else None,
+        part_name=part.name if part else None,
+        source_warehouse_name=source.name if source else None,
+        destination_warehouse_name=destination.name if destination else None,
+        engineer_name=user_name(item.engineer_id),
+        requested_by_name=user_name(item.requested_by),
+        requested_device_name=requested_device.device_name if requested_device else None,
+        approved_by_name=user_name(item.approved_by),
+        shipped_by_name=user_name(item.shipped_by),
+        shipped_device_name=shipped_device.device_name if shipped_device else None,
+        received_by_name=user_name(item.received_by),
+        cancelled_by_name=user_name(item.cancelled_by),
+        source_quantity=get_stock_quantity(db, item.part_id, item.source_warehouse_id),
+        destination_quantity=get_stock_quantity(db, item.part_id, item.destination_warehouse_id),
+        can_approve=warehouse_operator and item.status == "requested",
+        can_ship=is_engineer_owner and actor.device_verified and item.status == "approved",
+        can_receive=warehouse_operator and item.status == "shipped",
+        can_cancel=(warehouse_operator or is_engineer_owner) and item.status in {"requested", "approved"},
+    )
+    return VehicleReturnRequestRead(**payload)
+
+
+@router.get("/inventory/vehicle-return-destinations", response_model=list[WarehouseRead])
+def vehicle_return_destinations(
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
+    rows = db.scalars(select(Warehouse).where(Warehouse.is_active.is_(True)).order_by(Warehouse.name)).all()
+    return [warehouse for warehouse in rows if not warehouse_is_vehicle(db, warehouse)]
+
+
+@router.post("/inventory/vehicle-returns", response_model=VehicleReturnRequestRead)
+def create_vehicle_return_request(
+    payload: VehicleReturnRequestCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.role != UserRole.ENGINEER or actor.user_id is None:
+        raise HTTPException(status_code=403, detail="Only an engineer can request a vehicle return")
+    require_bound_device(actor)
+    client_request_id = payload.client_request_id.strip()
+    reason = payload.reason.strip()
+    if len(reason) < 3:
+        raise HTTPException(status_code=422, detail="Return reason must be at least 3 non-whitespace characters")
+
+    def matches_existing(candidate: VehicleReturnRequest) -> bool:
+        return (
+            candidate.part_id == payload.part_id
+            and candidate.source_warehouse_id == payload.source_warehouse_id
+            and candidate.destination_warehouse_id == payload.destination_warehouse_id
+            and candidate.quantity == payload.quantity
+            and candidate.reason == reason
+            and candidate.engineer_id == actor.user_id
+        )
+
+    existing = db.scalar(
+        select(VehicleReturnRequest).where(VehicleReturnRequest.client_request_id == client_request_id)
+    )
+    if existing:
+        if not matches_existing(existing):
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another return")
+        return _vehicle_return_read_for_actor(db, actor, existing)
+
+    part = db.get(Part, payload.part_id)
+    source = db.get(Warehouse, payload.source_warehouse_id)
+    destination = db.get(Warehouse, payload.destination_warehouse_id)
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+    if not source or not destination:
+        raise HTTPException(status_code=404, detail="Return warehouse not found")
+    _validate_vehicle_return_warehouses(db, source, destination, actor.user_id)
+    if get_stock_quantity(db, part.id, source.id) < payload.quantity:
+        raise HTTPException(status_code=409, detail="Vehicle stock is insufficient for this return")
+
+    item = VehicleReturnRequest(
+        client_request_id=client_request_id,
+        part_id=part.id,
+        source_warehouse_id=source.id,
+        destination_warehouse_id=destination.id,
+        engineer_id=actor.user_id,
+        quantity=payload.quantity,
+        reason=reason,
+        requested_by=actor.user_id,
+        requested_device_id=actor.device_record_id,
+    )
+    try:
+        db.add(item)
+        db.flush()
+        _audit(
+            db,
+            actor,
+            "vehicle_return_requested",
+            "vehicle_return_request",
+            item.id,
+            {
+                "part_id": item.part_id,
+                "quantity": item.quantity,
+                "source_warehouse_id": item.source_warehouse_id,
+                "destination_warehouse_id": item.destination_warehouse_id,
+                "engineer_id": item.engineer_id,
+                "client_request_id": item.client_request_id,
+                "reason": item.reason,
+            },
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.scalar(
+            select(VehicleReturnRequest).where(VehicleReturnRequest.client_request_id == client_request_id)
+        )
+        if existing and matches_existing(existing):
+            return _vehicle_return_read_for_actor(db, actor, existing)
+        if existing:
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another return")
+        raise HTTPException(status_code=409, detail="Vehicle return request could not be created") from exc
+    db.refresh(item)
+    return _vehicle_return_read_for_actor(db, actor, item)
+
+
+@router.get("/inventory/vehicle-returns", response_model=list[VehicleReturnRequestRead])
+def list_vehicle_return_requests(
+    status: str | None = Query(default=None, pattern="^(requested|approved|shipped|received|cancelled)$"),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE, UserRole.ENGINEER)
+    stmt = select(VehicleReturnRequest).order_by(VehicleReturnRequest.id.desc())
+    if actor.role == UserRole.ENGINEER:
+        stmt = stmt.where(VehicleReturnRequest.engineer_id == actor.user_id)
+    if status:
+        stmt = stmt.where(VehicleReturnRequest.status == status)
+    rows = db.scalars(stmt.limit(limit)).all()
+    return [_vehicle_return_read_for_actor(db, actor, item) for item in rows]
+
+
+@router.post("/inventory/vehicle-returns/{request_id}/actions", response_model=VehicleReturnRequestRead)
+def act_on_vehicle_return_request(
+    request_id: int,
+    payload: VehicleReturnRequestAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    begin_inventory_write(db)
+    item = db.scalar(
+        select(VehicleReturnRequest)
+        .where(
+            VehicleReturnRequest.id == request_id,
+            VehicleReturnRequest.organization_id == actor.organization_id,
+        )
+        .with_for_update()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Vehicle return request not found")
+
+    warehouse_operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    engineer_owner = bool(actor.role == UserRole.ENGINEER and actor.user_id == item.engineer_id)
+    target_status = {
+        "approve": "approved",
+        "ship": "shipped",
+        "receive": "received",
+        "cancel": "cancelled",
+    }[payload.action]
+    if payload.action in {"approve", "receive"} and not warehouse_operator:
+        raise HTTPException(status_code=403, detail="Warehouse or administrator access required")
+    if payload.action == "ship":
+        if not engineer_owner:
+            raise HTTPException(status_code=403, detail="Only the vehicle owner can hand over this return")
+        require_bound_device(actor)
+        if item.status == "shipped" and item.shipped_device_id != actor.device_record_id:
+            raise HTTPException(status_code=403, detail="Return was handed over on another registered device")
+    if payload.action == "cancel" and not (warehouse_operator or engineer_owner):
+        raise HTTPException(status_code=403, detail="Only the vehicle owner or warehouse can cancel this return")
+    if item.status == target_status:
+        return _vehicle_return_read_for_actor(db, actor, item)
+    if item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Vehicle return changed; refresh before continuing")
+
+    part = db.scalar(select(Part).where(Part.id == item.part_id).with_for_update())
+    source = db.get(Warehouse, item.source_warehouse_id)
+    destination = db.get(Warehouse, item.destination_warehouse_id)
+    if not part or not source or not destination:
+        raise HTTPException(status_code=409, detail="Return inventory references are incomplete")
+
+    previous_status = item.status
+    transaction_id: int | None = None
+    now = datetime.utcnow()
+    if payload.action == "approve":
+        if item.status != "requested":
+            raise HTTPException(status_code=409, detail="Only a requested return can be approved")
+        _validate_vehicle_return_warehouses(db, source, destination, item.engineer_id)
+        if get_available_stock_quantity(db, item.part_id, item.source_warehouse_id) < item.quantity:
+            raise HTTPException(status_code=409, detail="Vehicle stock is no longer available for approval")
+        item.approved_by = actor.user_id
+        item.approved_at = now
+
+    elif payload.action == "ship":
+        if item.status != "approved":
+            raise HTTPException(status_code=409, detail="Only an approved return can be handed over")
+        _validate_vehicle_return_warehouses(db, source, destination, item.engineer_id)
+        if source.assigned_user_id != actor.user_id:
+            raise HTTPException(status_code=409, detail="Vehicle assignment changed after approval")
+        _require_account_reauthentication(db, actor, payload.account_password)
+        if get_stock_quantity(db, item.part_id, item.source_warehouse_id) < item.quantity:
+            raise HTTPException(status_code=409, detail="Vehicle stock is insufficient for handover")
+        transaction = InventoryTransaction(
+            part_id=item.part_id,
+            transaction_type=TransactionType.OUTBOUND,
+            quantity=item.quantity,
+            from_warehouse_id=item.source_warehouse_id,
+            vehicle_return_request_id=item.id,
+            movement_stage="return_ship",
+            user_id=actor.user_id,
+            unit_cost=part.default_cost,
+            notes=f"Vehicle return #{item.id} handed over",
+        )
+        db.add(transaction)
+        db.flush()
+        transaction_id = transaction.id
+        item.shipment_transaction_id = transaction.id
+        item.shipped_by = actor.user_id
+        item.shipped_device_id = actor.device_record_id
+        item.shipped_at = now
+
+    elif payload.action == "receive":
+        if item.status != "shipped":
+            raise HTTPException(status_code=409, detail="Only a handed-over return can be received")
+        if not destination.is_active or warehouse_is_vehicle(db, destination):
+            raise HTTPException(status_code=409, detail="Return destination is no longer an active warehouse")
+        shipment = db.get(InventoryTransaction, item.shipment_transaction_id) if item.shipment_transaction_id else None
+        if (
+            not shipment
+            or shipment.vehicle_return_request_id != item.id
+            or shipment.movement_stage != "return_ship"
+            or shipment.transaction_type != TransactionType.OUTBOUND
+            or shipment.part_id != item.part_id
+            or shipment.quantity != item.quantity
+            or shipment.from_warehouse_id != item.source_warehouse_id
+        ):
+            raise HTTPException(status_code=409, detail="Return shipment ledger is incomplete")
+        transaction = InventoryTransaction(
+            part_id=item.part_id,
+            transaction_type=TransactionType.INBOUND,
+            quantity=item.quantity,
+            to_warehouse_id=item.destination_warehouse_id,
+            vehicle_return_request_id=item.id,
+            movement_stage="return_receive",
+            user_id=actor.user_id,
+            unit_cost=shipment.unit_cost,
+            notes=f"Vehicle return #{item.id} received",
+        )
+        db.add(transaction)
+        db.flush()
+        transaction_id = transaction.id
+        item.receipt_transaction_id = transaction.id
+        item.received_by = actor.user_id
+        item.received_at = now
+
+    else:
+        if item.status not in {"requested", "approved"}:
+            raise HTTPException(status_code=409, detail="Only requested or approved returns can be cancelled")
+        if not payload.reason or len(payload.reason.strip()) < 3:
+            raise HTTPException(status_code=422, detail="Cancellation reason must be at least 3 characters")
+        item.cancelled_by = actor.user_id
+        item.cancelled_at = now
+        item.cancellation_reason = payload.reason.strip()
+
+    item.status = target_status
+    item.version += 1
+    _audit(
+        db,
+        actor,
+        f"vehicle_return_{payload.action}",
+        "vehicle_return_request",
+        item.id,
+        {
+            "from_status": previous_status,
+            "to_status": target_status,
+            "previous_version": payload.expected_version,
+            "new_version": item.version,
+            "part_id": item.part_id,
+            "quantity": item.quantity,
+            "source_warehouse_id": item.source_warehouse_id,
+            "destination_warehouse_id": item.destination_warehouse_id,
+            "engineer_id": item.engineer_id,
+            "inventory_transaction_id": transaction_id,
+            "reason": item.cancellation_reason if payload.action == "cancel" else None,
+        },
+    )
+    db.commit()
+    db.refresh(item)
+    return _vehicle_return_read_for_actor(db, actor, item)
+
+
+def _inventory_count_quantity(db: Session, item: InventoryCountSession, part_id: int) -> int:
+    if item.location_id is not None:
+        return get_location_stock_quantity(db, part_id, item.location_id)
+    return get_stock_quantity(db, part_id, item.warehouse_id)
+
+
+def _inventory_count_read(db: Session, actor: Actor, item: InventoryCountSession) -> InventoryCountRead:
+    warehouse = db.get(Warehouse, item.warehouse_id)
+    location = db.get(StorageLocation, item.location_id) if item.location_id else None
+    rows = db.scalars(
+        select(InventoryCountLine).where(InventoryCountLine.session_id == item.id).order_by(InventoryCountLine.id)
+    ).all()
+    lines = []
+    for row in rows:
+        part = db.get(Part, row.part_id)
+        lines.append(InventoryCountLineRead(
+            id=row.id, part_id=row.part_id, part_number=part.part_number if part else None,
+            part_name=part.name if part else None, counted_quantity=row.counted_quantity,
+            submitted_book_quantity=row.submitted_book_quantity,
+            approved_book_quantity=row.approved_book_quantity, variance_quantity=row.variance_quantity,
+            counted_by=row.counted_by, counted_at=row.counted_at,
+            adjustment_transaction_id=row.adjustment_transaction_id, notes=row.notes,
+        ))
+    operator = actor.role in {UserRole.ADMIN, UserRole.WAREHOUSE}
+    return InventoryCountRead(
+        id=item.id, client_request_id=item.client_request_id, warehouse_id=item.warehouse_id,
+        warehouse_name=warehouse.name if warehouse else None, location_id=item.location_id,
+        location_code=location.code if location else None, title=item.title, notes=item.notes,
+        status=item.status, version=item.version, created_by=item.created_by,
+        submitted_by=item.submitted_by, submitted_at=item.submitted_at,
+        approved_by=item.approved_by, approved_at=item.approved_at,
+        cancelled_by=item.cancelled_by, cancelled_at=item.cancelled_at,
+        cancellation_reason=item.cancellation_reason, lines=lines,
+        can_edit=operator and item.status == "draft",
+        can_submit=operator and item.status == "draft" and bool(lines),
+        can_approve=actor.role == UserRole.ADMIN and item.status == "submitted",
+        can_cancel=operator and item.status == "draft" or actor.role == UserRole.ADMIN and item.status == "submitted",
+        created_at=item.created_at, updated_at=item.updated_at,
+    )
+
+
+@router.post("/inventory/counts", response_model=InventoryCountRead)
+def create_inventory_count(
+    payload: InventoryCountCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.WAREHOUSE)
+    client_request_id = payload.client_request_id.strip()
+    title = payload.title.strip()
+    if len(client_request_id) < 8:
+        raise HTTPException(status_code=422, detail="client_request_id must contain at least 8 non-whitespace characters")
+    if len(title) < 3:
+        raise HTTPException(status_code=422, detail="Count title must contain at least 3 non-whitespace characters")
+    existing = db.scalar(select(InventoryCountSession).where(
+        InventoryCountSession.client_request_id == client_request_id
+    ))
+    if existing:
+        if (existing.warehouse_id, existing.location_id, existing.title) != (
+            payload.warehouse_id, payload.location_id, title
+        ):
+            raise HTTPException(status_code=409, detail="client_request_id was already used for another count")
+        return _inventory_count_read(db, actor, existing)
+    warehouse = db.get(Warehouse, payload.warehouse_id)
+    if not warehouse or not warehouse.is_active:
+        raise HTTPException(status_code=404, detail="Active warehouse not found")
+    if warehouse_is_vehicle(db, warehouse):
+        raise HTTPException(status_code=409, detail="Vehicle stock requires an engineer-owned count workflow")
+    location = db.get(StorageLocation, payload.location_id) if payload.location_id else None
+    if location and (not location.is_active or location.warehouse_id != warehouse.id):
+        raise HTTPException(status_code=400, detail="Active location does not belong to warehouse")
+    item = InventoryCountSession(
+        client_request_id=client_request_id, warehouse_id=warehouse.id,
+        location_id=location.id if location else None, title=title, notes=payload.notes,
+        created_by=actor.user_id,
+    )
+    try:
+        db.add(item)
+        db.flush()
+        _audit(db, actor, "inventory_count_created", "inventory_count", item.id, {
+            "warehouse_id": item.warehouse_id, "location_id": item.location_id, "title": item.title,
+        })
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.scalar(select(InventoryCountSession).where(
+            InventoryCountSession.client_request_id == client_request_id
+        ))
+        if existing and (existing.warehouse_id, existing.location_id, existing.title) == (
+            payload.warehouse_id, payload.location_id, title
+        ):
+            return _inventory_count_read(db, actor, existing)
+        raise HTTPException(status_code=409, detail="Inventory count could not be created") from exc
+    db.refresh(item)
+    return _inventory_count_read(db, actor, item)
+
+
+@router.get("/inventory/counts", response_model=list[InventoryCountRead])
+def list_inventory_counts(
+    status: str | None = Query(default=None, pattern="^(draft|submitted|approved|cancelled)$"),
+    limit: int = Query(default=100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    stmt = select(InventoryCountSession).order_by(InventoryCountSession.id.desc())
+    if status:
+        stmt = stmt.where(InventoryCountSession.status == status)
+    return [_inventory_count_read(db, actor, item) for item in db.scalars(stmt.limit(limit)).all()]
+
+
+@router.put("/inventory/counts/{count_id}/lines", response_model=InventoryCountRead)
+def upsert_inventory_count_line(
+    count_id: int,
+    payload: InventoryCountLineUpsert,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.WAREHOUSE)
+    begin_inventory_write(db)
+    item = db.scalar(select(InventoryCountSession).where(
+        InventoryCountSession.id == count_id,
+        InventoryCountSession.organization_id == actor.organization_id,
+    ).with_for_update())
+    if not item:
+        raise HTTPException(status_code=404, detail="Inventory count not found")
+    if item.status != "draft" or item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Count is no longer editable; refresh before continuing")
+    if not db.get(Part, payload.part_id):
+        raise HTTPException(status_code=404, detail="Part not found")
+    line = db.scalar(select(InventoryCountLine).where(
+        InventoryCountLine.session_id == item.id, InventoryCountLine.part_id == payload.part_id
+    ))
+    if line:
+        previous = line.counted_quantity
+        line.counted_quantity = payload.counted_quantity
+        line.notes = payload.notes
+        line.counted_by = actor.user_id
+        line.counted_at = datetime.utcnow()
+    else:
+        previous = None
+        line = InventoryCountLine(session_id=item.id, part_id=payload.part_id,
+            counted_quantity=payload.counted_quantity, notes=payload.notes, counted_by=actor.user_id)
+        db.add(line)
+    item.version += 1
+    db.flush()
+    _audit(db, actor, "inventory_count_line_recorded", "inventory_count", item.id, {
+        "line_id": line.id, "part_id": line.part_id, "previous_quantity": previous,
+        "counted_quantity": line.counted_quantity, "new_version": item.version,
+    })
+    db.commit()
+    db.refresh(item)
+    return _inventory_count_read(db, actor, item)
+
+
+@router.post("/inventory/counts/{count_id}/actions", response_model=InventoryCountRead)
+def act_on_inventory_count(
+    count_id: int,
+    payload: InventoryCountAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.WAREHOUSE)
+    begin_inventory_write(db)
+    item = db.scalar(select(InventoryCountSession).where(
+        InventoryCountSession.id == count_id,
+        InventoryCountSession.organization_id == actor.organization_id,
+    ).with_for_update())
+    if not item:
+        raise HTTPException(status_code=404, detail="Inventory count not found")
+    if item.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Inventory count changed; refresh before continuing")
+    now = datetime.utcnow()
+    previous_status = item.status
+    lines = db.scalars(select(InventoryCountLine).where(InventoryCountLine.session_id == item.id)).all()
+    if payload.action == "submit":
+        if item.status != "draft" or not lines:
+            raise HTTPException(status_code=409, detail="Only a non-empty draft count can be submitted")
+        for line in lines:
+            line.submitted_book_quantity = _inventory_count_quantity(db, item, line.part_id)
+        item.status, item.submitted_by, item.submitted_at = "submitted", actor.user_id, now
+    elif payload.action == "approve":
+        if actor.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Administrator approval is required to adjust inventory")
+        if item.status != "submitted":
+            raise HTTPException(status_code=409, detail="Only a submitted count can be approved")
+        _require_account_reauthentication(db, actor, payload.password)
+        for line in lines:
+            part = db.scalar(select(Part).where(Part.id == line.part_id).with_for_update())
+            if not part:
+                raise HTTPException(status_code=409, detail="Counted part no longer exists")
+            book = _inventory_count_quantity(db, item, line.part_id)
+            variance = line.counted_quantity - book
+            line.approved_book_quantity, line.variance_quantity = book, variance
+            if variance:
+                tx = InventoryTransaction(
+                    part_id=line.part_id, transaction_type=TransactionType.ADJUSTMENT,
+                    quantity=abs(variance),
+                    from_warehouse_id=item.warehouse_id if variance < 0 else None,
+                    to_warehouse_id=item.warehouse_id if variance > 0 else None,
+                    from_location_id=item.location_id if variance < 0 else None,
+                    to_location_id=item.location_id if variance > 0 else None,
+                    inventory_count_line_id=line.id, user_id=actor.user_id,
+                    unit_cost=part.default_cost, notes=f"Approved inventory count #{item.id}",
+                )
+                db.add(tx)
+                db.flush()
+                line.adjustment_transaction_id = tx.id
+        item.status, item.approved_by, item.approved_at = "approved", actor.user_id, now
+    else:
+        allowed = item.status == "draft" or actor.role == UserRole.ADMIN and item.status == "submitted"
+        if not allowed:
+            raise HTTPException(status_code=409, detail="This inventory count cannot be cancelled")
+        if not payload.reason or len(payload.reason.strip()) < 3:
+            raise HTTPException(status_code=422, detail="Cancellation reason must be at least 3 characters")
+        item.status, item.cancelled_by, item.cancelled_at = "cancelled", actor.user_id, now
+        item.cancellation_reason = payload.reason.strip()
+    item.version += 1
+    _audit(db, actor, f"inventory_count_{payload.action}", "inventory_count", item.id, {
+        "from_status": previous_status, "to_status": item.status, "line_count": len(lines),
+        "previous_version": payload.expected_version, "new_version": item.version,
+        "warehouse_id": item.warehouse_id, "location_id": item.location_id,
+        "reason": item.cancellation_reason if payload.action == "cancel" else None,
+    })
+    db.commit()
+    db.refresh(item)
+    return _inventory_count_read(db, actor, item)
 
 
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])
@@ -1748,26 +5414,10 @@ def work_order_part_recommendations(
     work_order = db.get(WorkOrder, work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
-    memories = db.scalars(select(WorkOrderPartMemory).where(
-        or_(
-            and_(WorkOrderPartMemory.machine_type == work_order.machine_type, WorkOrderPartMemory.job_type == work_order.job_type),
-            WorkOrderPartMemory.machine_type == work_order.machine_type,
-            WorkOrderPartMemory.job_type == work_order.job_type,
-        )
-    ).order_by(WorkOrderPartMemory.usage_count.desc(), WorkOrderPartMemory.total_quantity.desc()).limit(20)).all()
-    recommendations = []
-    for memory in memories:
-        part = db.get(Part, memory.part_id)
-        if part:
-            average = max(1, round(memory.total_quantity / memory.usage_count))
-            exact = memory.machine_type == work_order.machine_type and memory.job_type == work_order.job_type
-            basis = "相同机型和工单类型" if exact else ("相同机型" if memory.machine_type == work_order.machine_type else "相同工单类型")
-            recommendations.append(WorkOrderPartRecommendation(
-                part=PartRead.model_validate(part), recommended_quantity=average,
-                usage_count=memory.usage_count, total_quantity=memory.total_quantity,
-                reason=f"基于{basis}：历史上 {memory.usage_count} 个类似工单使用过，平均每单 {average} 件。",
-            ))
-    return recommendations
+    consume_monthly_usage(db, actor.organization_id, ai_requests=1)
+    result = build_part_recommendations(db, work_order)
+    db.commit()
+    return result
 
 
 @router.get("/work-order-parts", response_model=list[WorkOrderPartRead])
@@ -2235,6 +5885,10 @@ async def preview_opening_inventory_import(
             row_errors.append("part_number does not exist in this organization")
         if not warehouse:
             row_errors.append("warehouse does not exist in this organization")
+        elif warehouse_is_vehicle(db, warehouse):
+            row_errors.append(
+                "opening inventory cannot post to a vehicle; use replenishment and engineer receipt"
+            )
         pair = (part_number, warehouse_name.lower())
         if part_number and warehouse_name and pair in seen_pairs:
             row_errors.append("duplicate part and warehouse in file")
@@ -2298,6 +5952,7 @@ def commit_opening_inventory_import(
     actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    begin_inventory_write(db)
     batch = db.get(ImportBatch, batch_id)
     if not batch or batch.import_type != "opening_inventory":
         raise HTTPException(status_code=404, detail="Import batch not found")
@@ -2306,7 +5961,20 @@ def commit_opening_inventory_import(
     if batch.status != "ready":
         raise HTTPException(status_code=409, detail="Import batch has validation errors")
     rows = json.loads(batch.payload_json or "[]")
+    part_ids = sorted({row["part_id"] for row in rows})
+    if part_ids:
+        locked_parts = db.scalars(
+            select(Part).where(Part.id.in_(part_ids)).order_by(Part.id).with_for_update()
+        ).all()
+        if len(locked_parts) != len(part_ids):
+            raise HTTPException(status_code=409, detail="An opening inventory part no longer exists")
     for row in rows:
+        warehouse = db.get(Warehouse, row["warehouse_id"])
+        if not warehouse or warehouse_is_vehicle(db, warehouse):
+            raise HTTPException(
+                status_code=409,
+                detail="Opening inventory can only be committed to non-vehicle warehouses",
+            )
         db.add(
             InventoryTransaction(
                 part_id=row["part_id"],
@@ -2323,6 +5991,14 @@ def commit_opening_inventory_import(
     batch.updated_count = 0
     batch.committed_at = datetime.utcnow()
     db.add(batch)
+    _audit(
+        db,
+        actor,
+        "opening_inventory_committed",
+        "import_batch",
+        batch.id,
+        {"rows": len(rows), "warehouse_ids": sorted({row["warehouse_id"] for row in rows})},
+    )
     db.commit()
     db.refresh(batch)
     return _import_batch_read(batch)

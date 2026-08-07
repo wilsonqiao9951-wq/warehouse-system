@@ -18,7 +18,21 @@ class Settings(BaseSettings):
     frontend_public_url: str = "http://localhost:3000"
     max_image_upload_bytes: int = 10 * 1024 * 1024
     max_audio_upload_bytes: int = 15 * 1024 * 1024
+    max_knowledge_media_upload_bytes: int = 50 * 1024 * 1024
     max_import_upload_bytes: int = 5 * 1024 * 1024
+    integration_delivery_enabled: bool = True
+    integration_delivery_poll_seconds: int = 30
+    custom_domain_dns_resolver_url: str = "https://cloudflare-dns.com/dns-query"
+    custom_domain_verification_cooldown_seconds: int = 30
+    billing_reconciliation_enabled: bool = True
+    billing_reconciliation_poll_seconds: int = 3600
+    billing_notice_window_days: int = 7
+    billing_webhook_secret: str = ""
+    billing_webhook_tolerance_seconds: int = 300
+    billing_webhook_max_bytes: int = 65536
+    data_export_public_files_root: str = "uploads"
+    data_export_private_files_root: str = "private_uploads"
+    max_data_export_bytes: int = 512 * 1024 * 1024
     # Comma-separated browser origins for CORS (e.g. Cloudflare Tunnel https://xxx.trycloudflare.com)
     cors_extra_origins: str = ""
 

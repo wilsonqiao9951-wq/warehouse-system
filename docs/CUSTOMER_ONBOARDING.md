@@ -46,6 +46,18 @@ No source value should be silently discarded. The customer approves the mapping 
 
 Create one `organization` for the customer. Users, parts, warehouses, work orders, inventory transactions, uploads and audit records inherit its `organization_id` from the authenticated user. Never accept `organization_id` from an import spreadsheet or normal API request.
 
+At creation, record the approved plan and trial length. Verify the standard or
+contract-specific limits for active users plus pending invitations, main
+warehouses, vehicle inventories, AI requests, and external API requests. Give
+the customer its branded link only after the HTTPS logo URL, primary color, and
+login headline have been reviewed.
+
+See [Commercial branding and plan controls](COMMERCIAL_BRANDING_PLANS.md) for
+the plan defaults, subscription states, access behavior, and quota definitions.
+For a Professional or Enterprise custom hostname, complete the DNS ownership,
+TLS/routing, CORS, and sender-identity checklist in
+[Verified custom domains](VERIFIED_DOMAINS.md) before publishing the URL.
+
 ## 4. Trial import
 
 Import into a staging database first. Validate:
@@ -87,6 +99,18 @@ The preview shows current quantity, proposed opening quantity and projected quan
 ## 5. Customer acceptance and cutover
 
 The customer signs off on the part catalog and opening balances. Then import users, warehouses, parts, stock and open work orders in that order. Run a limited pilot before broad rollout.
+
+## 6. Billing lifecycle binding
+
+In `/platform`, select **Billing lifecycle** for the customer. Use `manual` mode
+until an approved provider adapter exists. For a generic adapter, record the
+unique external customer and subscription references, configure the production
+Webhook secret outside source control, and send a signed activation event.
+Replay the same event once to verify idempotency, then confirm the current period,
+event evidence, audit evidence, and subscription notices. Never paste payment
+methods, card details, or the Webhook secret into customer records.
+
+See [Billing lifecycle and subscription notices](BILLING_LIFECYCLE.md).
 
 ## Product delivery options
 

@@ -13,11 +13,18 @@ const links = [
   { href: "/inventory", label: "Inventory", roles: ["warehouse", "manager", "admin"] },
   { href: "/inventory-scan", label: "Scan & Check", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/warehouse-tasks", label: "Warehouse Tasks", roles: ["warehouse", "manager", "admin"] },
+  { href: "/inventory-counts", label: "Inventory Counts", roles: ["warehouse", "manager", "admin"] },
+  { href: "/knowledge-base", label: "Service Knowledge", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/part-observation", label: "Photo Memory", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/employees", label: "Employees", roles: ["manager", "admin"] },
   { href: "/reports", label: "Reports", roles: ["manager", "admin"] },
+  { href: "/backups", label: "Backups", roles: ["admin"] },
   { href: "/pilot-checklist", label: "Pilot Checklist", roles: ["manager", "admin"] },
   { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
+  { href: "/work-order-templates", label: "Job Forms", roles: ["manager", "admin"] },
+  { href: "/form-actions", label: "Form Actions", roles: ["warehouse", "manager", "admin"] },
+  { href: "/sync-conflicts", label: "Sync Conflicts", roles: ["admin"] },
+  { href: "/integrations", label: "Integrations", roles: ["manager", "admin"] },
   { href: "/platform", label: "Customers", roles: ["admin"] },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },
   { href: "/parts-import", label: "Parts Import", roles: ["warehouse", "manager", "admin"] },
@@ -31,7 +38,7 @@ const links = [
 ];
 
 function sortEngineerLinks(items: typeof links) {
-  const order = ["/today", "/my-jobs", "/inventory-scan", "/my-van-inventory", "/profile", "/map", "/part-observation"];
+  const order = ["/today", "/my-jobs", "/my-van-inventory", "/knowledge-base", "/inventory-scan", "/sync-center", "/profile", "/map", "/part-observation"];
   return [...items].sort((a, b) => {
     const ai = order.indexOf(a.href); const bi = order.indexOf(b.href);
     return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);
@@ -51,6 +58,10 @@ export default function Nav() {
       setRole(saved);
     }
     if (token) {
+      if (!navigator.onLine) {
+        setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
+        return;
+      }
       api.getMe()
         .then((user) => {
           setAuthenticated(true);
@@ -59,9 +70,18 @@ export default function Nav() {
           window.localStorage.setItem("opf_role", user.role);
           window.localStorage.setItem("opf_user_id", String(user.id));
         })
-        .catch(() => {
-          window.localStorage.removeItem("opf_access_token");
-          setAuthenticated(false);
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "";
+          const networkUnavailable = (
+            message.includes("Network unavailable")
+            || message.includes("API unavailable")
+          );
+          if (navigator.onLine && !networkUnavailable) {
+            window.localStorage.removeItem("opf_access_token");
+            setAuthenticated(false);
+          } else {
+            setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
+          }
         });
     }
   }, []);

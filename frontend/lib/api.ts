@@ -1,18 +1,46 @@
 import {
+  BillingLifecycleEvent,
+  BillingProvider,
   EngineerDashboard,
+  ExternalIntegration,
+  ExternalIntegrationProvider,
+  ExternalIntegrationSecret,
+  ExternalSyncLog,
   JobStatus,
   LowStockAlert,
   LocationStockBalance,
+  MachineKnowledgeDraftGeneration,
+  MachineKnowledgeEntry,
+  MachineKnowledgeEntryType,
+  MachineKnowledgePartRole,
+  MachineKnowledgeProfile,
   Organization,
+  OrganizationBillingOverview,
+  OrganizationCommercialReport,
+  OrganizationDataExport,
+  OrganizationBranding,
+  OrganizationSettings,
+  OrganizationDomain,
+  PlatformBillingAccount,
+  PlatformCommercialReportRow,
+  PlanCode,
+  SubscriptionStatus,
+  SubscriptionNotice,
   PilotChecklist,
   Part,
+  PartRecognitionCandidate,
+  PartRecognitionObservation,
   QCPicture,
   ReturnEquipment,
   StockBalance,
   StorageLocation,
   InventoryScanResult,
+  InventoryLocationScan,
+  InventoryLocationLabel,
   InventoryNotification,
   ReplenishmentRequest,
+  VehicleReturnRequest,
+  InventoryCount,
   User,
   Warehouse,
   WorkOrder,
@@ -22,25 +50,119 @@ import {
   ImportBatch,
   InvitationCreated,
   InvitationInfo,
-  WorkOrderProfit
-  ,WorkOrderPartRecommendation, WorkOrderVoiceNote, WorkOrderServiceContext, CompletionPolicy
+  WorkOrderProfit,
+  WorkOrderPartRecommendation,
+  WorkOrderVoiceNote,
+  WorkOrderServiceContext,
+  WorkOrderServiceIntelligence,
+  CompletionPolicy,
+  WorkOrderForm,
+  WorkOrderFormAction,
+  WorkOrderFormConflict,
+  WorkOrderFormConflictReceipt,
+  WorkOrderFormConflictStatus,
+  WorkOrderFormField,
+  WorkOrderFormTemplate,
+  WorkOrderFormValue,
+  OfflineQueuedResult
 } from "@/types";
 import { ensureDeviceCredentials, getCurrentDeviceId, getCurrentDeviceToken } from "@/lib/device";
+import {
+  deleteOfflineImage,
+  isOfflineMediaMarker,
+  listOfflineImages,
+  OfflineMediaSummary,
+  OfflineMediaPurpose,
+  queueOfflineImage,
+  readOfflineImage
+} from "@/lib/offline-media";
+import {
+  listOfflineReadResponses,
+  OfflineReadCacheSummary,
+  readOfflineReadResponse,
+  saveOfflineReadResponse
+} from "@/lib/offline-read-cache";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
 const OFFLINE_QUEUE_KEY = "opf_offline_queue";
 const CLAIM_VERSIONS_KEY = "opf_claim_versions";
 
+async function downloadAuthenticatedFile(
+  path: string,
+  payload: object,
+  fallbackFilename: string
+): Promise<void> {
+  if (typeof window === "undefined") throw new Error("File export requires a browser.");
+  const token = window.localStorage.getItem("opf_access_token");
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store"
+  });
+  if (!response.ok) {
+    let detail = `Unable to export file (${response.status})`;
+    try {
+      const body = await response.json() as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // Keep the status fallback.
+    }
+    throw new Error(detail);
+  }
+  const objectUrl = URL.createObjectURL(await response.blob());
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = fallbackFilename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
 interface OfflineQueueItem {
+  id: string;
   path: string;
   method: string;
   body: string;
   queuedAt: string;
+  updatedAt: string;
   userId: string;
   deviceId: string;
   workOrderId?: number;
   claimVersion?: number;
+  operationType: "work_order_form" | "work_order_evidence" | "other";
+  syncState: "pending" | "failed" | "conflict" | "blocked";
+  attemptCount: number;
+  lastAttemptAt?: string;
   blockedReason?: string;
+  serverConflictId?: number;
+}
+
+class ApiRequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
+
+function queueId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function operationTypeForPath(path: string): OfflineQueueItem["operationType"] {
+  if (/^\/work-orders\/\d+\/form(?:\?|$)/.test(path)) return "work_order_form";
+  if (/^\/(qc-pictures|return-equipments)(?:\?|$)/.test(path)) return "work_order_evidence";
+  return "other";
 }
 
 function readJsonStorage<T>(key: string, fallback: T): T {
@@ -90,15 +212,95 @@ function workOrderIdForRequest(path: string, init?: RequestInit): number | undef
   }
 }
 
-function isOnlineOnlyMutation(path: string, method: string): boolean {
-  if (method === "GET") return false;
-  if (path.startsWith("/auth/") || path.startsWith("/platform/")) return true;
-  if (/^\/work-orders\/\d+\/(claim|release|start|pause|complete|request-completion|approve-completion|reject-completion)$/.test(path)) return true;
-  return path === "/job-status";
+function isOfflineQueueableMutation(path: string, method: string): boolean {
+  if (method === "PATCH" && /^\/work-orders\/\d+\/form(?:\?|$)/.test(path)) {
+    return true;
+  }
+  return (
+    method === "POST"
+    && (
+      /^\/qc-pictures(?:\?|$)/.test(path)
+      || /^\/return-equipments(?:\?|$)/.test(path)
+    )
+  );
+}
+
+function isOfflineReadableRequest(path: string): boolean {
+  const workOrderPath = path.split("?")[0];
+  const reviewedWorkOrderPath = (
+    /^\/work-orders\/\d+$/.test(workOrderPath)
+    || /^\/work-orders\/\d+\/(form|form-actions|service-context|service-intelligence|completion-policy|part-recommendations|voice-notes)$/.test(workOrderPath)
+  );
+  return (
+    path === "/auth/me"
+    || path === "/organization/settings"
+    || /^\/work-orders(?:\?|$)/.test(path)
+    || reviewedWorkOrderPath
+    || /^\/(parts|warehouses|job-status|qc-pictures|return-equipments|work-order-parts)(?:\?|$)/.test(path)
+    || /^\/employees\/\d+\/van-inventory(?:\?|$)/.test(path)
+    || /^\/inventory\/(my-van|replenishment-requests|vehicle-returns|vehicle-return-destinations)(?:\?|$)/.test(path)
+  );
+}
+
+function offlineReadIdentity(): { userId: string; deviceId: string } | null {
+  if (typeof window === "undefined") return null;
+  const userId = window.localStorage.getItem("opf_user_id");
+  const deviceId = getCurrentDeviceId();
+  return userId && deviceId ? { userId, deviceId } : null;
+}
+
+async function readRetainedResponse<T>(path: string): Promise<T> {
+  const identity = offlineReadIdentity();
+  if (!identity) {
+    throw new Error("Sign in on this registered device before opening retained data.");
+  }
+  const cached = await readOfflineReadResponse<T>(
+    identity.userId,
+    identity.deviceId,
+    path
+  );
+  window.dispatchEvent(new CustomEvent("opf-offline-cache-hit", {
+    detail: { path, storedAt: cached.storedAt }
+  }));
+  return cached.payload;
 }
 
 function readOfflineQueue(): OfflineQueueItem[] {
-  return readJsonStorage<OfflineQueueItem[]>(OFFLINE_QUEUE_KEY, []);
+  const raw = readJsonStorage<OfflineQueueItem[]>(OFFLINE_QUEUE_KEY, []);
+  let migrated = false;
+  const normalized = raw.map((item) => {
+    const unsafeLegacyMutation = !isOfflineQueueableMutation(
+      item.path,
+      (item.method || "GET").toUpperCase()
+    );
+    if (
+      !item.id
+      || !item.updatedAt
+      || !item.operationType
+      || !item.syncState
+      || item.attemptCount === undefined
+      || (unsafeLegacyMutation && item.syncState !== "blocked")
+    ) {
+      migrated = true;
+    }
+    return {
+      ...item,
+      id: item.id || queueId(),
+      updatedAt: item.updatedAt || item.queuedAt,
+      operationType: item.operationType || operationTypeForPath(item.path),
+      syncState: unsafeLegacyMutation
+        ? "blocked" as const
+        : item.syncState || (item.blockedReason ? "failed" : "pending"),
+      attemptCount: item.attemptCount || 0,
+      blockedReason: unsafeLegacyMutation
+        ? "Legacy operation is outside the reviewed offline-write allowlist and will not be replayed."
+        : item.blockedReason
+    };
+  });
+  if (migrated && typeof window !== "undefined") {
+    window.localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(normalized));
+  }
+  return normalized;
 }
 
 function writeOfflineQueue(queue: OfflineQueueItem[]): void {
@@ -108,9 +310,94 @@ function writeOfflineQueue(queue: OfflineQueueItem[]): void {
   window.dispatchEvent(new Event("opf-offline-queued"));
 }
 
+function queueOfflineMutation<T>(
+  path: string,
+  method: string,
+  body: string,
+  workOrderId?: number
+): T {
+  if (typeof window === "undefined") {
+    throw new Error("Offline storage is not available.");
+  }
+  const userId = window.localStorage.getItem("opf_user_id");
+  const deviceId = getCurrentDeviceId();
+  if (!userId || !deviceId) {
+    throw new Error("Sign in on this registered device before saving offline work.");
+  }
+  const claimVersion = workOrderId === undefined ? undefined : readClaimVersions()[String(workOrderId)];
+  if (workOrderId !== undefined && !Number.isInteger(claimVersion)) {
+    throw new Error("Open and claim this work order online before saving offline work.");
+  }
+  const queue = readOfflineQueue();
+  const now = new Date().toISOString();
+  const operationType = operationTypeForPath(path);
+  let queuedItem: OfflineQueueItem | undefined;
+  if (operationType === "work_order_form") {
+    queuedItem = queue.find((item) => (
+      item.path === path
+      && item.method === method
+      && item.userId === userId
+      && item.deviceId === deviceId
+      && item.claimVersion === claimVersion
+      && item.syncState !== "conflict"
+      && item.syncState !== "blocked"
+    ));
+    if (queuedItem) {
+      try {
+        const existing = JSON.parse(queuedItem.body) as {
+          expected_version: number;
+          values: Record<string, WorkOrderFormValue>;
+        };
+        const incoming = JSON.parse(body) as {
+          expected_version: number;
+          values: Record<string, WorkOrderFormValue>;
+        };
+        if (existing.expected_version === incoming.expected_version) {
+          queuedItem.body = JSON.stringify({
+            expected_version: existing.expected_version,
+            values: { ...existing.values, ...incoming.values }
+          });
+          queuedItem.updatedAt = now;
+          queuedItem.syncState = "pending";
+          queuedItem.blockedReason = undefined;
+        } else {
+          queuedItem = undefined;
+        }
+      } catch {
+        queuedItem = undefined;
+      }
+    }
+  }
+  if (!queuedItem) {
+    queuedItem = {
+      id: queueId(),
+      path,
+      method,
+      body,
+      queuedAt: now,
+      updatedAt: now,
+      userId,
+      deviceId,
+      workOrderId,
+      claimVersion,
+      operationType,
+      syncState: "pending",
+      attemptCount: 0
+    };
+    queue.push(queuedItem);
+  }
+  writeOfflineQueue(queue);
+  return {
+    queued: true,
+    queue_id: queuedItem.id,
+    queued_at: queuedItem.queuedAt
+  } as T;
+}
+
 export function clearOfflineSession(): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(OFFLINE_QUEUE_KEY);
+  // Retain unsynchronized work across sign-out. Queue reads and replays remain
+  // isolated by the original user id and registered device id.
   window.localStorage.removeItem(CLAIM_VERSIONS_KEY);
   window.dispatchEvent(new Event("opf-offline-queued"));
 }
@@ -187,37 +474,28 @@ async function xhrUploadPartPhoto(
   });
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQueue = true): Promise<T> {
   const method = (init?.method || "GET").toUpperCase();
   const workOrderId = workOrderIdForRequest(path, init);
+  const bodyContainsPassword = typeof init?.body === "string" && /password/i.test(init.body);
+  const canQueueMutation = (
+    method !== "GET"
+    && typeof init?.body === "string"
+    && isOfflineQueueableMutation(path, method)
+    && !bodyContainsPassword
+  );
   if (typeof navigator !== "undefined" && !navigator.onLine) {
-    const bodyContainsPassword = typeof init?.body === "string" && /password/i.test(init.body);
-    if (isOnlineOnlyMutation(path, method) || bodyContainsPassword) {
+    if (method === "GET" && isOfflineReadableRequest(path)) {
+      return readRetainedResponse<T>(path);
+    }
+    if (method === "GET") {
+      throw new Error("This information is not available in the reviewed offline read cache.");
+    }
+    if (!isOfflineQueueableMutation(path, method) || bodyContainsPassword) {
       throw new Error("This verified action requires a network connection.");
     }
-    if (method !== "GET" && typeof window !== "undefined" && typeof init?.body === "string") {
-      const userId = window.localStorage.getItem("opf_user_id");
-      const deviceId = getCurrentDeviceId();
-      if (!userId || !deviceId) {
-        throw new Error("Sign in on this registered device before saving offline work.");
-      }
-      const claimVersion = workOrderId === undefined ? undefined : readClaimVersions()[String(workOrderId)];
-      if (workOrderId !== undefined && !Number.isInteger(claimVersion)) {
-        throw new Error("Open and claim this work order online before saving offline work.");
-      }
-      const queue = readOfflineQueue();
-      queue.push({
-        path,
-        method,
-        body: init.body,
-        queuedAt: new Date().toISOString(),
-        userId,
-        deviceId,
-        workOrderId,
-        claimVersion
-      });
-      writeOfflineQueue(queue);
-      return { queued: true } as T;
+    if (canQueueMutation) {
+      return queueOfflineMutation<T>(path, method, init.body as string, workOrderId);
     }
     throw new Error("You are offline. This action will be available when connection returns.");
   }
@@ -248,11 +526,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
+    if (
+      method === "GET"
+      && isOfflineReadableRequest(path)
+      && (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed"))
+    ) {
+      try {
+        return await readRetainedResponse<T>(path);
+      } catch (cacheError) {
+        const cacheMessage = cacheError instanceof Error
+          ? cacheError.message
+          : "No retained snapshot is available.";
+        throw new Error(`Network unavailable. ${cacheMessage}`);
+      }
+    }
+    if (
+      allowNetworkFailureQueue
+      && canQueueMutation
+      && (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed"))
+    ) {
+      return queueOfflineMutation<T>(path, method, init?.body as string, workOrderId);
+    }
     throw new Error(
-      msg.includes("Failed to fetch") || msg.includes("NetworkError")
+      msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("Load failed")
         ? "Network unavailable. Check VPN or server URL (NEXT_PUBLIC_API_BASE_URL)."
         : msg
     );
+  }
+  const upstreamUnavailable = [502, 503, 504].includes(res.status);
+  if (method === "GET" && isOfflineReadableRequest(path) && upstreamUnavailable) {
+    try {
+      return await readRetainedResponse<T>(path);
+    } catch (cacheError) {
+      const cacheMessage = cacheError instanceof Error
+        ? cacheError.message
+        : "No retained snapshot is available.";
+      throw new Error(`API unavailable. ${cacheMessage}`);
+    }
+  }
+  if (allowNetworkFailureQueue && canQueueMutation && upstreamUnavailable) {
+    return queueOfflineMutation<T>(path, method, init?.body as string, workOrderId);
+  }
+  if (typeof window !== "undefined" && !upstreamUnavailable) {
+    window.dispatchEvent(new Event("opf-api-online"));
   }
   if (!res.ok) {
     let detail = `API error ${res.status}`;
@@ -266,11 +582,97 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       // ignore parse failure
     }
-    throw new Error(detail);
+    throw new ApiRequestError(detail, res.status);
   }
+  if (res.status === 204) return undefined as T;
   const payload = (await res.json()) as T;
   rememberClaimVersionsFromPayload(payload);
+  if (method === "GET" && isOfflineReadableRequest(path)) {
+    const identity = offlineReadIdentity();
+    if (identity) {
+      void saveOfflineReadResponse(
+        identity.userId,
+        identity.deviceId,
+        path,
+        payload
+      ).catch(() => undefined);
+    }
+  }
   return payload;
+}
+
+async function uploadOfflineMediaForQueueItem(
+  item: OfflineQueueItem,
+  userId: string,
+  deviceId: string,
+  persistQueue: () => void
+): Promise<void> {
+  if (!item.body.includes("opf-offline-media://")) return;
+  if (item.workOrderId === undefined || item.claimVersion === undefined) {
+    throw new Error("Offline photo is missing its work-order claim context.");
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(item.body);
+  } catch {
+    throw new Error("Offline photo operation contains invalid queued data.");
+  }
+  const uploaded = new Map<string, string>();
+  const consumedMarkers: string[] = [];
+  const replaceMarkers = async (value: unknown): Promise<unknown> => {
+    if (isOfflineMediaMarker(value)) {
+      const existingUrl = uploaded.get(value);
+      if (existingUrl) return existingUrl;
+      const media = await readOfflineImage(value, {
+        userId,
+        deviceId,
+        workOrderId: item.workOrderId as number,
+        claimVersion: item.claimVersion as number
+      });
+      const expectedPurpose: OfflineMediaPurpose = item.operationType === "work_order_form"
+        ? "configured_form_photo"
+        : "qc_photo";
+      if (media.purpose !== expectedPurpose) {
+        throw new Error("Offline photo purpose does not match the queued operation.");
+      }
+      const formData = new FormData();
+      formData.append("work_order_id", String(item.workOrderId));
+      formData.append("file", media.blob, media.fileName);
+      const result = await request<{ url: string }>(
+        "/uploads/work-order-parts",
+        { method: "POST", body: formData },
+        false
+      );
+      uploaded.set(value, result.url);
+      consumedMarkers.push(value);
+      return result.url;
+    }
+    if (Array.isArray(value)) {
+      return Promise.all(value.map((entry) => replaceMarkers(entry)));
+    }
+    if (value && typeof value === "object") {
+      const replaced: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(value)) {
+        replaced[key] = await replaceMarkers(entry);
+      }
+      return replaced;
+    }
+    return value;
+  };
+  payload = await replaceMarkers(payload);
+  item.body = JSON.stringify(payload);
+  item.updatedAt = new Date().toISOString();
+  // Persist server URLs before deleting device blobs so a tab or device crash
+  // cannot leave a queue marker pointing at media that no longer exists.
+  persistQueue();
+  for (const marker of consumedMarkers) {
+    await deleteOfflineImage(marker, {
+      userId,
+      deviceId,
+      workOrderId: item.workOrderId,
+      claimVersion: item.claimVersion
+    });
+  }
 }
 
 export async function syncOfflineQueue(): Promise<number> {
@@ -281,9 +683,16 @@ export async function syncOfflineQueue(): Promise<number> {
   const queue = readOfflineQueue();
   if (!queue.length) return 0;
   const currentQueue = queue.filter((row) => row.userId === userId && row.deviceId === deviceId);
-  if (currentQueue.some((row) => row.workOrderId !== undefined)) {
+  const queuedWorkOrderIds = Array.from(new Set(
+    currentQueue
+      .map((row) => row.workOrderId)
+      .filter((id): id is number => id !== undefined)
+  ));
+  if (queuedWorkOrderIds.length) {
     try {
-      await request<WorkOrder[]>("/work-orders?scope=all&limit=100");
+      for (const workOrderId of queuedWorkOrderIds) {
+        await request<WorkOrder>(`/work-orders/${workOrderId}`);
+      }
     } catch {
       return 0;
     }
@@ -291,42 +700,256 @@ export async function syncOfflineQueue(): Promise<number> {
   let remaining = [...queue];
   let synced = 0;
   for (const item of currentQueue) {
+    if (item.syncState === "conflict") {
+      if (item.serverConflictId) {
+        try {
+          const receipt = await request<WorkOrderFormConflictReceipt>(
+            `/work-order-form-conflicts/${item.serverConflictId}/status`,
+            undefined,
+            false
+          );
+          if (receipt.status !== "pending") {
+            remaining = remaining.filter((row) => row !== item);
+            synced += 1;
+          }
+        } catch (error) {
+          item.blockedReason = error instanceof Error
+            ? error.message
+            : "Could not refresh administrator conflict resolution.";
+        }
+        continue;
+      }
+      if (item.operationType !== "work_order_form") {
+        item.syncState = "blocked";
+        item.blockedReason = "This legacy conflict requires manual review before retry.";
+        continue;
+      }
+      // Upgrade pre-server-conflict queue records by replaying once. A stale
+      // version will enter the authenticated registration path below.
+      item.syncState = "pending";
+      item.blockedReason = undefined;
+    }
+    if (item.syncState === "blocked") {
+      continue;
+    }
     if (item.workOrderId !== undefined) {
       const currentVersion = readClaimVersions()[String(item.workOrderId)];
-      if (!Number.isInteger(item.claimVersion) || currentVersion !== item.claimVersion) break;
+      if (!Number.isInteger(item.claimVersion) || currentVersion !== item.claimVersion) {
+        item.syncState = "blocked";
+        item.blockedReason = "Work order was released, reclaimed, or moved to a new claim generation.";
+        continue;
+      }
     }
     try {
+      item.attemptCount += 1;
+      item.lastAttemptAt = new Date().toISOString();
+      await uploadOfflineMediaForQueueItem(
+        item,
+        userId,
+        deviceId,
+        () => writeOfflineQueue(remaining)
+      );
       await request(item.path, {
         method: item.method,
         body: item.body,
         headers: item.claimVersion === undefined ? undefined : { "X-Claim-Version": String(item.claimVersion) }
-      });
+      }, false);
       remaining = remaining.filter((row) => row !== item);
       synced += 1;
+      try {
+        if (item.operationType === "work_order_form" && item.workOrderId !== undefined) {
+          await request<WorkOrderForm>(`/work-orders/${item.workOrderId}/form`);
+        } else if (item.path === "/qc-pictures" && item.workOrderId !== undefined) {
+          await request<QCPicture[]>(`/qc-pictures?work_order_id=${item.workOrderId}`);
+        } else if (item.path === "/return-equipments" && item.workOrderId !== undefined) {
+          await request<ReturnEquipment[]>(`/return-equipments?work_order_id=${item.workOrderId}`);
+        }
+      } catch {
+        // The authoritative mutation already succeeded. A later online read can
+        // refresh its optional offline snapshot without replaying the write.
+      }
     } catch (error) {
       item.blockedReason = error instanceof Error ? error.message : "Sync failed";
-      break;
+      if (
+        item.operationType === "work_order_form"
+        && error instanceof ApiRequestError
+        && error.status === 409
+        && error.message === "Work-order form version is stale"
+        && item.workOrderId !== undefined
+        && item.claimVersion !== undefined
+      ) {
+        try {
+          const formPayload = JSON.parse(item.body) as {
+            expected_version: number;
+            values: Record<string, WorkOrderFormValue>;
+          };
+          const receipt = await request<WorkOrderFormConflictReceipt>(
+            "/work-order-form-conflicts",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                work_order_id: item.workOrderId,
+                client_queue_id: item.id,
+                claim_version: item.claimVersion,
+                base_form_version: formPayload.expected_version,
+                local_values: formPayload.values
+              }),
+              headers: { "X-Claim-Version": String(item.claimVersion) }
+            },
+            false
+          );
+          item.serverConflictId = receipt.id;
+          item.syncState = "conflict";
+          item.blockedReason = "Server form changed; administrator resolution is pending.";
+          continue;
+        } catch (registrationError) {
+          item.blockedReason = registrationError instanceof Error
+            ? `Conflict retained locally; server registration failed: ${registrationError.message}`
+            : "Conflict retained locally; server registration failed.";
+          item.syncState = (
+            registrationError instanceof ApiRequestError
+            && [401, 403, 409, 428].includes(registrationError.status)
+          )
+            ? "blocked"
+            : "failed";
+          continue;
+        }
+      }
+      item.syncState = (
+        error instanceof ApiRequestError && error.status === 409
+          ? "blocked"
+          : error instanceof ApiRequestError && [401, 403, 428].includes(error.status)
+            ? "blocked"
+            : "failed"
+      );
     }
   }
   writeOfflineQueue(remaining);
   return synced;
 }
 
-export function getOfflineQueue(): Array<{ path: string; method: string; queuedAt: string; claimVersion?: number; stale: boolean; blockedReason?: string }> {
+export function retryOfflineQueueItem(id: string): void {
+  const queue = readOfflineQueue();
+  const item = queue.find((row) => row.id === id);
+  if (!item) return;
+  item.syncState = "pending";
+  item.blockedReason = undefined;
+  writeOfflineQueue(queue);
+}
+
+export function getOfflineQueue(): Array<{
+  id: string;
+  path: string;
+  method: string;
+  queuedAt: string;
+  updatedAt: string;
+  workOrderId?: number;
+  claimVersion?: number;
+  operationType: OfflineQueueItem["operationType"];
+  syncState: OfflineQueueItem["syncState"];
+  attemptCount: number;
+  lastAttemptAt?: string;
+  serverConflictId?: number;
+  stale: boolean;
+  blockedReason?: string;
+}> {
   if (typeof window === "undefined") return [];
   const userId = window.localStorage.getItem("opf_user_id");
   const deviceId = getCurrentDeviceId();
   const versions = readClaimVersions();
   return readOfflineQueue()
     .filter((row) => row.userId === userId && row.deviceId === deviceId)
-    .map(({ path, method, queuedAt, workOrderId, claimVersion, blockedReason }) => ({
+    .map(({ id, path, method, queuedAt, updatedAt, workOrderId, claimVersion, operationType, syncState, attemptCount, lastAttemptAt, serverConflictId, blockedReason }) => ({
+      id,
       path,
       method,
       queuedAt,
+      updatedAt,
+      workOrderId,
       claimVersion,
+      operationType,
+      syncState,
+      attemptCount,
+      lastAttemptAt,
+      serverConflictId,
       stale: workOrderId !== undefined && versions[String(workOrderId)] !== claimVersion,
       blockedReason
     }));
+}
+
+export async function getOfflineMediaQueue(): Promise<Array<OfflineMediaSummary & { referenced: boolean }>> {
+  if (typeof window === "undefined") return [];
+  const userId = window.localStorage.getItem("opf_user_id");
+  const deviceId = getCurrentDeviceId();
+  if (!userId || !deviceId) return [];
+  const queue = readOfflineQueue().filter(
+    (item) => item.userId === userId && item.deviceId === deviceId
+  );
+  return (await listOfflineImages(userId, deviceId)).map((media) => ({
+    ...media,
+    referenced: queue.some((item) => item.body.includes(media.marker))
+  }));
+}
+
+export async function discardUnreferencedOfflineMedia(
+  marker: string,
+  workOrderId: number,
+  claimVersion: number
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const userId = window.localStorage.getItem("opf_user_id");
+  const deviceId = getCurrentDeviceId();
+  if (!userId || !deviceId) {
+    throw new Error("Sign in on the originating device before discarding an offline photo.");
+  }
+  const referenced = readOfflineQueue().some(
+    (item) => (
+      item.userId === userId
+      && item.deviceId === deviceId
+      && item.body.includes(marker)
+    )
+  );
+  if (referenced) {
+    throw new Error("This photo is attached to a retained operation and cannot be discarded separately.");
+  }
+  await deleteOfflineImage(marker, {
+    userId,
+    deviceId,
+    workOrderId,
+    claimVersion
+  });
+}
+
+export async function getOfflineReadCacheSummary(): Promise<OfflineReadCacheSummary[]> {
+  const identity = offlineReadIdentity();
+  if (!identity) return [];
+  return listOfflineReadResponses(identity.userId, identity.deviceId);
+}
+
+function requestWithOfflineMediaQueue<T>(
+  path: string,
+  init: RequestInit
+): Promise<T | OfflineQueuedResult> {
+  const method = (init.method || "POST").toUpperCase();
+  if (
+    typeof init.body === "string"
+    && init.body.includes("opf-offline-media://")
+  ) {
+    if (!isOfflineQueueableMutation(path, method)) {
+      return Promise.reject(new Error("This photo operation is not approved for offline replay."));
+    }
+    const queued = queueOfflineMutation<OfflineQueuedResult>(
+      path,
+      method,
+      init.body,
+      workOrderIdForRequest(path, init)
+    );
+    if (typeof navigator !== "undefined" && navigator.onLine) {
+      void syncOfflineQueue();
+    }
+    return Promise.resolve(queued);
+  }
+  return request<T>(path, init);
 }
 
 export const api = {
@@ -345,6 +968,128 @@ export const api = {
     });
   },
   getMe: () => request<User>("/auth/me"),
+  getPublicOrganizationBranding: (slug: string) =>
+    request<OrganizationBranding>(
+      `/auth/organization-branding/${encodeURIComponent(slug)}`
+    ),
+  getPublicOrganizationBrandingByDomain: (domain: string) =>
+    request<OrganizationBranding>(
+      `/auth/organization-branding/by-domain/${encodeURIComponent(domain)}`
+    ),
+  getOrganizationSettings: () =>
+    request<OrganizationSettings>("/organization/settings"),
+  getOrganizationDomain: () =>
+    request<OrganizationDomain | null>("/organization/domain"),
+  putOrganizationDomain: (domain: string, accountPassword: string, expectedVersion?: number) =>
+    request<OrganizationDomain>("/organization/domain", {
+      method: "PUT",
+      body: JSON.stringify({
+        domain,
+        account_password: accountPassword,
+        ...(expectedVersion == null ? {} : { expected_version: expectedVersion })
+      })
+    }),
+  verifyOrganizationDomain: (expectedVersion: number) =>
+    request<OrganizationDomain>("/organization/domain/verify", {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion })
+    }),
+  rotateOrganizationDomainChallenge: (expectedVersion: number, accountPassword: string) =>
+    request<OrganizationDomain>("/organization/domain/rotate-challenge", {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion, account_password: accountPassword })
+    }),
+  updateOrganizationEmailIdentity: (payload: {
+    expected_version: number;
+    enabled: boolean;
+    from_name: string;
+    local_part: string;
+    account_password: string;
+  }) => request<OrganizationDomain>("/organization/domain/email-identity", {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  }),
+  deleteOrganizationDomain: (expectedVersion: number, accountPassword: string) =>
+    request<void>("/organization/domain", {
+      method: "DELETE",
+      body: JSON.stringify({ expected_version: expectedVersion, account_password: accountPassword })
+    }),
+  getOrganizationBilling: () =>
+    request<OrganizationBillingOverview>("/organization/billing"),
+  getOrganizationCommercialReport: (months = 12) =>
+    request<OrganizationCommercialReport>(`/organization/commercial-report?months=${months}`),
+  downloadOrganizationCommercialReport: (months: number, accountPassword: string) =>
+    downloadAuthenticatedFile(
+      "/organization/commercial-report/export",
+      { months, account_password: accountPassword },
+      "openpartsflow-commercial-usage.csv"
+    ),
+  listOrganizationDataExports: () =>
+    request<OrganizationDataExport[]>("/organization/data-exports"),
+  downloadOrganizationDataExport: (includeFiles: boolean, accountPassword: string) =>
+    downloadAuthenticatedFile(
+      "/organization/data-exports",
+      { include_files: includeFiles, account_password: accountPassword },
+      "openpartsflow-backup.zip"
+    ),
+  acknowledgeSubscriptionNotice: (noticeId: number, expectedVersion: number) =>
+    request<SubscriptionNotice>(`/organization/billing/notices/${noticeId}/acknowledge`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion })
+    }),
+  listPlatformBillingAccounts: () =>
+    request<PlatformBillingAccount[]>("/platform/billing/accounts"),
+  putPlatformBillingAccount: (
+    organizationId: number,
+    payload: {
+      expected_version: number;
+      provider: BillingProvider;
+      external_customer_id?: string | null;
+      external_subscription_id?: string | null;
+      current_period_start?: string | null;
+      current_period_end?: string | null;
+      cancel_at_period_end: boolean;
+      grace_ends_at?: string | null;
+      account_password: string;
+    }
+  ) => request<PlatformBillingAccount>(`/platform/billing/accounts/${organizationId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  }),
+  listPlatformBillingEvents: (organizationId?: number) =>
+    request<BillingLifecycleEvent[]>(
+      `/platform/billing/events${organizationId ? `?organization_id=${organizationId}` : ""}`
+    ),
+  listPlatformSubscriptionNotices: (organizationId?: number) =>
+    request<SubscriptionNotice[]>(
+      `/platform/billing/notices${organizationId ? `?organization_id=${organizationId}` : ""}`
+    ),
+  reconcilePlatformBilling: () =>
+    request<{ organizations_checked: number; notices_created: number; notices_resolved: number }>(
+      "/platform/billing/reconcile",
+      { method: "POST", body: JSON.stringify({}) }
+    ),
+  getPlatformCommercialReport: (periodStart?: string) =>
+    request<PlatformCommercialReportRow[]>(
+      `/platform/commercial-report${periodStart ? `?period_start=${encodeURIComponent(periodStart)}` : ""}`
+    ),
+  downloadPlatformCommercialReport: (periodStart: string, accountPassword: string) =>
+    downloadAuthenticatedFile(
+      "/platform/commercial-report/export",
+      { period_start: periodStart, account_password: accountPassword },
+      `openpartsflow-platform-commercial-${periodStart}.csv`
+    ),
+  updateOrganizationBranding: (
+    payload: {
+      expected_version: number;
+      brand_logo_url?: string | null;
+      brand_primary_color?: string;
+      brand_login_headline?: string | null;
+    }
+  ) => request<OrganizationSettings>("/organization/settings/branding", {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  }),
   createInvitation: (payload: { name: string; email: string; role: string }) =>
     request<InvitationCreated>("/users/invitations", { method: "POST", body: JSON.stringify(payload) }),
   getInvitation: (token: string) =>
@@ -361,11 +1106,64 @@ export const api = {
     admin_name: string;
     admin_email: string;
     admin_password: string;
+    plan_code: PlanCode;
+    trial_days: number;
   }) => request<Organization>("/platform/organizations", { method: "POST", body: JSON.stringify(payload) }),
-  updateOrganization: (organizationId: number, isActive: boolean) =>
+  updateOrganization: (
+    organizationId: number,
+    payload: {
+      expected_version: number;
+      is_active?: boolean;
+      plan_code?: PlanCode;
+      subscription_status?: SubscriptionStatus;
+      trial_ends_at?: string | null;
+      max_users?: number | null;
+      max_warehouses?: number | null;
+      max_vehicle_warehouses?: number | null;
+      ai_monthly_limit?: number | null;
+      api_monthly_limit?: number | null;
+    }
+  ) =>
     request<Organization>(`/platform/organizations/${organizationId}`, {
       method: "PATCH",
-      body: JSON.stringify({ is_active: isActive })
+      body: JSON.stringify(payload)
+    }),
+  listIntegrations: () => request<ExternalIntegration[]>("/integrations"),
+  createIntegration: (payload: {
+    name: string;
+    provider: ExternalIntegrationProvider;
+    field_mapping: Record<string, string>;
+    webhook_url?: string | null;
+    subscribed_events?: ExternalIntegration["subscribed_events"];
+  }) => request<ExternalIntegrationSecret>("/integrations", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  updateIntegration: (
+    integrationId: number,
+    payload: {
+      expected_version: number;
+      name?: string;
+      field_mapping?: Record<string, string>;
+      webhook_url?: string | null;
+      subscribed_events?: ExternalIntegration["subscribed_events"];
+      is_active?: boolean;
+    }
+  ) => request<ExternalIntegration>(`/integrations/${integrationId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  }),
+  rotateIntegrationKey: (integrationId: number, expectedVersion: number) =>
+    request<ExternalIntegrationSecret>(`/integrations/${integrationId}/rotate-key`, {
+      method: "POST",
+      body: JSON.stringify({ expected_version: expectedVersion })
+    }),
+  listIntegrationSyncLogs: (integrationId: number) =>
+    request<ExternalSyncLog[]>(`/integrations/${integrationId}/sync-logs?limit=100`),
+  retryIntegrationDelivery: (integrationId: number, logId: number) =>
+    request<ExternalSyncLog>(`/integrations/${integrationId}/sync-logs/${logId}/retry`, {
+      method: "POST",
+      body: JSON.stringify({})
     }),
   previewPartsImport: (file: File) => {
     const form = new FormData();
@@ -412,8 +1210,110 @@ export const api = {
     if (!query.has("limit")) query.set("limit", "100");
     return request<WorkOrder[]>(`/work-orders?${query.toString()}`);
   },
+  getWorkOrder: (workOrderId: number) =>
+    request<WorkOrder>(`/work-orders/${workOrderId}`),
   createWorkOrder: (payload: Partial<WorkOrder> & { ticket_number: string }) =>
     request<WorkOrder>("/work-orders", { method: "POST", body: JSON.stringify(payload) }),
+  listWorkOrderFormTemplates: (includeInactive = false) =>
+    request<WorkOrderFormTemplate[]>(
+      `/work-order-form-templates${includeInactive ? "?include_inactive=true" : ""}`
+    ),
+  createWorkOrderFormTemplate: (payload: {
+    name: string;
+    industry?: string | null;
+    description?: string | null;
+    applicable_machine_type?: string | null;
+    applicable_job_type?: string | null;
+    default_work_order_status: "open" | "scheduled";
+    fields: WorkOrderFormField[];
+  }) =>
+    request<WorkOrderFormTemplate>("/work-order-form-templates", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  updateWorkOrderFormTemplate: (
+    templateId: number,
+    payload: {
+      expected_version: number;
+      name?: string;
+      industry?: string | null;
+      description?: string | null;
+      applicable_machine_type?: string | null;
+      applicable_job_type?: string | null;
+      default_work_order_status?: "open" | "scheduled";
+      is_active?: boolean;
+      fields?: WorkOrderFormField[];
+    }
+  ) =>
+    request<WorkOrderFormTemplate>(`/work-order-form-templates/${templateId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  getWorkOrderForm: (workOrderId: number) =>
+    request<WorkOrderForm>(`/work-orders/${workOrderId}/form`),
+  updateWorkOrderForm: (
+    workOrderId: number,
+    expectedVersion: number,
+    values: Record<string, WorkOrderFormValue>
+  ) =>
+    requestWithOfflineMediaQueue<WorkOrderForm>(`/work-orders/${workOrderId}/form`, {
+      method: "PATCH",
+      body: JSON.stringify({ expected_version: expectedVersion, values })
+    }),
+  listWorkOrderFormConflicts: (params?: {
+    status?: WorkOrderFormConflictStatus;
+    work_order_id?: number;
+    limit?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.work_order_id) query.set("work_order_id", String(params.work_order_id));
+    if (params?.limit) query.set("limit", String(params.limit));
+    const suffix = query.toString();
+    return request<WorkOrderFormConflict[]>(
+      `/work-order-form-conflicts${suffix ? `?${suffix}` : ""}`
+    );
+  },
+  resolveWorkOrderFormConflict: (
+    conflictId: number,
+    payload: {
+      expected_version: number;
+      expected_server_form_version: number;
+      action: "keep_server" | "apply_local" | "merge";
+      values?: Record<string, WorkOrderFormValue>;
+      resolution_notes: string;
+    }
+  ) =>
+    request<WorkOrderFormConflict>(`/work-order-form-conflicts/${conflictId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
+  listWorkOrderFormActions: (params?: {
+    status?: "pending" | "acknowledged" | "resolved";
+    action_type?: "notification" | "inventory_review";
+    work_order_id?: number;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.action_type) query.set("action_type", params.action_type);
+    if (params?.work_order_id) query.set("work_order_id", String(params.work_order_id));
+    query.set("limit", "200");
+    return request<WorkOrderFormAction[]>(`/work-order-form-actions?${query.toString()}`);
+  },
+  listWorkOrderFormActionProgress: (workOrderId: number) =>
+    request<WorkOrderFormAction[]>(`/work-orders/${workOrderId}/form-actions`),
+  updateWorkOrderFormAction: (
+    taskId: number,
+    payload: {
+      expected_version: number;
+      action: "acknowledge" | "resolve";
+      resolution_notes?: string | null;
+    }
+  ) =>
+    request<WorkOrderFormAction>(`/work-order-form-actions/${taskId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    }),
   claimWorkOrder: (workOrderId: number) =>
     request<WorkOrder>(`/work-orders/${workOrderId}/claim`, { method: "POST", body: JSON.stringify({}) }),
   releaseWorkOrder: (workOrderId: number, reason: string) =>
@@ -431,9 +1331,191 @@ export const api = {
     return users.filter((u) => u.role === "engineer");
   },
   listParts: () => request<Part[]>("/parts?limit=100"),
+  createPartRecognitionCandidates: (payload: {
+    file: File;
+    machineModel?: string;
+    labelText?: string;
+    workOrderId?: number;
+    notes?: string;
+  }) => {
+    const form = new FormData();
+    form.append("file", payload.file);
+    if (payload.machineModel) form.append("machine_model", payload.machineModel);
+    if (payload.labelText) form.append("label_text", payload.labelText);
+    if (payload.workOrderId) form.append("work_order_id", String(payload.workOrderId));
+    if (payload.notes) form.append("notes", payload.notes);
+    return request<PartRecognitionObservation>("/parts/recognition/candidates", {
+      method: "POST",
+      body: form
+    });
+  },
+  listPartRecognitionCandidates: (status?: string) =>
+    request<PartRecognitionObservation[]>(
+      `/parts/recognition/candidates${status ? `?status=${encodeURIComponent(status)}` : ""}`
+    ),
+  actOnPartRecognitionCandidate: (
+    candidate: Pick<PartRecognitionCandidate, "id" | "version">,
+    action: "employee_confirm" | "admin_confirm" | "verify_usage" | "promote_trusted" | "reject",
+    workOrderId?: number | null,
+    reason?: string
+  ) => request<PartRecognitionObservation>(
+    `/parts/recognition/candidates/${candidate.id}/actions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        action,
+        expected_version: candidate.version,
+        work_order_id: workOrderId || undefined,
+        reason
+      })
+    }
+  ),
+  listMachineKnowledge: (params?: {
+    q?: string;
+    model?: string;
+    includeInactive?: boolean;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.q) query.set("q", params.q);
+    if (params?.model) query.set("model", params.model);
+    if (params?.includeInactive) query.set("include_inactive", "true");
+    query.set("limit", "100");
+    return request<MachineKnowledgeProfile[]>(`/machine-knowledge?${query.toString()}`);
+  },
+  getMachineKnowledge: (profileId: number) =>
+    request<MachineKnowledgeProfile>(`/machine-knowledge/${profileId}`),
+  createMachineKnowledge: (payload: {
+    model: string;
+    manufacturer?: string;
+    equipment_type?: string;
+    summary?: string;
+  }) => request<MachineKnowledgeProfile>("/machine-knowledge", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  updateMachineKnowledge: (
+    profile: Pick<MachineKnowledgeProfile, "id" | "version">,
+    payload: {
+      model?: string;
+      manufacturer?: string | null;
+      equipment_type?: string | null;
+      summary?: string | null;
+      is_active?: boolean;
+    }
+  ) => request<MachineKnowledgeProfile>(`/machine-knowledge/${profile.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ expected_version: profile.version, ...payload })
+  }),
+  createMachineKnowledgeEntry: (
+    profileId: number,
+    payload: {
+      entry_type: MachineKnowledgeEntryType;
+      title: string;
+      content: string;
+      fault_code?: string;
+      related_part_id?: number;
+      related_part_role?: MachineKnowledgePartRole;
+      alternative_for_part_id?: number;
+      installation_location?: string;
+      source_work_order_id?: number;
+      media_url?: string;
+      sort_order?: number;
+    }
+  ) => request<MachineKnowledgeProfile>(`/machine-knowledge/${profileId}/entries`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  updateMachineKnowledgeEntry: (
+    entry: Pick<MachineKnowledgeEntry, "id" | "version">,
+    payload: {
+      entry_type?: MachineKnowledgeEntryType;
+      title?: string;
+      content?: string;
+      fault_code?: string | null;
+      related_part_id?: number | null;
+      related_part_role?: MachineKnowledgePartRole | null;
+      alternative_for_part_id?: number | null;
+      installation_location?: string | null;
+      source_work_order_id?: number | null;
+      media_url?: string | null;
+      sort_order?: number;
+    }
+  ) => request<MachineKnowledgeProfile>(`/machine-knowledge/entries/${entry.id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ expected_version: entry.version, ...payload })
+  }),
+  actOnMachineKnowledgeEntry: (
+    entry: Pick<MachineKnowledgeEntry, "id" | "version">,
+    action: "publish" | "archive" | "reopen"
+  ) => request<MachineKnowledgeProfile>(`/machine-knowledge/entries/${entry.id}/actions`, {
+    method: "POST",
+    body: JSON.stringify({ action, expected_version: entry.version })
+  }),
+  generateMachineKnowledgeDrafts: (profileId: number, workOrderId: number) =>
+    request<MachineKnowledgeDraftGeneration>(
+      `/machine-knowledge/${profileId}/drafts/from-work-order`,
+      {
+        method: "POST",
+        body: JSON.stringify({ work_order_id: workOrderId })
+      }
+    ),
+  uploadMachineKnowledgeMedia: (
+    profileId: number,
+    payload: {
+      file: File;
+      title: string;
+      description: string;
+      sourceWorkOrderId?: number;
+      sortOrder?: number;
+    }
+  ) => {
+    const form = new FormData();
+    form.append("file", payload.file);
+    form.append("title", payload.title);
+    form.append("description", payload.description);
+    if (payload.sourceWorkOrderId) {
+      form.append("source_work_order_id", String(payload.sourceWorkOrderId));
+    }
+    if (payload.sortOrder !== undefined) {
+      form.append("sort_order", String(payload.sortOrder));
+    }
+    return request<MachineKnowledgeProfile>(
+      `/machine-knowledge/${profileId}/media`,
+      { method: "POST", body: form }
+    );
+  },
+  openMachineKnowledgeMedia: async (entryId: number) => {
+    if (typeof window === "undefined") throw new Error("Media preview requires a browser.");
+    const preview = window.open("about:blank", "_blank");
+    const token = window.localStorage.getItem("opf_access_token");
+    try {
+      const response = await fetch(`${API_BASE}/machine-knowledge/media/${entryId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      if (!response.ok) {
+        let detail = `Unable to open media (${response.status})`;
+        try {
+          const body = await response.json() as { detail?: string };
+          if (body.detail) detail = body.detail;
+        } catch {
+          // Keep the status fallback.
+        }
+        throw new Error(detail);
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      if (preview) preview.location.href = objectUrl;
+      else window.location.href = objectUrl;
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 300_000);
+    } catch (error) {
+      preview?.close();
+      throw error;
+    }
+  },
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=100"),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),
+  getWorkOrderServiceIntelligence: (workOrderId: number) =>
+    request<WorkOrderServiceIntelligence>(`/work-orders/${workOrderId}/service-intelligence`),
   listCompletionPolicies: () => request<CompletionPolicy[]>("/completion-policies"),
   saveCompletionPolicy: (payload: Omit<CompletionPolicy, "id" | "organization_id" | "source">) =>
     request<CompletionPolicy>("/completion-policies", { method: "POST", body: JSON.stringify(payload) }),
@@ -447,11 +1529,85 @@ export const api = {
     request<StorageLocation[]>(`/storage-locations${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   scanInventory: (payload: { barcode?: string; part_number?: string; quantity?: number; warehouse_id?: number; location_id?: number }) =>
     request<InventoryScanResult>("/inventory/scan", { method: "POST", body: JSON.stringify(payload) }),
+  scanInventoryLocation: (payload: { label: string; expected_warehouse_id?: number }) =>
+    request<InventoryLocationScan>("/inventory/location-scan", { method: "POST", body: JSON.stringify(payload) }),
+  listInventoryLocationLabels: (warehouseId: number) =>
+    request<InventoryLocationLabel[]>(`/inventory/location-labels?warehouse_id=${warehouseId}`),
   listInventoryNotifications: () => request<InventoryNotification[]>("/inventory/notifications"),
   updateInventoryNotification: (id: number, status: string) => request<InventoryNotification>(`/inventory/notifications/${id}?status=${status}`, { method: "PATCH" }),
   createReplenishmentRequest: (id: number, quantity: number, sourceWarehouseId?: number) => request<ReplenishmentRequest>(`/inventory/notifications/${id}/create-request?quantity=${quantity}${sourceWarehouseId ? `&source_warehouse_id=${sourceWarehouseId}` : ""}`, { method: "POST" }),
+  createManualReplenishmentRequest: (payload: {
+    part_id: number;
+    destination_warehouse_id: number;
+    quantity: number;
+    source_warehouse_id?: number;
+    reason: string;
+    client_request_id: string;
+  }) => request<ReplenishmentRequest>("/inventory/replenishment-requests", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
   listReplenishmentRequests: () => request<ReplenishmentRequest[]>("/inventory/replenishment-requests"),
-  updateReplenishmentRequest: (id: number, status: string) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}?status=${status}`, { method: "PATCH" }),
+  actOnReplenishmentRequest: (
+    id: number,
+    payload: {
+      action: "approve" | "reject" | "start_picking" | "ship" | "receive" | "complete" | "cancel";
+      expected_version: number;
+      source_warehouse_id?: number;
+      reason?: string;
+      account_password?: string;
+    }
+  ) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}/actions`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  reconcileReplenishmentRequest: (
+    id: number,
+    payload: {
+      expected_version: number;
+      resolution: "reset_requested" | "accept_historical";
+      reason: string;
+      account_password: string;
+    }
+  ) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}/reconcile`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listVehicleReturnDestinations: () => request<Warehouse[]>("/inventory/vehicle-return-destinations"),
+  createVehicleReturnRequest: (payload: {
+    part_id: number;
+    source_warehouse_id: number;
+    destination_warehouse_id: number;
+    quantity: number;
+    reason: string;
+    client_request_id: string;
+  }) => request<VehicleReturnRequest>("/inventory/vehicle-returns", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listVehicleReturnRequests: () => request<VehicleReturnRequest[]>("/inventory/vehicle-returns"),
+  actOnVehicleReturnRequest: (
+    id: number,
+    payload: {
+      action: "approve" | "ship" | "receive" | "cancel";
+      expected_version: number;
+      reason?: string;
+      account_password?: string;
+    }
+  ) => request<VehicleReturnRequest>(`/inventory/vehicle-returns/${id}/actions`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listInventoryCounts: () => request<InventoryCount[]>("/inventory/counts"),
+  createInventoryCount: (payload: {
+    client_request_id: string; warehouse_id: number; location_id?: number; title: string; notes?: string;
+  }) => request<InventoryCount>("/inventory/counts", { method: "POST", body: JSON.stringify(payload) }),
+  recordInventoryCountLine: (id: number, payload: {
+    part_id: number; counted_quantity: number; notes?: string; expected_version: number;
+  }) => request<InventoryCount>(`/inventory/counts/${id}/lines`, { method: "PUT", body: JSON.stringify(payload) }),
+  actOnInventoryCount: (id: number, payload: {
+    action: "submit" | "approve" | "cancel"; expected_version: number; reason?: string; password?: string;
+  }) => request<InventoryCount>(`/inventory/counts/${id}/actions`, { method: "POST", body: JSON.stringify(payload) }),
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),
@@ -459,6 +1615,7 @@ export const api = {
     request<LocationStockBalance[]>(`/inventory/location-balances${warehouseId ? `?warehouse_id=${warehouseId}` : ""}`),
   getVanInventory: (userId: number) =>
     request<StockBalance[]>(`/employees/${userId}/van-inventory?limit=500`),
+  getMyVanInventory: () => request<StockBalance[]>("/inventory/my-van?limit=500"),
   usePartOnWorkOrder: (
     workOrderId: number,
     payload: {
@@ -479,19 +1636,65 @@ export const api = {
         old_part_returned: "no"
       })
     }),
-  uploadPartUsagePhoto: async (workOrderId: number, file: File, onProgress?: (percent: number) => void) => {
-    if (onProgress) {
-      const result = await xhrUploadPartPhoto(workOrderId, file, onProgress);
-      onProgress(100);
-      return result;
+  uploadPartUsagePhoto: async (
+    workOrderId: number,
+    file: File,
+    onProgress?: (percent: number) => void,
+    offlinePurpose?: OfflineMediaPurpose
+  ): Promise<{ url: string; queued_offline?: boolean }> => {
+    const retainOffline = async () => {
+      if (!offlinePurpose || typeof window === "undefined") {
+        throw new Error("Photo upload requires a network connection.");
+      }
+      const userId = window.localStorage.getItem("opf_user_id");
+      const deviceId = getCurrentDeviceId();
+      const claimVersion = readClaimVersions()[String(workOrderId)];
+      if (!userId || !deviceId || !Number.isInteger(claimVersion)) {
+        throw new Error("Open and claim this work order online before retaining an offline photo.");
+      }
+      const marker = await queueOfflineImage(
+        file,
+        {
+          userId,
+          deviceId,
+          workOrderId,
+          claimVersion
+        },
+        offlinePurpose
+      );
+      return { url: marker, queued_offline: true };
+    };
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      return retainOffline();
     }
-    const formData = new FormData();
-    formData.append("work_order_id", String(workOrderId));
-    formData.append("file", file);
-    return request<{ url: string }>("/uploads/work-order-parts", {
-      method: "POST",
-      body: formData
-    });
+    try {
+      if (onProgress) {
+        const result = await xhrUploadPartPhoto(workOrderId, file, onProgress);
+        onProgress(100);
+        return result;
+      }
+      const formData = new FormData();
+      formData.append("work_order_id", String(workOrderId));
+      formData.append("file", file);
+      return await request<{ url: string }>("/uploads/work-order-parts", {
+        method: "POST",
+        body: formData
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (
+        offlinePurpose
+        && (
+          message.includes("Network unavailable")
+          || message.includes("Failed to fetch")
+          || message.includes("NetworkError")
+          || message.includes("Load failed")
+        )
+      ) {
+        return retainOffline();
+      }
+      throw error;
+    }
   },
   getWorkOrderProfit: (workOrderId: number) => request<WorkOrderProfit>(`/work-orders/${workOrderId}/profit`),
   getWorkOrderPartRecommendations: (workOrderId: number) => request<WorkOrderPartRecommendation[]>(`/work-orders/${workOrderId}/part-recommendations`),
@@ -499,7 +1702,7 @@ export const api = {
   listQCPictures: (workOrderId?: number) =>
     request<QCPicture[]>(`/qc-pictures${workOrderId ? `?work_order_id=${workOrderId}` : ""}`),
   createQCPicture: (payload: { work_order_id: number; image_url: string; uploaded_by?: number | null }) =>
-    request<QCPicture>("/qc-pictures", { method: "POST", body: JSON.stringify(payload) }),
+    requestWithOfflineMediaQueue<QCPicture>("/qc-pictures", { method: "POST", body: JSON.stringify(payload) }),
   listVoiceNotes: (workOrderId: number) =>
     request<WorkOrderVoiceNote[]>(`/work-orders/${workOrderId}/voice-notes`),
   uploadVoiceNote: (workOrderId: number, blob: Blob, durationSeconds: number) => {
@@ -515,13 +1718,19 @@ export const api = {
   listReturnEquipments: (workOrderId?: number) =>
     request<ReturnEquipment[]>(`/return-equipments${workOrderId ? `?work_order_id=${workOrderId}` : ""}`),
   createReturnEquipment: (payload: { work_order_id: number; equipment_type: string; quantity: number }) =>
-    request<ReturnEquipment>("/return-equipments", { method: "POST", body: JSON.stringify(payload) }),
+    request<ReturnEquipment | OfflineQueuedResult>("/return-equipments", { method: "POST", body: JSON.stringify(payload) }),
   startJob: (workOrderId: number) =>
     request<WorkOrder>(`/work-orders/${workOrderId}/start`, { method: "POST", body: JSON.stringify({}) }),
   pauseJob: (workOrderId: number, notes?: string) =>
     request<WorkOrder>(`/work-orders/${workOrderId}/pause`, { method: "POST", body: JSON.stringify({ notes }) }),
   completeJob: (workOrderId: number, payload: {
     repair_result?: string;
+    fault_type?: string;
+    error_code?: string;
+    environment_info?: string;
+    final_outcome?: string;
+    first_time_fix?: boolean;
+    is_rework?: boolean;
     checklist_json?: string;
     customer_signature_name?: string;
     customer_signature_data?: string;

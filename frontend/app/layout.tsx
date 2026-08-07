@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import Nav from "@/components/nav";
 import PwaClient from "@/components/pwa-client";
+import BrandHeader from "@/components/brand-header";
 
 export const metadata: Metadata = {
   title: "OpenPartsFlow",
@@ -40,12 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <PwaClient />
         <div className="app-shell">
-          <header className="app-header container">
-            <div className="app-header-brand">
-              <span className="app-header-title">OpenPartsFlow</span>
-              <span className="app-header-badge">Pilot</span>
-            </div>
-          </header>
+          <BrandHeader />
           <Nav />
           <main className="app-main container">{children}</main>
         </div>

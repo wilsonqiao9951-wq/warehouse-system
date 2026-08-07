@@ -5,8 +5,9 @@
 ## 架构摘要
 
 - **后端**：FastAPI（默认 `http://127.0.0.1:8000/api`）。
-- **前端**：Next.js 14，`output: "export"` 静态导出，产物目录为 `frontend/out`。
-- **PWA**：`public/manifest.json`、`public/sw.js`（仅缓存**同源**静态资源，**不**缓存跨域 API 响应，避免离线误读接口数据）。
+- **前端**：Next.js 16，`output: "export"` 静态导出，产物目录为 `frontend/out`（Node.js 20.9+）。
+- **PWA**：`public/manifest.json`、`public/sw.js`（仅缓存**同源**静态资源，**不**缓存跨域 API 响应，避免离线误读接口数据）。离线写入白名单、账号/设备/认领绑定和照片 IndexedDB 生命周期见 `docs/OFFLINE_SYNC_SECURITY.md`。
+- **离线只读数据**：通过独立 IndexedDB 按账号、注册设备和完整请求路径保存经过审核的成功 GET 响应；页面使用快照时显示保存时间，Service Worker 不保存 API 响应。
 - **Capacitor**：`frontend/capacitor.config.ts` 中 `webDir: "out"`，`appId: com.openpartsflow.app`，`appName: OpenPartsFlow`。
 
 ## 本地运行

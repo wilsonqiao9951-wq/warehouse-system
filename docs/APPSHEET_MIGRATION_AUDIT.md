@@ -51,7 +51,8 @@ Status legend:
 
 ### Export / Integration
 - `Implemented` Inventory Excel export
-- `Unknown` Any AppSheet external integrations (Google Sheets, Gmail, webhook, ERP sync)
+- `Partial` AppSheet/REST inbound work-order Webhook, API keys, field mapping, source links, idempotency, and sync logs are implemented; outbound status/parts callbacks remain
+- `Unknown` Other AppSheet external integrations (Google Sheets automations, Gmail, ERP sync)
 - `Unknown` Existing reporting schedule/distribution requirements
 
 ---
@@ -74,7 +75,7 @@ Recommended additional tables for enterprise migration safety:
 9. `alerts` (low stock, abnormal usage, SLA)
 10. `kpi_snapshots` (pre-aggregated daily metrics)
 11. `roles_permissions` (if role model grows beyond enum)
-12. `appsheet_id_mapping` (source-to-target row ID mapping for traceability)
+12. `external_work_order_links` (implemented source-to-target row ID mapping for traceability)
 
 ---
 
@@ -181,6 +182,14 @@ AppSheet feature -> OpenPartsFlow module -> API endpoint -> frontend page
   - `POST /api/inventory/transactions`
   - `GET /api/inventory/transactions`
 - Frontend page: Not yet linked in current UI (backend ready)
+
+10. AppSheet work-order intake
+- AppSheet feature: Create or update an unclaimed service job through a bot/Webhook
+- OpenPartsFlow module: External Integrations
+- API endpoint:
+  - `POST /api/external/v1/work-orders`
+  - `GET /api/integrations/{integration_id}/sync-logs`
+- Frontend page: `frontend/app/integrations/page.tsx`
 
 ---
 

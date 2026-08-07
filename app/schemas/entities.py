@@ -1,9 +1,13 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import base64
 import binascii
-from pydantic import BaseModel, Field, field_validator, model_validator
+import json
+from urllib.parse import urlsplit
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
+from app.services.domains import normalize_custom_domain
 
 
 class UserBase(BaseModel):
@@ -75,10 +79,124 @@ class OrganizationCreate(BaseModel):
     admin_name: str = Field(min_length=2, max_length=120)
     admin_email: str = Field(min_length=3, max_length=255)
     admin_password: str = Field(min_length=10, max_length=128)
+    plan_code: Literal["starter", "professional", "enterprise"] = "professional"
+    trial_days: int = Field(default=14, ge=0, le=90)
 
 
 class OrganizationUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    is_active: bool | None = None
+    plan_code: Literal["starter", "professional", "enterprise"] | None = None
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ] | None = None
+    trial_ends_at: datetime | None = None
+    max_users: int | None = Field(default=None, ge=1)
+    max_warehouses: int | None = Field(default=None, ge=1)
+    max_vehicle_warehouses: int | None = Field(default=None, ge=1)
+    ai_monthly_limit: int | None = Field(default=None, ge=0)
+    api_monthly_limit: int | None = Field(default=None, ge=0)
+
+    @field_validator("trial_ends_at")
+    @classmethod
+    def normalize_trial_end(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def require_update(self):
+        if not (self.model_fields_set - {"expected_version"}):
+            raise ValueError("At least one organization setting must be supplied")
+        return self
+
+
+class OrganizationBrandingRead(BaseModel):
+    name: str
+    slug: str
+    brand_logo_url: str | None = None
+    brand_primary_color: str
+    brand_login_headline: str | None = None
+
+
+class OrganizationBrandingUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    brand_logo_url: str | None = Field(default=None, max_length=1000)
+    brand_primary_color: str | None = Field(
+        default=None,
+        pattern=r"^#[0-9a-fA-F]{6}$",
+    )
+    brand_login_headline: str | None = Field(default=None, max_length=200)
+
+    @field_validator("brand_logo_url")
+    @classmethod
+    def validate_logo_url(cls, value: str | None) -> str | None:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            return None
+        if any(character in cleaned for character in "\"'<>\\\r\n\t"):
+            raise ValueError("Brand logo URL must use HTTPS")
+        try:
+            parsed = urlsplit(cleaned)
+            valid = (
+                parsed.scheme.lower() == "https"
+                and bool(parsed.hostname)
+                and parsed.username is None
+                and parsed.password is None
+            )
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("Brand logo URL must be a valid HTTPS URL") from exc
+        if not valid:
+            raise ValueError("Brand logo URL must use HTTPS without embedded credentials")
+        return cleaned
+
+    @field_validator("brand_primary_color")
+    @classmethod
+    def normalize_primary_color(cls, value: str | None) -> str | None:
+        return value.lower() if value else None
+
+    @field_validator("brand_login_headline")
+    @classmethod
+    def normalize_login_headline(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
+
+    @model_validator(mode="after")
+    def require_branding_update(self):
+        if not (self.model_fields_set - {"expected_version"}):
+            raise ValueError("At least one branding field must be supplied")
+        return self
+
+
+class OrganizationSettingsRead(OrganizationBrandingRead):
+    id: int
     is_active: bool
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    trial_ends_at: datetime | None = None
+    max_users: int | None = None
+    max_warehouses: int | None = None
+    max_vehicle_warehouses: int | None = None
+    ai_monthly_limit: int | None = None
+    api_monthly_limit: int | None = None
+    usage_period_start: date
+    ai_monthly_used: int = Field(default=0, ge=0)
+    api_monthly_used: int = Field(default=0, ge=0)
+    settings_version: int = Field(ge=0)
+    active_users: int = 0
+    pending_invitations: int = 0
+    active_warehouses: int = 0
+    active_vehicle_warehouses: int = 0
 
 
 class OrganizationRead(BaseModel):
@@ -86,13 +204,613 @@ class OrganizationRead(BaseModel):
     name: str
     slug: str
     is_active: bool
+    brand_logo_url: str | None = None
+    brand_primary_color: str
+    brand_login_headline: str | None = None
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    trial_ends_at: datetime | None = None
+    max_users: int | None = None
+    max_warehouses: int | None = None
+    max_vehicle_warehouses: int | None = None
+    ai_monthly_limit: int | None = None
+    api_monthly_limit: int | None = None
+    usage_period_start: date
+    ai_monthly_used: int = Field(default=0, ge=0)
+    api_monthly_used: int = Field(default=0, ge=0)
+    settings_version: int = Field(ge=0)
+    active_users: int = 0
+    pending_invitations: int = 0
+    active_warehouses: int = 0
+    active_vehicle_warehouses: int = 0
     total_users: int = 0
     total_parts: int = 0
     total_work_orders: int = 0
+    custom_domain: str | None = None
+    custom_domain_status: Literal["pending", "verified"] | None = None
+    email_sender_address: str | None = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class OrganizationDomainUpsert(BaseModel):
+    domain: str = Field(min_length=3, max_length=253)
+    expected_version: int | None = Field(default=None, ge=0)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("domain")
+    @classmethod
+    def normalize_domain(cls, value: str) -> str:
+        return normalize_custom_domain(value)
+
+
+class OrganizationDomainAction(BaseModel):
+    expected_version: int = Field(ge=0)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class OrganizationEmailIdentityUpdate(OrganizationDomainAction):
+    enabled: bool
+    from_name: str = Field(min_length=1, max_length=160)
+    local_part: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$",
+    )
+
+    @field_validator("from_name")
+    @classmethod
+    def normalize_from_name(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if any(character in value for character in "\r\n"):
+            raise ValueError("Sender name cannot contain line breaks")
+        if not cleaned:
+            raise ValueError("Sender name cannot be blank")
+        return cleaned
+
+    @field_validator("local_part", mode="before")
+    @classmethod
+    def normalize_local_part(cls, value: str) -> str:
+        cleaned = value.strip().casefold()
+        if ".." in cleaned:
+            raise ValueError("Sender local part cannot contain consecutive dots")
+        return cleaned
+
+
+class OrganizationDomainRead(BaseModel):
+    id: int
+    organization_id: int
+    domain: str
+    status: Literal["pending", "verified"]
+    verification_record_type: Literal["TXT"] = "TXT"
+    verification_name: str
+    verification_value: str
+    last_checked_at: datetime | None = None
+    verification_error: str | None = None
+    verified_at: datetime | None = None
+    email_from_name: str | None = None
+    email_from_local_part: str | None = None
+    email_identity_enabled: bool
+    email_sender_address: str | None = None
+    login_url: str | None = None
+    version: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+
+class BillingAccountUpsert(BaseModel):
+    expected_version: int = Field(default=0, ge=0)
+    provider: Literal["manual", "generic"]
+    external_customer_id: str | None = Field(default=None, min_length=1, max_length=200)
+    external_subscription_id: str | None = Field(default=None, min_length=1, max_length=200)
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool = False
+    grace_ends_at: datetime | None = None
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("external_customer_id", "external_subscription_id")
+    @classmethod
+    def normalize_external_reference(cls, value: str | None) -> str | None:
+        return (value or "").strip() or None
+
+    @field_validator(
+        "current_period_start",
+        "current_period_end",
+        "grace_ends_at",
+    )
+    @classmethod
+    def normalize_billing_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def validate_binding(self):
+        references = (self.external_customer_id, self.external_subscription_id)
+        if self.provider == "manual" and any(references):
+            raise ValueError("Manual billing cannot include provider references")
+        if self.provider == "generic" and not all(references):
+            raise ValueError("Generic billing requires customer and subscription references")
+        if (self.current_period_start is None) != (self.current_period_end is None):
+            raise ValueError("Billing period start and end must be supplied together")
+        if (
+            self.current_period_start is not None
+            and self.current_period_end is not None
+            and self.current_period_end <= self.current_period_start
+        ):
+            raise ValueError("Billing period end must be after its start")
+        return self
+
+
+BillingEventType = Literal[
+    "trial.started",
+    "subscription.activated",
+    "subscription.renewed",
+    "payment.failed",
+    "subscription.cancellation_scheduled",
+    "subscription.cancellation_reversed",
+    "subscription.suspended",
+    "subscription.cancelled",
+]
+
+
+class BillingWebhookEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str = Field(
+        min_length=1,
+        max_length=200,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$",
+    )
+    event_type: BillingEventType
+    occurred_at: datetime
+    external_customer_id: str = Field(min_length=1, max_length=200)
+    external_subscription_id: str = Field(min_length=1, max_length=200)
+    plan_code: Literal["starter", "professional", "enterprise"] | None = None
+    trial_ends_at: datetime | None = None
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool | None = None
+    grace_ends_at: datetime | None = None
+
+    @field_validator("external_customer_id", "external_subscription_id")
+    @classmethod
+    def normalize_webhook_reference(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Provider reference cannot be blank")
+        return cleaned
+
+    @field_validator(
+        "occurred_at",
+        "trial_ends_at",
+        "current_period_start",
+        "current_period_end",
+        "grace_ends_at",
+    )
+    @classmethod
+    def normalize_webhook_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def validate_event_timeline(self):
+        if (self.current_period_start is None) != (self.current_period_end is None):
+            raise ValueError("Billing period start and end must be supplied together")
+        if (
+            self.current_period_start is not None
+            and self.current_period_end is not None
+            and self.current_period_end <= self.current_period_start
+        ):
+            raise ValueError("Billing period end must be after its start")
+        if self.current_period_start is not None and self.current_period_start > self.occurred_at:
+            raise ValueError("Billing period start cannot be after the event")
+        if self.current_period_end is not None and self.current_period_end <= self.occurred_at:
+            raise ValueError("Billing period end must be after the event")
+        if self.event_type == "trial.started":
+            if self.trial_ends_at is None or self.trial_ends_at <= self.occurred_at:
+                raise ValueError("A trial event requires a future trial end")
+        if self.event_type in {"subscription.activated", "subscription.renewed"}:
+            if self.current_period_end is None or self.current_period_end <= self.occurred_at:
+                raise ValueError("An active subscription event requires a future billing period")
+        if self.grace_ends_at is not None:
+            if self.event_type != "payment.failed" or self.grace_ends_at <= self.occurred_at:
+                raise ValueError("Only a payment failure may set a future grace end")
+        if self.cancel_at_period_end is not None and self.event_type not in {
+            "subscription.activated",
+            "subscription.renewed",
+        }:
+            raise ValueError("This event type cannot set cancel_at_period_end directly")
+        return self
+
+
+class BillingAccountRead(BaseModel):
+    id: int
+    organization_id: int
+    provider: Literal["manual", "generic"]
+    external_customer_id: str | None = None
+    external_subscription_id: str | None = None
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool
+    grace_ends_at: datetime | None = None
+    last_event_at: datetime | None = None
+    last_event_id: str | None = None
+    version: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlatformBillingAccountRead(BillingAccountRead):
+    organization_name: str
+    organization_slug: str
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    open_notice_count: int = Field(ge=0)
+
+
+class BillingLifecycleEventRead(BaseModel):
+    id: int
+    organization_id: int
+    billing_account_id: int
+    provider: str
+    external_event_id: str
+    event_type: BillingEventType
+    processing_status: Literal["applied", "ignored_stale"]
+    payload_sha256: str
+    before_subscription_status: str
+    after_subscription_status: str
+    before_plan_code: str
+    after_plan_code: str
+    occurred_at: datetime
+    received_at: datetime
+    processed_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SubscriptionNoticeRead(BaseModel):
+    id: int
+    organization_id: int
+    source_event_id: int | None = None
+    notice_type: Literal[
+        "trial_ending",
+        "trial_expired",
+        "renewal_upcoming",
+        "renewal_overdue",
+        "cancellation_scheduled",
+        "payment_past_due",
+        "subscription_suspended",
+        "subscription_cancelled",
+    ]
+    status: Literal["open", "acknowledged", "resolved"]
+    severity: Literal["info", "warning", "critical"]
+    message: str
+    effective_at: datetime
+    acknowledged_by: int | None = None
+    acknowledged_at: datetime | None = None
+    resolved_at: datetime | None = None
+    version: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrganizationBillingOverviewRead(BaseModel):
+    organization_id: int
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    trial_ends_at: datetime | None = None
+    account: BillingAccountRead | None = None
+    notices: list[SubscriptionNoticeRead]
+
+
+class SubscriptionNoticeAcknowledge(BaseModel):
+    expected_version: int = Field(ge=0)
+
+
+class BillingWebhookResponse(BaseModel):
+    event_id: int
+    external_event_id: str
+    processing_status: Literal["applied", "ignored_stale"]
+    duplicate: bool
+    subscription_status: str
+    plan_code: str
+
+
+class BillingReconciliationRead(BaseModel):
+    organizations_checked: int = Field(ge=0)
+    notices_created: int = Field(ge=0)
+    notices_resolved: int = Field(ge=0)
+
+
+class OrganizationDataExportRequest(BaseModel):
+    include_files: bool = True
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class OrganizationDataExportRead(BaseModel):
+    id: int
+    organization_id: int
+    requested_by: int | None = None
+    format_version: Literal["opf-portable-v1"]
+    sha256: str = Field(min_length=64, max_length=64)
+    size_bytes: int = Field(ge=0)
+    record_count: int = Field(ge=0)
+    file_count: int = Field(ge=0)
+    missing_file_count: int = Field(ge=0)
+    include_files: bool
+    table_counts: dict[str, int]
+    generated_at: datetime
+
+
+class CommercialUsagePeriodRead(BaseModel):
+    period_start: date
+    ai_requests: int = Field(ge=0)
+    api_requests: int = Field(ge=0)
+    last_ai_used_at: datetime | None = None
+    last_api_used_at: datetime | None = None
+
+
+class CommercialCapacityRead(BaseModel):
+    active_users: int = Field(ge=0)
+    pending_invitations: int = Field(ge=0)
+    active_warehouses: int = Field(ge=0)
+    active_vehicle_warehouses: int = Field(ge=0)
+    max_users: int | None = None
+    max_warehouses: int | None = None
+    max_vehicle_warehouses: int | None = None
+
+
+class OrganizationCommercialReportRead(BaseModel):
+    organization_id: int
+    organization_name: str
+    organization_slug: str
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: Literal[
+        "trialing",
+        "active",
+        "past_due",
+        "suspended",
+        "cancelled",
+    ]
+    generated_at: datetime
+    ai_monthly_limit: int | None = None
+    api_monthly_limit: int | None = None
+    capacity: CommercialCapacityRead
+    periods: list[CommercialUsagePeriodRead]
+
+
+class PlatformCommercialReportRow(BaseModel):
+    organization_id: int
+    organization_name: str
+    organization_slug: str
+    plan_code: Literal["starter", "professional", "enterprise"]
+    subscription_status: str
+    period_start: date
+    ai_requests: int = Field(ge=0)
+    ai_monthly_limit: int | None = None
+    api_requests: int = Field(ge=0)
+    api_monthly_limit: int | None = None
+    active_users: int = Field(ge=0)
+    pending_invitations: int = Field(ge=0)
+    max_users: int | None = None
+    active_warehouses: int = Field(ge=0)
+    max_warehouses: int | None = None
+    active_vehicle_warehouses: int = Field(ge=0)
+    max_vehicle_warehouses: int | None = None
+
+
+class CommercialReportExportRequest(BaseModel):
+    months: int = Field(default=12, ge=1, le=36)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class PlatformCommercialReportExportRequest(BaseModel):
+    period_start: date
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("period_start")
+    @classmethod
+    def require_month_start(cls, value: date) -> date:
+        if value.day != 1:
+            raise ValueError("Commercial report period must start on the first day of a month")
+        return value
+
+
+ExternalIntegrationProvider = Literal[
+    "appsheet",
+    "generic",
+    "google_sheets",
+    "crm",
+    "erp",
+    "wms",
+]
+
+ExternalWebhookEvent = Literal[
+    "work_order.status_changed",
+    "work_order.completed",
+    "work_order.part_used",
+]
+
+
+class ExternalIntegrationCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    provider: ExternalIntegrationProvider = "appsheet"
+    field_mapping: dict[str, str] = Field(default_factory=dict)
+    webhook_url: str | None = Field(default=None, max_length=1000)
+    subscribed_events: list[ExternalWebhookEvent] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Integration name must contain at least 2 characters")
+        return cleaned
+
+
+class ExternalIntegrationUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    field_mapping: dict[str, str] | None = None
+    webhook_url: str | None = Field(default=None, max_length=1000)
+    subscribed_events: list[ExternalWebhookEvent] | None = None
+    is_active: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def normalize_optional_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Integration name must contain at least 2 characters")
+        return cleaned
+
+
+class ExternalIntegrationRotate(BaseModel):
+    expected_version: int = Field(ge=0)
+
+
+class ExternalIntegrationRead(BaseModel):
+    id: int
+    organization_id: int
+    name: str
+    provider: ExternalIntegrationProvider
+    key_prefix: str
+    masked_api_key: str
+    field_mapping: dict[str, str] = Field(default_factory=dict)
+    webhook_url: str | None = None
+    subscribed_events: list[ExternalWebhookEvent] = Field(default_factory=list)
+    is_active: bool
+    version: int = Field(ge=0)
+    last_used_at: datetime | None = None
+    created_by: int | None = None
+    updated_by: int | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExternalIntegrationSecretRead(BaseModel):
+    integration: ExternalIntegrationRead
+    api_key: str
+
+
+class ExternalSyncLogRead(BaseModel):
+    id: int
+    integration_id: int
+    direction: Literal["inbound", "outbound"]
+    event_type: str
+    external_id: str
+    idempotency_key: str
+    status: Literal["pending", "processing", "processed", "failed"]
+    attempt_count: int = Field(ge=0)
+    work_order_id: int | None = None
+    changed_fields: list[str] = Field(default_factory=list)
+    response_status_code: int | None = None
+    error_message: str | None = None
+    next_retry_at: datetime | None = None
+    last_attempt_at: datetime | None = None
+    processed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ExternalWorkOrderUpsert(BaseModel):
+    external_id: str = Field(min_length=1, max_length=255)
+    data: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("external_id")
+    @classmethod
+    def normalize_external_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("external_id cannot be blank")
+        return cleaned
+
+    @field_validator("data")
+    @classmethod
+    def bound_external_data(cls, value: dict[str, object]) -> dict[str, object]:
+        if len(value) > 200:
+            raise ValueError("data cannot contain more than 200 fields")
+        encoded = json.dumps(value, separators=(",", ":"), default=str)
+        if len(encoded.encode("utf-8")) > 262_144:
+            raise ValueError("data cannot exceed 256 KiB")
+        return value
+
+
+class ExternalWorkOrderUpsertRead(BaseModel):
+    integration_id: int
+    external_id: str
+    work_order_id: int
+    ticket_number: str
+    result: Literal["created", "updated"]
+    changed_fields: list[str] = Field(default_factory=list)
+    replayed: bool = False
+
+
+class ExternalInventoryBalanceRead(BaseModel):
+    part_number: str
+    part_name: str
+    warehouse_code: str
+    warehouse_name: str
+    quantity: int
+    available_quantity: int
+    unit: str
+    is_low_stock: bool
+
+
+class ExternalWorkOrderRead(BaseModel):
+    external_id: str
+    work_order_id: int
+    ticket_number: str
+    status: str
+    assigned_engineer_id: int | None = None
+    claimed: bool
+    started_at: datetime | None = None
+    paused_at: datetime | None = None
+    completed_at: datetime | None = None
+    final_outcome: str | None = None
+    updated_at: datetime
+
+
+class ExternalPartRecommendationRead(BaseModel):
+    part_number: str
+    part_name: str
+    recommended_quantity: int
+    historical_usage_count: int
+    success_rate: float | None = None
+    average_repair_minutes: float | None = None
+    available_quantity: int
+    inventory_location: str | None = None
+    confidence: float
+    reason: str
 
 
 class WarehouseCreate(BaseModel):
@@ -177,6 +895,70 @@ class PartMachineAssociationRead(BaseModel):
         from_attributes = True
 
 
+class PartRecognitionCandidateRead(BaseModel):
+    id: int
+    organization_id: int
+    observation_id: int
+    part_id: int
+    part: PartRead
+    rank: int = Field(gt=0)
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+    status: Literal[
+        "ai_candidate",
+        "employee_confirmed",
+        "admin_confirmed",
+        "usage_verified",
+        "trusted",
+        "rejected",
+    ]
+    version: int = Field(ge=0)
+    employee_confirmed_by: int | None = None
+    employee_confirmed_at: datetime | None = None
+    admin_confirmed_by: int | None = None
+    admin_confirmed_at: datetime | None = None
+    usage_verified_by: int | None = None
+    usage_verified_at: datetime | None = None
+    trusted_at: datetime | None = None
+    rejected_by: int | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
+    can_employee_confirm: bool = False
+    can_admin_confirm: bool = False
+    can_verify_usage: bool = False
+    can_promote_trusted: bool = False
+    can_reject: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class PartRecognitionObservationRead(BaseModel):
+    id: int
+    organization_id: int
+    work_order_id: int | None = None
+    machine_model: str | None = None
+    label_text: str | None = None
+    image_url: str
+    notes: str | None = None
+    created_by: int | None = None
+    created_at: datetime
+    updated_at: datetime
+    candidates: list[PartRecognitionCandidateRead] = Field(default_factory=list)
+
+
+class PartRecognitionCandidateAction(BaseModel):
+    action: Literal[
+        "employee_confirm",
+        "admin_confirm",
+        "verify_usage",
+        "promote_trusted",
+        "reject",
+    ]
+    expected_version: int = Field(ge=0)
+    work_order_id: int | None = Field(default=None, ge=1)
+    reason: str | None = Field(default=None, max_length=1000)
+
+
 class ImportBatchRead(BaseModel):
     id: int
     organization_id: int
@@ -196,9 +978,322 @@ class ImportBatchRead(BaseModel):
     created_at: datetime
 
 
+WorkOrderFormFieldType = Literal[
+    "text",
+    "textarea",
+    "number",
+    "boolean",
+    "date",
+    "select",
+    "photo",
+    "signature",
+]
+WorkOrderFormValue = str | int | float | bool | None
+
+
+class WorkOrderFormFieldCreate(BaseModel):
+    field_key: str = Field(
+        min_length=2,
+        max_length=64,
+        pattern=r"^[a-z][a-z0-9_]*$",
+    )
+    label: str = Field(min_length=1, max_length=160)
+    field_type: WorkOrderFormFieldType
+    help_text: str | None = Field(default=None, max_length=1000)
+    placeholder: str | None = Field(default=None, max_length=500)
+    default_value: WorkOrderFormValue = None
+    options: list[str] = Field(default_factory=list, max_length=100)
+    required_at_completion: bool = False
+    requires_photo: bool = False
+    requires_signature: bool = False
+    requires_approval: bool = False
+    triggers_notification: bool = False
+    affects_inventory: bool = False
+    include_in_ai_learning: bool = False
+    sort_order: int = Field(default=0, ge=0, le=10_000)
+
+    @field_validator("field_key")
+    @classmethod
+    def normalize_field_key(cls, value: str) -> str:
+        return value.strip().lower()
+
+    @field_validator("label")
+    @classmethod
+    def normalize_field_label(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field label cannot be blank")
+        return cleaned
+
+    @field_validator("options")
+    @classmethod
+    def validate_field_options(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            cleaned = value.strip()
+            if not cleaned or len(cleaned) > 160:
+                raise ValueError("Field options must contain 1 to 160 characters")
+            if cleaned not in normalized:
+                normalized.append(cleaned)
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_type_configuration(self):
+        if self.field_type == "select" and not self.options:
+            raise ValueError("Select fields require at least one option")
+        if self.field_type != "select" and self.options:
+            raise ValueError("Only select fields may define options")
+        if self.requires_photo and self.field_type != "photo":
+            raise ValueError("requires_photo can only be set on photo fields")
+        if self.requires_signature and self.field_type != "signature":
+            raise ValueError("requires_signature can only be set on signature fields")
+        return self
+
+
+class WorkOrderFormTemplateCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=160)
+    industry: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=5000)
+    applicable_machine_type: str | None = Field(default=None, max_length=255)
+    applicable_job_type: str | None = Field(default=None, max_length=120)
+    default_work_order_status: Literal["open", "scheduled"] = "open"
+    fields: list[WorkOrderFormFieldCreate] = Field(default_factory=list, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_template_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Template name must contain at least two characters")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_unique_field_keys(self):
+        keys = [field.field_key for field in self.fields]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Template field keys must be unique")
+        return self
+
+
+class WorkOrderFormTemplateUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    industry: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=5000)
+    applicable_machine_type: str | None = Field(default=None, max_length=255)
+    applicable_job_type: str | None = Field(default=None, max_length=120)
+    default_work_order_status: Literal["open", "scheduled"] | None = None
+    is_active: bool | None = None
+    fields: list[WorkOrderFormFieldCreate] | None = Field(default=None, max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_template_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if len(cleaned) < 2:
+            raise ValueError("Template name must contain at least two characters")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_unique_field_keys(self):
+        if self.fields is None:
+            return self
+        keys = [field.field_key for field in self.fields]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Template field keys must be unique")
+        return self
+
+
+class WorkOrderFormFieldRead(WorkOrderFormFieldCreate):
+    id: int | None = None
+
+
+class WorkOrderFormTemplateRead(BaseModel):
+    id: int
+    organization_id: int
+    name: str
+    industry: str | None = None
+    description: str | None = None
+    applicable_machine_type: str | None = None
+    applicable_job_type: str | None = None
+    default_work_order_status: Literal["open", "scheduled"]
+    is_active: bool
+    version: int = Field(ge=0)
+    fields: list[WorkOrderFormFieldRead] = Field(default_factory=list)
+    created_by: int | None = None
+    updated_by: int | None = None
+    can_edit: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkOrderFormRead(BaseModel):
+    work_order_id: int
+    template_id: int | None = None
+    template_name: str | None = None
+    template_version: int | None = None
+    form_version: int = Field(ge=0)
+    fields: list[WorkOrderFormFieldRead] = Field(default_factory=list)
+    values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+    missing_required_fields: list[str] = Field(default_factory=list)
+    can_edit: bool = False
+    is_frozen: bool = False
+
+
+class WorkOrderFormUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+
+    @field_validator("values")
+    @classmethod
+    def bound_values(
+        cls,
+        values: dict[str, WorkOrderFormValue],
+    ) -> dict[str, WorkOrderFormValue]:
+        if len(values) > 100:
+            raise ValueError("Form cannot contain more than 100 values")
+        encoded = json.dumps(values, separators=(",", ":"), default=str)
+        if len(encoded.encode("utf-8")) > 262_144:
+            raise ValueError("Form values cannot exceed 256 KiB")
+        return values
+
+
+class WorkOrderFormConflictCreate(BaseModel):
+    work_order_id: int = Field(ge=1)
+    client_queue_id: str = Field(min_length=8, max_length=80)
+    claim_version: int = Field(ge=0)
+    base_form_version: int = Field(ge=0)
+    local_values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+
+    @field_validator("client_queue_id")
+    @classmethod
+    def normalize_queue_id(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("local_values")
+    @classmethod
+    def bound_local_values(
+        cls,
+        values: dict[str, WorkOrderFormValue],
+    ) -> dict[str, WorkOrderFormValue]:
+        if len(values) > 100:
+            raise ValueError("Form cannot contain more than 100 values")
+        encoded = json.dumps(values, separators=(",", ":"), default=str)
+        if len(encoded.encode("utf-8")) > 262_144:
+            raise ValueError("Form values cannot exceed 256 KiB")
+        return values
+
+
+class WorkOrderFormConflictReceipt(BaseModel):
+    id: int
+    status: Literal["pending", "kept_server", "applied_local", "merged"]
+    version: int = Field(ge=0)
+
+
+class WorkOrderFormConflictRead(WorkOrderFormConflictReceipt):
+    organization_id: int
+    work_order_id: int
+    work_order_ticket_number: str
+    client_queue_id: str
+    created_by: int
+    created_by_name: str | None = None
+    created_device_id: int
+    created_device_name: str | None = None
+    claim_version: int = Field(ge=0)
+    base_form_version: int = Field(ge=0)
+    server_form_version: int = Field(ge=0)
+    current_server_form_version: int = Field(ge=0)
+    local_values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+    server_values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+    current_server_values: dict[str, WorkOrderFormValue] = Field(default_factory=dict)
+    resolved_values: dict[str, WorkOrderFormValue] | None = None
+    resolved_server_form_version: int | None = Field(default=None, ge=0)
+    resolution_notes: str | None = None
+    resolved_by: int | None = None
+    resolved_by_name: str | None = None
+    resolved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkOrderFormConflictResolve(BaseModel):
+    expected_version: int = Field(ge=0)
+    expected_server_form_version: int = Field(ge=0)
+    action: Literal["keep_server", "apply_local", "merge"]
+    values: dict[str, WorkOrderFormValue] | None = None
+    resolution_notes: str = Field(min_length=3, max_length=2000)
+
+    @field_validator("resolution_notes")
+    @classmethod
+    def normalize_conflict_notes(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("Resolution notes must contain at least 3 characters")
+        return normalized
+
+    @field_validator("values")
+    @classmethod
+    def bound_resolution_values(
+        cls,
+        values: dict[str, WorkOrderFormValue] | None,
+    ) -> dict[str, WorkOrderFormValue] | None:
+        if values is None:
+            return None
+        if len(values) > 100:
+            raise ValueError("Form cannot contain more than 100 values")
+        encoded = json.dumps(values, separators=(",", ":"), default=str)
+        if len(encoded.encode("utf-8")) > 262_144:
+            raise ValueError("Form values cannot exceed 256 KiB")
+        return values
+
+
+class WorkOrderFormActionRead(BaseModel):
+    id: int
+    organization_id: int
+    work_order_id: int
+    work_order_ticket_number: str
+    template_id: int | None = None
+    template_name: str | None = None
+    field_key: str
+    field_label: str
+    action_type: Literal["notification", "inventory_review"]
+    status: Literal["pending", "acknowledged", "resolved"]
+    triggered_form_version: int = Field(ge=1)
+    version: int = Field(ge=0)
+    created_by: int | None = None
+    created_by_name: str | None = None
+    acknowledged_by: int | None = None
+    acknowledged_by_name: str | None = None
+    acknowledged_at: datetime | None = None
+    resolved_by: int | None = None
+    resolved_by_name: str | None = None
+    resolved_at: datetime | None = None
+    resolution_notes: str | None = None
+    can_acknowledge: bool = False
+    can_resolve: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class WorkOrderFormActionUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    action: Literal["acknowledge", "resolve"]
+    resolution_notes: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("resolution_notes")
+    @classmethod
+    def normalize_resolution_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
 class WorkOrderCreate(BaseModel):
     customer_id: int | None = None
     equipment_id: int | None = None
+    form_template_id: int | None = Field(default=None, ge=1)
     ticket_number: str | None = None
     wo_number: str | None = None
     schedule_date: date | None = None
@@ -213,6 +1308,9 @@ class WorkOrderCreate(BaseModel):
     contact_phone: str | None = None
     machine_type: str | None = None
     problem_description: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
     assigned_user_id: int | None = None
     engineer_id: int | None = None
     assistant_id: int | None = None
@@ -244,6 +1342,12 @@ class WorkOrderUpdate(BaseModel):
     contact_phone: str | None = None
     machine_type: str | None = None
     problem_description: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
+    final_outcome: str | None = Field(default=None, max_length=120)
+    first_time_fix: bool | None = None
+    is_rework: bool | None = None
     assigned_user_id: int | None = None
     engineer_id: int | None = None
     assistant_id: int | None = None
@@ -255,10 +1359,16 @@ class WorkOrderUpdate(BaseModel):
 class WorkOrderRead(WorkOrderCreate):
     id: int
     organization_id: int
+    form_template_version: int | None = None
+    form_version: int = Field(default=0, ge=0)
     started_at: datetime | None = None
     completed_at: datetime | None = None
     paused_at: datetime | None = None
     repair_result: str | None = None
+    final_outcome: str | None = None
+    first_time_fix: bool | None = None
+    is_rework: bool = False
+    repair_duration_minutes: int | None = None
     checklist_json: str | None = None
     customer_signature_name: str | None = None
     customer_signature_data: str | None = None
@@ -304,6 +1414,10 @@ class InventoryTransactionCreate(BaseModel):
 class InventoryTransactionRead(InventoryTransactionCreate):
     id: int
     organization_id: int
+    replenishment_request_id: int | None = None
+    vehicle_return_request_id: int | None = None
+    inventory_count_line_id: int | None = None
+    movement_stage: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -351,6 +1465,13 @@ class WorkOrderPartRecommendation(BaseModel):
     recommended_quantity: int
     usage_count: int
     total_quantity: int
+    success_rate: float | None = Field(default=None, ge=0, le=1)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    available_quantity: int = Field(ge=0)
+    inventory_location: str | None = None
+    inventory_warehouse_id: int | None = None
+    inventory_location_id: int | None = None
+    confidence: float = Field(ge=0, le=1)
     reason: str
 
 
@@ -370,14 +1491,67 @@ class InventoryNotificationRead(BaseModel):
 
 class ReplenishmentRequestRead(BaseModel):
     id: int
+    organization_id: int
+    notification_id: int | None = None
+    client_request_id: str | None = None
+    request_reason: str | None = None
     part_id: int
     destination_warehouse_id: int
     source_warehouse_id: int | None = None
     quantity: int
     work_order_id: int | None = None
     requested_by: int | None = None
+    target_user_id: int | None = None
+    version: int = 0
+    requires_reconciliation: bool = False
+    approval_status: str = "pending"
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    rejected_by: int | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
+    picking_by: int | None = None
+    picking_at: datetime | None = None
+    shipped_by: int | None = None
+    shipped_at: datetime | None = None
+    received_by: int | None = None
+    received_device_id: int | None = None
+    received_at: datetime | None = None
+    completed_by: int | None = None
+    completed_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    shipment_transaction_id: int | None = None
+    receipt_transaction_id: int | None = None
     status: str
+    part_number: str | None = None
+    part_name: str | None = None
+    source_warehouse_name: str | None = None
+    destination_warehouse_name: str | None = None
+    target_user_name: str | None = None
+    requested_by_name: str | None = None
+    approved_by_name: str | None = None
+    rejected_by_name: str | None = None
+    picking_by_name: str | None = None
+    shipped_by_name: str | None = None
+    received_by_name: str | None = None
+    received_device_name: str | None = None
+    completed_by_name: str | None = None
+    cancelled_by_name: str | None = None
+    work_order_ticket_number: str | None = None
+    source_available_quantity: int | None = None
+    destination_quantity: int = 0
+    can_start_picking: bool = False
+    can_approve: bool = False
+    can_reject: bool = False
+    can_ship: bool = False
+    can_receive: bool = False
+    can_complete: bool = False
+    can_cancel: bool = False
+    can_reconcile: bool = False
     created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -402,6 +1576,34 @@ class InventoryScanRead(BaseModel):
     current_quantity: int | None = None
     projected_quantity: int | None = None
     feedback: str
+
+
+class InventoryLocationScanRequest(BaseModel):
+    label: str = Field(min_length=1, max_length=200)
+    expected_warehouse_id: int | None = None
+
+
+class InventoryLocationScanRead(BaseModel):
+    scan_type: Literal["warehouse", "location"]
+    label_token: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name: str
+    location_id: int | None = None
+    location_code: str | None = None
+    location_name: str | None = None
+    zone: str | None = None
+
+
+class InventoryLocationLabelRead(BaseModel):
+    label_token: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name: str
+    location_id: int | None = None
+    location_code: str | None = None
+    location_name: str | None = None
+    zone: str | None = None
 
 
 class StockBalance(BaseModel):
@@ -429,6 +1631,12 @@ class WorkOrderFlowAction(BaseModel):
     notes: str | None = None
     account_password: str | None = Field(default=None, max_length=128)
     repair_result: str | None = None
+    fault_type: str | None = Field(default=None, max_length=120)
+    error_code: str | None = Field(default=None, max_length=120)
+    environment_info: str | None = Field(default=None, max_length=4000)
+    final_outcome: str | None = Field(default=None, max_length=120)
+    first_time_fix: bool | None = None
+    is_rework: bool | None = None
     checklist_json: str | None = None
     customer_signature_name: str | None = None
     customer_signature_data: str | None = None
@@ -549,6 +1757,171 @@ class QCPictureRead(QCPictureCreate):
         from_attributes = True
 
 
+class ReplenishmentRequestAction(BaseModel):
+    action: str = Field(pattern=r"^(approve|reject|start_picking|ship|receive|complete|cancel)$")
+    expected_version: int = Field(ge=0)
+    source_warehouse_id: int | None = Field(default=None, ge=1)
+    reason: str | None = Field(default=None, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
+
+
+class ReplenishmentRequestCreate(BaseModel):
+    part_id: int = Field(ge=1)
+    destination_warehouse_id: int = Field(ge=1)
+    quantity: int = Field(ge=1)
+    source_warehouse_id: int | None = Field(default=None, ge=1)
+    reason: str = Field(min_length=3, max_length=500)
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$",
+    )
+
+
+class ReplenishmentRequestReconcile(BaseModel):
+    expected_version: int = Field(ge=0)
+    resolution: str = Field(pattern=r"^(reset_requested|accept_historical)$")
+    reason: str = Field(min_length=3, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
+
+
+class VehicleReturnRequestCreate(BaseModel):
+    part_id: int = Field(ge=1)
+    source_warehouse_id: int = Field(ge=1)
+    destination_warehouse_id: int = Field(ge=1)
+    quantity: int = Field(ge=1)
+    reason: str = Field(min_length=3, max_length=500)
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$",
+    )
+
+
+class VehicleReturnRequestAction(BaseModel):
+    action: str = Field(pattern=r"^(approve|ship|receive|cancel)$")
+    expected_version: int = Field(ge=0)
+    reason: str | None = Field(default=None, max_length=500)
+    account_password: str | None = Field(default=None, max_length=128)
+
+
+class VehicleReturnRequestRead(BaseModel):
+    id: int
+    organization_id: int
+    client_request_id: str
+    part_id: int
+    source_warehouse_id: int
+    destination_warehouse_id: int
+    engineer_id: int
+    quantity: int
+    reason: str
+    version: int
+    status: str
+    requested_by: int
+    requested_device_id: int
+    requested_at: datetime
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    shipped_by: int | None = None
+    shipped_device_id: int | None = None
+    shipped_at: datetime | None = None
+    received_by: int | None = None
+    received_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    shipment_transaction_id: int | None = None
+    receipt_transaction_id: int | None = None
+    part_number: str | None = None
+    part_name: str | None = None
+    source_warehouse_name: str | None = None
+    destination_warehouse_name: str | None = None
+    engineer_name: str | None = None
+    requested_by_name: str | None = None
+    requested_device_name: str | None = None
+    approved_by_name: str | None = None
+    shipped_by_name: str | None = None
+    shipped_device_name: str | None = None
+    received_by_name: str | None = None
+    cancelled_by_name: str | None = None
+    source_quantity: int = 0
+    destination_quantity: int = 0
+    can_approve: bool = False
+    can_ship: bool = False
+    can_receive: bool = False
+    can_cancel: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class InventoryCountCreate(BaseModel):
+    client_request_id: str = Field(min_length=8, max_length=100)
+    warehouse_id: int
+    location_id: int | None = None
+    title: str = Field(min_length=3, max_length=160)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class InventoryCountLineUpsert(BaseModel):
+    part_id: int
+    counted_quantity: int = Field(ge=0)
+    notes: str | None = Field(default=None, max_length=1000)
+    expected_version: int = Field(ge=0)
+
+
+class InventoryCountAction(BaseModel):
+    action: Literal["submit", "approve", "cancel"]
+    expected_version: int = Field(ge=0)
+    reason: str | None = Field(default=None, max_length=2000)
+    password: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class InventoryCountLineRead(BaseModel):
+    id: int
+    part_id: int
+    part_number: str | None = None
+    part_name: str | None = None
+    counted_quantity: int
+    submitted_book_quantity: int | None = None
+    approved_book_quantity: int | None = None
+    variance_quantity: int | None = None
+    counted_by: int
+    counted_at: datetime
+    adjustment_transaction_id: int | None = None
+    notes: str | None = None
+
+
+class InventoryCountRead(BaseModel):
+    id: int
+    client_request_id: str
+    warehouse_id: int
+    warehouse_name: str | None = None
+    location_id: int | None = None
+    location_code: str | None = None
+    title: str
+    notes: str | None = None
+    status: str
+    version: int
+    created_by: int
+    submitted_by: int | None = None
+    submitted_at: datetime | None = None
+    approved_by: int | None = None
+    approved_at: datetime | None = None
+    cancelled_by: int | None = None
+    cancelled_at: datetime | None = None
+    cancellation_reason: str | None = None
+    lines: list[InventoryCountLineRead] = Field(default_factory=list)
+    can_edit: bool = False
+    can_submit: bool = False
+    can_approve: bool = False
+    can_cancel: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
 class CustomerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     account_number: str | None = Field(default=None, max_length=120)
@@ -596,6 +1969,156 @@ class EquipmentRead(EquipmentCreate):
         from_attributes = True
 
 
+MachineKnowledgeEntryType = Literal[
+    "fault",
+    "repair_step",
+    "tool",
+    "caution",
+    "common_error",
+    "photo",
+    "video",
+    "note",
+]
+
+MachineKnowledgePartRole = Literal[
+    "recommended",
+    "alternative",
+    "consumable",
+    "reference",
+]
+
+
+class MachineKnowledgeProfileCreate(BaseModel):
+    model: str = Field(min_length=1, max_length=255)
+    manufacturer: str | None = Field(default=None, max_length=160)
+    equipment_type: str | None = Field(default=None, max_length=160)
+    summary: str | None = Field(default=None, max_length=5000)
+
+
+class MachineKnowledgeProfileUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    model: str | None = Field(default=None, min_length=1, max_length=255)
+    manufacturer: str | None = Field(default=None, max_length=160)
+    equipment_type: str | None = Field(default=None, max_length=160)
+    summary: str | None = Field(default=None, max_length=5000)
+    is_active: bool | None = None
+
+
+class MachineKnowledgeEntryCreate(BaseModel):
+    entry_type: MachineKnowledgeEntryType
+    title: str = Field(min_length=1, max_length=255)
+    content: str = Field(min_length=1, max_length=20000)
+    fault_code: str | None = Field(default=None, max_length=120)
+    related_part_id: int | None = Field(default=None, ge=1)
+    related_part_role: MachineKnowledgePartRole | None = None
+    alternative_for_part_id: int | None = Field(default=None, ge=1)
+    installation_location: str | None = Field(default=None, max_length=500)
+    source_work_order_id: int | None = Field(default=None, ge=1)
+    media_url: str | None = Field(default=None, max_length=1000)
+    sort_order: int = Field(default=0, ge=0, le=10000)
+
+
+class MachineKnowledgeEntryUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    entry_type: MachineKnowledgeEntryType | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    content: str | None = Field(default=None, min_length=1, max_length=20000)
+    fault_code: str | None = Field(default=None, max_length=120)
+    related_part_id: int | None = Field(default=None, ge=1)
+    related_part_role: MachineKnowledgePartRole | None = None
+    alternative_for_part_id: int | None = Field(default=None, ge=1)
+    installation_location: str | None = Field(default=None, max_length=500)
+    source_work_order_id: int | None = Field(default=None, ge=1)
+    media_url: str | None = Field(default=None, max_length=1000)
+    sort_order: int | None = Field(default=None, ge=0, le=10000)
+
+
+class MachineKnowledgeEntryAction(BaseModel):
+    action: Literal["publish", "archive", "reopen"]
+    expected_version: int = Field(ge=0)
+
+
+class MachineKnowledgeDraftGenerate(BaseModel):
+    work_order_id: int = Field(ge=1)
+
+
+class MachineKnowledgePartRead(BaseModel):
+    id: int
+    part_number: str
+    name: str
+    image_url: str | None = None
+    recognition_source: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    confirmed_count: int | None = Field(default=None, ge=0)
+
+
+class MachineKnowledgeEvidenceRead(BaseModel):
+    completed_work_orders: int = Field(ge=0)
+    labeled_outcomes: int = Field(ge=0)
+    first_time_fix_rate: float | None = Field(default=None, ge=0, le=1)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    latest_completed_at: datetime | None = None
+
+
+class MachineKnowledgeEntryRead(BaseModel):
+    id: int
+    organization_id: int
+    profile_id: int
+    entry_type: MachineKnowledgeEntryType
+    title: str
+    content: str
+    fault_code: str | None = None
+    related_part: MachineKnowledgePartRead | None = None
+    related_part_role: MachineKnowledgePartRole | None = None
+    alternative_for_part: MachineKnowledgePartRead | None = None
+    installation_location: str | None = None
+    source_work_order_id: int | None = None
+    media_url: str | None = None
+    media_mime_type: str | None = None
+    media_size_bytes: int | None = Field(default=None, ge=0)
+    sort_order: int
+    status: Literal["draft", "published", "archived"]
+    version: int = Field(ge=0)
+    created_by: int | None = None
+    updated_by: int | None = None
+    published_by: int | None = None
+    published_at: datetime | None = None
+    archived_by: int | None = None
+    archived_at: datetime | None = None
+    can_edit: bool = False
+    can_publish: bool = False
+    can_archive: bool = False
+    can_reopen: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class MachineKnowledgeProfileRead(BaseModel):
+    id: int
+    organization_id: int
+    manufacturer: str | None = None
+    model: str
+    equipment_type: str | None = None
+    summary: str | None = None
+    version: int = Field(ge=0)
+    is_active: bool
+    created_by: int | None = None
+    updated_by: int | None = None
+    can_edit: bool = False
+    can_add_entry: bool = False
+    entries: list[MachineKnowledgeEntryRead] = Field(default_factory=list)
+    related_parts: list[MachineKnowledgePartRead] = Field(default_factory=list)
+    evidence: MachineKnowledgeEvidenceRead
+    created_at: datetime
+    updated_at: datetime
+
+
+class MachineKnowledgeDraftGenerationRead(BaseModel):
+    profile: MachineKnowledgeProfileRead
+    created_entries: int = Field(ge=0)
+    skipped_entries: int = Field(ge=0)
+
+
 class ServiceHistoryPart(BaseModel):
     part_number: str
     name: str
@@ -609,6 +2132,13 @@ class ServiceHistoryItem(BaseModel):
     job_type: str | None = None
     problem_description: str | None = None
     repair_result: str | None = None
+    fault_type: str | None = None
+    error_code: str | None = None
+    environment_info: str | None = None
+    final_outcome: str | None = None
+    first_time_fix: bool | None = None
+    is_rework: bool = False
+    repair_duration_minutes: int | None = None
     status: str
     completed_at: datetime | None = None
     engineer_id: int | None = None
@@ -622,6 +2152,71 @@ class WorkOrderServiceContext(BaseModel):
     fallback_contact_phone: str | None = None
     fallback_equipment_model: str | None = None
     history: list[ServiceHistoryItem] = Field(default_factory=list)
+
+
+class ServiceIntelligencePattern(BaseModel):
+    value: str
+    count: int = Field(ge=1)
+
+
+class ServiceIntelligenceFaultAnalysis(BaseModel):
+    machine_model: str | None = None
+    completed_work_orders: int = Field(default=0, ge=0)
+    labeled_outcomes: int = Field(default=0, ge=0)
+    first_time_fix_rate: float | None = Field(default=None, ge=0, le=1)
+    rework_rate: float | None = Field(default=None, ge=0, le=1)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    top_fault_types: list[ServiceIntelligencePattern] = Field(default_factory=list)
+    top_error_codes: list[ServiceIntelligencePattern] = Field(default_factory=list)
+    summary: str
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ServiceIntelligenceSimilarWorkOrder(BaseModel):
+    id: int
+    ticket_number: str
+    completed_at: datetime | None = None
+    job_type: str | None = None
+    problem_description: str | None = None
+    fault_type: str | None = None
+    error_code: str | None = None
+    repair_result: str | None = None
+    final_outcome: str | None = None
+    first_time_fix: bool | None = None
+    is_rework: bool = False
+    repair_duration_minutes: int | None = None
+    parts_used: list[ServiceHistoryPart] = Field(default_factory=list)
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+
+
+class ServiceIntelligenceKnowledgeEntry(BaseModel):
+    id: int
+    profile_id: int
+    machine_model: str
+    entry_type: MachineKnowledgeEntryType
+    title: str
+    content: str
+    fault_code: str | None = None
+    related_part: MachineKnowledgePartRead | None = None
+    related_part_role: MachineKnowledgePartRole | None = None
+    alternative_for_part: MachineKnowledgePartRead | None = None
+    installation_location: str | None = None
+    media_url: str | None = None
+    media_mime_type: str | None = None
+    published_at: datetime | None = None
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+
+
+class WorkOrderServiceIntelligence(BaseModel):
+    work_order_id: int
+    evidence_scope: Literal[
+        "organization_completed_work_orders_and_published_exact_model_knowledge"
+    ]
+    fault_analysis: ServiceIntelligenceFaultAnalysis
+    knowledge_entries: list[ServiceIntelligenceKnowledgeEntry] = Field(default_factory=list)
+    similar_work_orders: list[ServiceIntelligenceSimilarWorkOrder] = Field(default_factory=list)
 
 
 class WorkOrderVoiceNoteRead(BaseModel):

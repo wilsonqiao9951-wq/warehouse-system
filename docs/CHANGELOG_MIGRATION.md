@@ -200,3 +200,336 @@ New APIs:
 - `GET /api/work-orders?scope=all|mine|available`
 
 Validation completed on SQLite with a full base-to-head upgrade, `0018 -> 0017` downgrade, and `0017 -> 0018` re-upgrade.
+
+---
+
+## 8) Replenishment Custody and Inventory Movements (`20260711_0019`)
+
+Added to `replenishment_requests`:
+
+- source notification and target engineer links;
+- organization-scoped `client_request_id` and `request_reason` for idempotent manual vehicle requests;
+- a monotonically increasing workflow `version`;
+- `requires_reconciliation` for legacy rows without trustworthy custody evidence;
+- picker, shipper, receiver, receiving device, completer, and canceller attribution;
+- server timestamps for every custody transition;
+- cancellation reason;
+- shipment and receipt inventory transaction IDs.
+
+Added to `inventory_transactions`:
+
+- `replenishment_request_id`;
+- `movement_stage` (`ship` or `receive`);
+- a unique request/stage constraint that prevents duplicate movement posting during retries.
+
+The migration also formalizes `warehouses.warehouse_type`, converts existing engineer-owned warehouses to `van`, adds organization/status and organization/target/status indexes, enforces one request per notification and one manual `client_request_id` per organization, and adds quantity/version/status checks plus unique shipment/receipt transaction links.
+
+Legacy rows labelled `picking`, `shipped`, `received`, or `completed` are marked `requires_reconciliation`. The three intermediate labels are reopened as `requested`; `completed` remains completed for an administrator to explicitly accept as historical or leave blocked for further investigation. Normal custody actions are blocked while the flag remains set.
+
+Workflow behavior:
+
+```text
+requested → picking → shipped → received → completed
+```
+
+- `picking` reserves the requested source quantity when available stock is calculated.
+- `shipped` posts a linked `OUTBOUND` transaction from the source warehouse.
+- `received` posts a linked `INBOUND` transaction to the destination vehicle and records the engineer and registered device.
+- `completed` closes the task and resolves its originating low-stock notification.
+- Cancellation is limited to `requested` or `picking`, requires a reason, and resolves the source notification to avoid recreating a cancelled request loop.
+
+New APIs:
+
+- `POST /api/inventory/replenishment-requests` for an idempotent manual assigned-vehicle request with `client_request_id` and reason
+- `GET /api/inventory/replenishment-requests`
+- `POST /api/inventory/replenishment-requests/{id}/actions`
+- `POST /api/inventory/replenishment-requests/{id}/reconcile`
+- `GET /api/inventory/my-van`
+
+The former generic replenishment status PATCH now returns `410`. Action requests send `expected_version`; a stale version or invalid transition returns `409` without changing custody or inventory state.
+
+Reconciliation is administrator-only and requires a matching version, a reason, and current-password verification. `reset_requested` is valid for a reopened requested row; `accept_historical` is valid for a legacy completed row. Rows with linked inventory movements cannot use historical reconciliation. Downgrade from `0019` is also blocked while any linked replenishment movement exists, preventing the migration from discarding ledger-to-custody references.
+
+Runtime inventory safeguards added with this revision:
+
+- SQLite connections enable `PRAGMA foreign_keys=ON` and a five-second busy timeout.
+- SQLite inventory-affecting custody writes acquire `BEGIN IMMEDIATE` before reading available stock or changing state; PostgreSQL uses row locks.
+- An engineer-owned warehouse is treated as a vehicle even if legacy metadata is stale, and new engineer-owned warehouses are normalized to `van`.
+- A vehicle cannot be a replenishment source.
+- Generic inventory transactions reject every vehicle source/destination; opening-inventory preview and commit also reject vehicles.
+- The generic transaction API accepts only `INBOUND`, `OUTBOUND`, `TRANSFER`, and `DAMAGE`. `RETURN` and `WORK_ORDER_USED` require their authenticated business workflows.
+
+Verification:
+
+- Full backend suite: 66 passed.
+- Replenishment custody/security: 14 targeted tests passed.
+- File-backed SQLite contention: 2 targeted tests passed.
+- Fresh base-to-`0019`, empty `0019 → 0018 → 0019`, and legacy compatibility database-to-`0019` migration paths passed.
+- Linked-movement downgrade was rejected before any downgrade DDL executed.
+- Frontend upgraded to Next.js 16.2.10 and ESLint 9; lint and the production build passed for all 26 static routes.
+- npm dependency installation/audit resolved to 0 known vulnerabilities; PostCSS is pinned to the patched 8.5.17 release.
+
+## 20260712_0020 - Authenticated vehicle return custody
+
+Added `vehicle_return_requests` and the strict reverse logistics chain `requested -> approved -> shipped -> received`.
+
+- Engineers create returns only from their own assigned vehicle and registered device.
+- Warehouse/admin approval reserves the vehicle quantity.
+- Only the same engineer can confirm handover, using the bound device and current password; this posts `return_ship` vehicle `OUTBOUND`.
+- Warehouse/admin receipt validates the linked shipment and posts `return_receive` warehouse `INBOUND` with the same cost.
+- Cancellation is allowed only before handover and releases approved reservations.
+- Unique client request IDs, workflow versions, transaction stages, tenant indexes, and audit events make retries and concurrent requests safe.
+- Generic `RETURN` remains disabled; all return mutations are online-only.
+- Downgrade is blocked while linked vehicle-return movements exist.
+
+Verification: full backend suite 70 passed, vehicle custody target suite 18 passed, migration base-to-`0020` and empty `0020 -> 0019 -> 0020` passed, ESLint passed, and the Next.js production build generated all 26 static routes.
+
+## 20260712_0021 - Auditable inventory counts
+
+- Adds tenant-scoped count sessions and lines with actor timestamps and optimistic versions.
+- Submission records book snapshots; administrator approval recalculates current book stock and posts one uniquely linked adjustment per non-zero variance.
+- Administrator password reauthentication is required before ledger changes. Managers remain read-only and vehicle warehouses are excluded.
+- Downgrade is blocked while approved count adjustment movements exist.
+
+## 20260712_0022 - Replenishment approvals
+
+- Adds pending/approved/rejected decision state plus approver/rejector identities, timestamps, and rejection reason.
+- Managers and administrators decide requests; warehouse users cannot self-approve and cannot pick pending requests.
+- Existing in-progress/completed custody rows are migrated as approved. Rejected rows downgrade safely to cancelled with their reason preserved.
+
+## 20260712_0023 - Work-order learning data
+
+- Adds indexed fault type, error code, and final outcome plus environment information, first-time-fix, rework, and repair duration.
+- Duration is non-negative and server-calculated from field start through the engineer's completion submission, so manager approval delay does not inflate it.
+- Learning evidence is returned in work-order and equipment service-history APIs and is frozen with the existing completion evidence.
+
+## 20260728_0024 - Controlled visual part candidates
+
+- Adds tenant-scoped photo observations and ranked part candidates.
+- Adds the strict `ai_candidate -> employee_confirmed -> admin_confirmed -> usage_verified -> trusted` lifecycle plus reason-required rejection.
+- Records every actor and timestamp, uses optimistic versions, and requires a real linked work-order part usage before trust promotion.
+- Trusted promotion updates verified machine/part knowledge only; the recognition workflow never writes inventory transactions.
+
+## 20260728_0025 - Governed machine service knowledge
+
+- Adds tenant-scoped machine profiles with normalized per-organization model uniqueness and optimistic versions.
+- Adds typed fault, repair-step, tool, caution, common-error, photo, video, and service-note entries.
+- Keeps new knowledge in `draft` until an administrator publishes it; published guidance is immutable and can only be archived or reopened as a new draft workflow.
+- Links optional tenant-validated parts and completed same-model work orders without exposing cost or supplier data to field readers.
+- Aggregates completed-job count, first-time-fix rate, average repair duration, latest completion, and confirmed machine/part associations.
+- Records profile, draft, publish, archive, and reopen actions in the organization audit log.
+
+Verification: target workflow tests 3 passed, full backend suite 86 passed, fresh base-to-`0025` plus `0025 -> 0024 -> 0025` passed on SQLite, the Next.js 16.2.12 production build generated all 28 static routes, and the production dependency audit reported 0 vulnerabilities.
+
+## 20260728_0026 - Governed knowledge capture
+
+- Adds idempotent per-profile origin keys so repeated completed-work-order extraction cannot duplicate knowledge drafts.
+- Adds recommended, alternative, consumable, and reference part roles plus primary-part substitution and installation-location fields.
+- Adds protected media storage metadata, MIME type, byte size, and non-negative/relationship database constraints.
+- Generates curator-only drafts from completed same-model work orders: fault context, repair result, and used parts.
+- Marks parts as recommended only when the source work order records a successful first-time repair; rework or unlabeled evidence remains reference-only.
+- Adds validated JPEG, PNG, GIF, WebP, HEIC, MP4, MOV, and WebM upload with configurable size limits and random private storage keys.
+- Serves uploaded media only through an authenticated tenant- and publication-scoped API; it is not mounted under public `/uploads`.
+
+Verification: knowledge capture/governance target suite 6 passed, full backend suite 89 passed, fresh base-to-`0026` plus `0026 -> 0025 -> 0026` passed on SQLite, and the Next.js 16.2.12 production build generated all 28 static routes.
+- Work-order-linked evidence is restricted to the claiming engineer's registered device and claim generation or an administrator.
+
+## Phase 5 explainable service intelligence (no schema migration)
+
+- Adds `GET /api/work-orders/{id}/service-intelligence` using the existing work-order learning and governed-knowledge schema.
+- Ranks locked completed history by machine, work type, fault, error code, and symptoms and returns an explanation for every match.
+- Calculates exact-model first-time-fix, rework, duration, fault, and error-code evidence with low-confidence warnings.
+- Ranks only published entries on the active exact-model profile; drafts, archived entries, unlocked jobs, and other tenants are excluded.
+- Adds the read-only mobile intelligence panel without broadening work-order mutation permissions.
+
+Verification: service-intelligence target suite 3 passed, full backend suite 92 passed, ESLint passed, and the Next.js 16.2.12 production build generated all 28 static routes. Schema head remains `20260728_0026`.
+
+## 20260728_0027 - External integration foundation
+
+- Adds tenant-scoped external integrations with provider label, field mapping, active state, optimistic version, actors, and last-used time.
+- Stores only a globally unique API key prefix and SHA-256 hash; raw keys are shown once on create or rotation.
+- Adds stable per-integration external-row-to-work-order links.
+- Adds inbound/outbound-ready sync logs with idempotency key, request hash, status, attempts, changed fields, safe error, linked work order, and processing timestamps.
+- Adds database constraints for supported providers, integration versions, sync direction/status/attempts, and per-integration source/idempotency uniqueness.
+- Adds the idempotent AppSheet/REST inbound work-order endpoint and blocks external updates after claim or evidence freeze.
+
+Verification: external integration target suite 4 passed, full backend suite 96 passed, fresh base-to-`0027` plus `0027 -> 0026 -> 0027` passed on SQLite, and the Next.js 16.2.12 production build generated all 29 static routes.
+
+## 20260729_0028 - External delivery runtime
+
+- Adds HTTPS Webhook destinations and subscribed work-order events to tenant integrations.
+- Extends synchronization logs with a durable outbound payload, pending state, response status, next retry, and last-attempt evidence.
+- Queues status, completion, and part-usage callbacks in the same transaction as the authoritative business change.
+- Signs exact callback bytes with HMAC-SHA256 derived from the integration API key hash.
+- Adds concurrency-safe delivery claiming, no-redirect requests, five-attempt exponential retry, terminal failure, and administrator requeue.
+- Adds external inventory, linked work-order status, and explainable part-recommendation read APIs without cost or supplier disclosure.
+- Rejects non-HTTPS and local/private/reserved Webhook targets.
+
+Verification: external delivery target suite 5 passed, full backend suite 101 passed, fresh base-to-`0028` plus `0028 -> 0027 -> 0028` passed on SQLite, and the Next.js 16.2.12 production build generated all 29 static routes.
+
+## 20260729_0029 - Configurable work-order forms
+
+- Adds tenant-scoped work-order form templates and ordered text, textarea, number, boolean, date, select, photo, and signature fields.
+- Adds typed defaults, applicability filters, completion requirements, approval, notification, inventory-declaration, and AI-learning flags.
+- Snapshots the exact template version, schema, rules, and defaults onto every assigned work order so later template changes cannot rewrite history.
+- Adds optimistic template and form value versions, bounded payloads, typed validation, and immutable evidence after approval submission or completion.
+- Keeps forms visible to all same-organization engineers while restricting updates to an administrator or the exact claiming engineer account, registered device, and claim generation.
+- Merges configured approval fields into the existing completion policy and blocks completion while configured required evidence is missing.
+- Treats inventory-impact flags as governed metadata; dynamic form submissions never mutate physical inventory.
+
+Verification: configurable-form target suite 5 passed, full backend suite 106 passed, fresh base-to-`0029` plus `0029 -> 0028 -> 0029` passed on SQLite, and the Next.js 16.2.12 production build generated all 30 static routes.
+
+## 20260729_0030 - Configured-form action workflow
+
+- Adds tenant-scoped durable notification and inventory-review tasks created only when a flagged configured field actually changes.
+- Keys every task to the work order, field, action type, and exact form revision so retries and identical-value submissions cannot duplicate follow-up work.
+- Stores field identity and workflow evidence without copying submitted form values into the action queue.
+- Adds strict `pending -> acknowledged -> resolved` handling with optimistic versions, actor/timestamp attribution, and audit records.
+- Allows managers to process notifications, warehouse staff to process inventory reviews, and administrators to process either; inventory resolution requires notes.
+- Gives engineers read-only action progress on shared work orders without global queue or mutation access.
+- Keeps inventory changes in the dedicated replenishment, transfer, return, and count workflows; resolving a form action never posts a stock transaction.
+- Blocks downgrade while any action evidence exists.
+
+Verification: form-action target suite 3 passed, all 109 backend tests passed in two bounded modules, fresh base-to-`0030` plus `0030 -> 0029 -> 0030` passed on SQLite, and the Next.js 16.2.12 production build generated all 31 static routes.
+
+## 20260729_0031 - Audited offline configured-form conflicts
+
+- Adds tenant-scoped server conflict records linked to the work order, originating engineer, registered device, claim generation, offline base version, and server version.
+- Stores bounded local and server form snapshots plus a canonical payload hash under administrator-only full-value access.
+- Enforces per-organization client queue idempotency and rejects changed-data reuse.
+- Adds pending, kept-server, applied-local, and merged states with optimistic versions, mandatory notes, resolver attribution, and timestamps.
+- Lets only the originating account and registered device create a conflict or poll its status receipt.
+- Lets only administrators compare full values and resolve by keeping server data, applying the offline copy, or selecting a field merge.
+- Requires the latest server form version at resolution and repeats immutable-schema validation; frozen evidence can only keep server data.
+- Generates normal notification/inventory-review tasks for real values applied through conflict resolution.
+- Adds exact work-order reads so offline replay refreshes every queued claim generation without a 100-record pagination gap.
+- Blocks downgrade while any conflict evidence exists.
+
+Verification: conflict, idempotency, account/device ownership, administrator role, cross-tenant, merge, server-revision, form-action, and claim regression suite 17 passed; all 111 backend tests passed in two bounded groups (45 plus 66); fresh base-to-`0031` plus `0031 -> 0030 -> 0031` passed on SQLite; the Next.js 16.2.12 production build generated all 32 static routes.
+
+## 20260730_0032 - Tenant branding and commercial plan controls
+
+- Adds HTTPS logo, primary color, and login headline configuration to each
+  organization.
+- Adds Starter, Professional, and Enterprise plan codes.
+- Adds trialing, active, past-due, suspended, and cancelled subscription states
+  plus optional trial end.
+- Adds user, main warehouse, vehicle inventory, AI monthly, and external API
+  monthly limits.
+- Adds optimistic organization settings versions.
+- Adds database constraints for supported plan/state values, non-negative
+  settings versions, positive resource limits, and non-negative metered
+  allowances.
+- Migrates existing organizations to active Professional defaults.
+- Blocks downgrade after any branding, subscription, plan, limit, trial, or
+  settings-version customization to prevent silent configuration loss.
+
+Verification: commercial target suite and file-backed SQLite seat-race coverage
+passed; all 115 backend tests passed;
+fresh `0031 -> 0032`, schema/default/constraint inspection,
+`0032 -> 0031 -> 0032` passed on SQLite; ESLint and the Next.js 16.2.12
+production build passed for all 32 static routes; real browser branding/plan
+regression passed with zero console errors; production dependency audit reported
+0 vulnerabilities.
+
+## 20260806_0033 - Durable monthly AI/API usage metering
+
+- Adds one tenant-isolated commercial usage ledger row per UTC calendar month.
+- Stores non-negative AI and external API request counters plus last-used
+  timestamps without retaining request or response content.
+- Enforces `0` allowances as unavailable (`403`), positive allowance boundaries
+  as exhausted (`429`), and continues to count contract/unlimited usage.
+- Meters internal recommendations, service intelligence, visual part candidate
+  generation, and every external API operation; external recommendations consume
+  both an AI and API unit.
+- Commits inbound work-order usage with the processed business transaction and
+  does not double-charge exact idempotent replays.
+- Serializes competing final-unit requests with the organization commercial lock.
+- Blocks downgrade after usage evidence exists.
+
+Verification: usage boundary/idempotency/rollover/isolation/race tests passed;
+all 119 backend tests passed; fresh base-to-`0033`, schema/index/constraint
+inspection, empty `0033 -> 0032 -> 0033`, and guarded evidence downgrade passed
+on SQLite; ESLint and the Next.js 16.2.12 production build passed for all 32
+static routes; production dependency audit reported 0 vulnerabilities.
+
+## 20260806_0034 - Verified domains and sender identities
+
+- Adds one globally unique, tenant-owned custom hostname per organization.
+- Adds pending/verified ownership states, high-entropy DNS TXT challenges,
+  verification checks, safe errors, timestamps, and optimistic versions.
+- Restricts the capability to Professional and Enterprise administrators.
+- Requires current-password reauthentication before hostname, challenge,
+  sender-identity, or removal mutations.
+- Adds customer sender display/local-part configuration that cannot be enabled
+  until domain ownership is verified.
+- Adds public safe branding lookup by verified host and automatic login-page host
+  discovery without exposing challenges or commercial data.
+- Adds platform domain/status/sender visibility, audit evidence, and guarded
+  downgrade.
+
+Verification: domain lifecycle and affected commercial suite passed; all 122
+backend tests passed; fresh base-to-`0034`, schema/index/constraint inspection,
+empty `0034 -> 0033 -> 0034`, and guarded configured-domain downgrade passed on
+SQLite; ESLint and the Next.js 16.2.12 production build passed for all 32 static
+routes; production dependency audit reported 0 vulnerabilities.
+
+## 20260806_0035 - Billing lifecycle and subscription notices
+
+- Adds one provider-neutral billing account per organization with manual or
+  signed-generic binding, unique external references, periods, cancellation,
+  grace, ordering cursor, and optimistic version.
+- Adds immutable normalized lifecycle event evidence with global provider event
+  idempotency, SHA-256 body evidence, applied/stale outcome, and before/after
+  subscription and plan state.
+- Adds tenant-owned trial, renewal, cancellation, past-due, suspension, and
+  cancellation notices with acknowledgement, automatic resolution, and
+  optimistic versions.
+- Adds HMAC-SHA256 and timestamp-verified Webhook processing with payload size,
+  schema, reference, event collision, ordering, and future-clock safeguards.
+- Adds platform binding/event/notice/reconciliation operations, organization
+  administrator notice visibility, background reconciliation, UI, and audits.
+- Requires current-password reauthentication for platform billing bindings and
+  refuses downgrade while any billing configuration or evidence remains.
+
+Verification: billing lifecycle tests passed; all 125 backend tests passed;
+fresh base-to-`0035`, table/index/check inspection, empty
+`0035 -> 0034 -> 0035`, invalid-provider rejection, and configured-evidence
+downgrade refusal passed on SQLite; ESLint and the Next.js 16.2.12 production
+build passed for all 32 static routes; production dependency audit reported 0
+vulnerabilities.
+
+## 2026-08-06 - Commercial usage reports (no schema revision)
+
+- Adds continuous 1–36 month tenant reports backed by the existing `0033` UTC
+  usage ledger and current capacity/limit projections.
+- Adds a selected-month platform comparison that retains zero-usage customers.
+- Adds password-confirmed organization/platform CSV exports, export audit
+  evidence, fixed filenames, UTF-8 spreadsheet compatibility, and formula-cell
+  hardening.
+- Adds organization Reports and platform control-plane reporting UI.
+
+Verification: commercial report and affected billing suites passed; all 127
+backend tests passed; ESLint and the Next.js 16.2.12 production build passed for
+all 32 static routes; Python dependency consistency passed; production npm
+audit reported 0 vulnerabilities.
+
+## 20260806_0036 - Customer data export integrity evidence
+
+- Adds tenant-owned evidence for each generated portable backup, including the
+  format version, archive SHA-256, size, record/file/missing counts, per-table
+  counts, requester, and generation time.
+- Adds administrator-only, current-password-confirmed ZIP generation with
+  tenant JSONL data, checksum manifest, and optional referenced local media.
+- Excludes password, device, external API key, invitation, and DNS challenge
+  authentication material from every archive.
+- Streams the archive to the requester without retaining a second plaintext
+  server copy and records a secret-free audit event.
+- Refuses downgrade while export integrity evidence exists.
+
+Verification: targeted export/isolation/reauthentication tests passed; fresh
+base-to-`0036` and empty `0036 -> 0035 -> 0036` migration paths passed on SQLite;
+all 130 backend tests passed; configured-evidence downgrade refusal passed;
+ESLint, TypeScript, and the Next.js 16.2.12
+production build passed for all 33 static routes; Python dependency consistency
+and full/production npm audits reported 0 known vulnerabilities.

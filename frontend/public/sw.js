@@ -1,4 +1,4 @@
-const CACHE_NAME = "openpartsflow-static-v2";
+const CACHE_NAME = "openpartsflow-static-v3";
 const OFFLINE_URL = "/offline.html";
 const CORE_ASSETS = ["/", "/offline.html", "/manifest.json", "/icons/icon-192.png", "/icons/icon-512.png"];
 
