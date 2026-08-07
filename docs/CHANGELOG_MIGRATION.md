@@ -816,3 +816,12 @@ Verification: all 218 backend tests passed, including Cookie attributes, CSRF ab
 - Refuses downgrade while non-manual invitation delivery evidence exists.
 
 Verification: all 225 backend tests passed, including recipient-only token delivery, relay failure evidence, fail-closed production behavior, single-use acceptance, and cross-tenant reissue isolation; fresh base-to-`0051` and `0051 -> 0050 -> 0051` migration rehearsals passed on SQLite; frontend ESLint, TypeScript, and the Next.js production build passed for all 40 static routes; Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.
+
+## 20260807 - Interrupted outbound delivery recovery
+
+- Added a platform-administrator-only, password-confirmed operation to requeue a bounded batch of stale outbound Webhook processing leases.
+- Locks and rechecks eligible rows, excludes inbound/fresh/completed work, preserves attempt counters and stable idempotency keys, and leaves actual delivery to the worker.
+- Added per-organization audit evidence without customer payloads or credentials, an idempotent no-op outcome, operations-console controls, and a recovery runbook.
+- No schema change is required; Alembic head remains `20260807_0051`.
+
+Verification: all 227 backend tests passed; frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes; Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.

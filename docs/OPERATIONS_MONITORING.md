@@ -84,6 +84,42 @@ The endpoint aggregates counts only. It does not return customer names,
 webhook payloads, response bodies, billing messages, archive paths, or error
 details. The page refreshes every 30 seconds and supports an explicit refresh.
 
+## Interrupted outbound delivery recovery
+
+`POST /api/platform/operations/recover-stale-deliveries` provides a bounded,
+platform-administrator-only recovery path for outbound Webhook rows left in
+`processing` after a worker or host interruption. The operator must confirm the
+current account password and supply a non-blank operational reason.
+
+Recovery selects at most the requested bounded batch (100 by default, 500
+maximum) whose processing age is older than
+`OPERATIONS_STALE_PROCESSING_MINUTES`. Rows are locked before mutation and are
+rechecked after lock acquisition. Fresh attempts, inbound sync rows, deliveries
+already completed by another worker, and rows no longer in `processing` are
+never changed.
+
+Each recovered row returns to `pending` with an immediate retry time. Its
+attempt count and stable business idempotency key are preserved, so the worker
+can continue normal retry accounting and receivers can deduplicate the
+delivery. Recovery does not send the Webhook inside the administrator request.
+One tenant-scoped audit record is written for every affected organization with
+the operator, reason, cutoff, time, count, and row IDs; payloads, callback URLs,
+response bodies, API keys, and signatures are excluded. A request that finds no
+eligible rows is also audited in the platform administrator's home organization.
+
+Operational procedure:
+
+1. Confirm the integration worker is stopped, restarted, or otherwise no longer
+   executing the stale attempts.
+2. Verify the operations console count remains stale beyond the configured
+   cutoff; do not recover a request that may still be running.
+3. Confirm the receiving system deduplicates `Idempotency-Key` or
+   `X-OpenPartsFlow-Delivery`.
+4. Enter the incident or change reference and current account password, then
+   requeue the bounded batch.
+5. Watch the worker and queue counts until the rows become `processed` or enter
+   normal retry/failed handling; retain the audit export with the incident.
+
 ## Default thresholds
 
 | Setting | Default | Purpose |
@@ -109,7 +145,9 @@ backups, and restore conflicts.
 5. Confirm enabled workers move from `starting` to `ok` within their grace
    period.
 6. Create a test outbound delivery, confirm the due count changes, then deliver
-   or retry it and confirm recovery.
+   or retry it and confirm recovery. In a non-production rehearsal, interrupt a
+   worker attempt, wait beyond the stale cutoff, and exercise the protected
+   recovery control.
 7. Verify the backup-overdue count falls after each customer backup policy is
    satisfied.
 8. Route critical alerts to the on-call system and define response ownership in

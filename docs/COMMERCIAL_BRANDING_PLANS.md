@@ -212,10 +212,12 @@ evidence exists.
 
 ## Next Phase 9 batches
 
-- Provider-specific checkout, invoice, tax, refund, and restricted customer
-  billing-recovery portal integration
-- Disaster-recovery retention policy, evidence cleanup, and interrupted-operation recovery tooling
-- MFA and account recovery for platform and organization administrators
+- Disaster-recovery retention policy and governed evidence cleanup
+- PostgreSQL row-level security deployment defense in depth
+
+Provider-specific Stripe checkout, invoices, taxes, refunds, and restricted
+billing recovery; administrator MFA and account recovery; verified invitation
+delivery; and interrupted outbound-delivery recovery are implemented.
 
 Verified hostname ownership, automatic custom-host login branding, and the
 provider-independent customer sender identity foundation are documented in

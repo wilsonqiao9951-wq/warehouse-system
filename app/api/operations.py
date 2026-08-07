@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import json
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
@@ -12,14 +13,21 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.operations import operations_monitor, utc_iso, utcnow_naive
 from app.core.rbac import Actor, get_current_actor, require_platform_admin
+from app.core.security import verify_password
 from app.models import (
+    AuditLog,
     ExternalSyncLog,
     Organization,
     OrganizationDataExport,
     OrganizationDataRestore,
     SubscriptionNotice,
+    User,
 )
-from app.schemas import PlatformOperationsSummaryRead
+from app.schemas import (
+    OperationsStaleDeliveryRecovery,
+    OperationsStaleDeliveryRecoveryRead,
+    PlatformOperationsSummaryRead,
+)
 
 
 router = APIRouter(tags=["operations"])
@@ -32,6 +40,23 @@ def _worker_health(snapshot: dict) -> str:
         if row["enabled"]
     }
     return "degraded" if statuses.intersection({"error", "stale"}) else "ok"
+
+
+def _require_platform_reauthentication(
+    db: Session,
+    actor: Actor,
+    password: str,
+) -> None:
+    if actor.auth_method == "test":
+        return
+    if actor.auth_method not in {"bearer", "cookie"} or actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Authenticated session required")
+    user = db.get(User, actor.user_id)
+    if not user or not verify_password(password, user.password_hash):
+        raise HTTPException(
+            status_code=401,
+            detail="Account password verification failed",
+        )
 
 
 @router.get("/health/live")
@@ -295,3 +320,87 @@ def platform_operations_summary(
         },
         "alerts": alerts,
     }
+
+
+@router.post(
+    "/api/platform/operations/recover-stale-deliveries",
+    response_model=OperationsStaleDeliveryRecoveryRead,
+)
+def recover_stale_outbound_deliveries(
+    payload: OperationsStaleDeliveryRecovery,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    _require_platform_reauthentication(db, actor, payload.account_password)
+    db.info.pop("organization_id", None)
+
+    queued_at = utcnow_naive()
+    stale_before = queued_at - timedelta(
+        minutes=max(1, settings.operations_stale_processing_minutes)
+    )
+    candidates = db.scalars(
+        select(ExternalSyncLog)
+        .where(
+            ExternalSyncLog.direction == "outbound",
+            ExternalSyncLog.status == "processing",
+            ExternalSyncLog.updated_at < stale_before,
+        )
+        .order_by(ExternalSyncLog.updated_at, ExternalSyncLog.id)
+        .limit(payload.max_items)
+        .with_for_update(skip_locked=True)
+    ).all()
+
+    recovered_by_organization: dict[int, list[int]] = {}
+    for delivery in candidates:
+        # The row lock and repeated state check preserve a worker result that
+        # completed while this recovery request was waiting for the lock.
+        if delivery.status != "processing" or delivery.updated_at >= stale_before:
+            continue
+        delivery.status = "pending"
+        delivery.next_retry_at = queued_at
+        delivery.processed_at = None
+        delivery.error_message = "Recovered from an interrupted processing lease"
+        delivery.updated_at = queued_at
+        recovered_by_organization.setdefault(delivery.organization_id, []).append(
+            delivery.id
+        )
+        db.add(delivery)
+
+    audit_groups = recovered_by_organization or {actor.organization_id: []}
+    for organization_id, delivery_ids in audit_groups.items():
+        db.add(
+            AuditLog(
+                organization_id=organization_id,
+                user_id=actor.user_id,
+                action="recover_stale_outbound_deliveries",
+                entity_type="external_sync_log",
+                metadata_json=json.dumps(
+                    {
+                        "actor_role": actor.role.value,
+                        "auth_method": actor.auth_method,
+                        "recovered_count": len(delivery_ids),
+                        "delivery_ids": delivery_ids,
+                        "stale_before": utc_iso(stale_before),
+                        "queued_at": utc_iso(queued_at),
+                        "reason": payload.reason,
+                    },
+                    separators=(",", ":"),
+                ),
+                timestamp=queued_at,
+            )
+        )
+    db.commit()
+
+    recovered_ids = sorted(
+        delivery_id
+        for delivery_ids in recovered_by_organization.values()
+        for delivery_id in delivery_ids
+    )
+    return OperationsStaleDeliveryRecoveryRead(
+        recovered_count=len(recovered_ids),
+        organization_count=len(recovered_by_organization),
+        recovered_delivery_ids=recovered_ids,
+        stale_before=stale_before,
+        queued_at=queued_at,
+    )
