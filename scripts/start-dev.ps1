@@ -40,12 +40,12 @@ if (Test-Path (Join-Path $root ".git")) {
   }
 }
 
-Write-Host "Applying database migrations ..."
+Write-Host "Preparing database (safe legacy adoption + migrations) ..."
 Push-Location $root
 try {
-  & $venvPython -m alembic upgrade head
+  & $venvPython -m scripts.prepare_database
   if ($LASTEXITCODE -ne 0) {
-    Write-Error "Database migration failed; services were not started."
+    Write-Error "Database preparation failed; services were not started."
   }
 } finally {
   Pop-Location

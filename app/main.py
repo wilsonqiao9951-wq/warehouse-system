@@ -15,7 +15,7 @@ from app.api.billing import router as billing_router
 from app.api.data_exports import router as data_exports_router
 from app.api.data_restores import router as data_restores_router
 from app.core.config import settings
-from app.core.database import Base, SessionLocal, engine, ensure_schema_compatibility, get_db
+from app.core.database import SessionLocal, ensure_schema_ready, get_db
 from app.core.logging import setup_logging
 from app.core.middleware import ErrorHandlingMiddleware
 from app.models import *  # noqa: F401,F403
@@ -25,13 +25,13 @@ from app.services.billing import reconcile_billing_lifecycle
 
 setup_logging()
 logger = logging.getLogger(__name__)
-Base.metadata.create_all(bind=engine)
-ensure_schema_compatibility()
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     delivery_task = None
     billing_task = None
+    if get_db not in app_instance.dependency_overrides:
+        ensure_schema_ready()
     # Tests replace the database dependency with an isolated session. Skipping
     # the production worker prevents it from touching the developer database.
     if (

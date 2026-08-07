@@ -13,7 +13,11 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Programmatic maintenance tools can bind Alembic to an isolated candidate
+# without mutating process-wide settings. Normal CLI use continues to read the
+# configured application database URL.
+database_url = config.attributes.get("database_url", settings.database_url)
+config.set_main_option("sqlalchemy.url", database_url)
 target_metadata = Base.metadata
 
 

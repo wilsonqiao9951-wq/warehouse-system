@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 *.db
+*.adoption-*.json
+.*.adoption-*.tmp
 .DS_Store
 .env
 frontend/.env.local
