@@ -86,6 +86,12 @@ Managers and administrators may search and summarize their organization's audit 
 
 Only administrators may call `POST /api/audit-logs/export`. A Bearer-authenticated administrator must re-enter the current account password. The CSV uses the active filters, hardens spreadsheet-formula cells, returns a SHA-256 digest and row count, and then appends an `audit_log_exported` event containing the digest and filters. The password is discarded after verification and never enters the CSV, response metadata, or audit event. See [`AUDIT_LOGS.md`](AUDIT_LOGS.md).
 
+## Platform operations monitoring
+
+`GET /health/live` and `GET /health/ready` are intentionally unauthenticated so load balancers and orchestrators can probe the process. They expose only uptime plus high-level database, schema, and worker state; they never expose tenant counts, URLs, errors, credentials, or configuration values.
+
+`GET /api/platform/operations/summary` requires `is_platform_admin=true`, not merely the customer `admin` role. The endpoint deliberately removes the tenant session scope only after that platform check, then aggregates actionable counts across integration delivery, billing notices, backups, and restore conflicts. Customer administrators, managers, engineers, warehouse users, assistants, API keys, and unauthenticated callers are denied. Detailed worker exception messages are not retained or returned; only the exception class is exposed to the platform operator. See [`OPERATIONS_MONITORING.md`](OPERATIONS_MONITORING.md).
+
 ## Automated acceptance coverage
 
 - Same-organization engineers all see the pool; cross-tenant data remains isolated.

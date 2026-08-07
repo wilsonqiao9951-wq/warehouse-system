@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     data_export_private_files_root: str = "private_uploads"
     max_data_export_bytes: int = 512 * 1024 * 1024
     max_audit_export_rows: int = 100_000
+    operations_request_window_seconds: int = 300
+    operations_backup_warning_days: int = 7
+    operations_stale_processing_minutes: int = 10
+    operations_slow_request_ms: int = 1000
     # Includes room for the manifest/ZIP overhead around a max-sized export.
     max_data_restore_archive_bytes: int = 528 * 1024 * 1024
     max_data_restore_uncompressed_bytes: int = 528 * 1024 * 1024

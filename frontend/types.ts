@@ -61,6 +61,62 @@ export interface AuditLogFilters {
   to_at?: string;
 }
 
+export interface OperationsRequestMetrics {
+  window_seconds: number;
+  total: number;
+  server_errors: number;
+  server_error_rate: number;
+  average_duration_ms: number;
+  p95_duration_ms: number;
+}
+
+export interface OperationsWorker {
+  name: string;
+  enabled: boolean;
+  status: "disabled" | "starting" | "ok" | "error" | "stale";
+  interval_seconds: number;
+  grace_seconds: number;
+  last_started_at?: string | null;
+  last_success_at?: string | null;
+  last_error_at?: string | null;
+  last_error_type?: string | null;
+  last_result_count?: number | null;
+}
+
+export interface OperationsAlert {
+  severity: "warning" | "critical";
+  code: string;
+  message: string;
+  count: number;
+}
+
+export interface PlatformOperationsSummary {
+  status: "healthy" | "degraded" | "critical";
+  checked_at: string;
+  started_at: string;
+  uptime_seconds: number;
+  database_status: "ok" | "error";
+  database_latency_ms: number;
+  schema_status: "ok" | "error";
+  schema_revision: string;
+  requests: OperationsRequestMetrics;
+  workers: OperationsWorker[];
+  integration_queue: {
+    outbound_pending: number;
+    outbound_due: number;
+    outbound_failed: number;
+    stale_processing: number;
+  };
+  open_critical_billing_notices: number;
+  data_protection: {
+    active_organizations: number;
+    organizations_without_recent_backup: number;
+    backup_warning_days: number;
+    restore_plans_with_conflicts: number;
+  };
+  alerts: OperationsAlert[];
+}
+
 export type PlanCode = "starter" | "professional" | "enterprise";
 export type SubscriptionStatus =
   | "trialing"

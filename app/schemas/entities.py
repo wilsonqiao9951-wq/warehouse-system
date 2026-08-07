@@ -2377,3 +2377,63 @@ class AuditLogExportRequest(BaseModel):
         self.action = self.action.strip() if self.action else None
         self.entity_type = self.entity_type.strip() if self.entity_type else None
         return self
+
+
+class OperationsRequestMetricsRead(BaseModel):
+    window_seconds: int = Field(ge=1)
+    total: int = Field(ge=0)
+    server_errors: int = Field(ge=0)
+    server_error_rate: float = Field(ge=0, le=1)
+    average_duration_ms: float = Field(ge=0)
+    p95_duration_ms: float = Field(ge=0)
+
+
+class OperationsWorkerRead(BaseModel):
+    name: str
+    enabled: bool
+    status: Literal["disabled", "starting", "ok", "error", "stale"]
+    interval_seconds: int = Field(ge=1)
+    grace_seconds: int = Field(ge=1)
+    last_started_at: datetime | None = None
+    last_success_at: datetime | None = None
+    last_error_at: datetime | None = None
+    last_error_type: str | None = None
+    last_result_count: int | None = Field(default=None, ge=0)
+
+
+class OperationsQueueRead(BaseModel):
+    outbound_pending: int = Field(ge=0)
+    outbound_due: int = Field(ge=0)
+    outbound_failed: int = Field(ge=0)
+    stale_processing: int = Field(ge=0)
+
+
+class OperationsDataProtectionRead(BaseModel):
+    active_organizations: int = Field(ge=0)
+    organizations_without_recent_backup: int = Field(ge=0)
+    backup_warning_days: int = Field(ge=1)
+    restore_plans_with_conflicts: int = Field(ge=0)
+
+
+class OperationsAlertRead(BaseModel):
+    severity: Literal["warning", "critical"]
+    code: str
+    message: str
+    count: int = Field(ge=0)
+
+
+class PlatformOperationsSummaryRead(BaseModel):
+    status: Literal["healthy", "degraded", "critical"]
+    checked_at: datetime
+    started_at: datetime
+    uptime_seconds: int = Field(ge=0)
+    database_status: Literal["ok", "error"]
+    database_latency_ms: float = Field(ge=0)
+    schema_status: Literal["ok", "error"]
+    schema_revision: str
+    requests: OperationsRequestMetricsRead
+    workers: list[OperationsWorkerRead] = Field(default_factory=list)
+    integration_queue: OperationsQueueRead
+    open_critical_billing_notices: int = Field(ge=0)
+    data_protection: OperationsDataProtectionRead
+    alerts: list[OperationsAlertRead] = Field(default_factory=list)
