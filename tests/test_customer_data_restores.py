@@ -2,13 +2,15 @@ from io import BytesIO
 import json
 import zipfile
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.core.config import settings
 from app.core.security import hash_password
 from app.services import data_restores
 from app.models import (
     AuditLog,
+    Customer,
+    Equipment,
     Organization,
     OrganizationDataRestore,
     Part,
@@ -162,6 +164,93 @@ def test_restore_rejects_tampered_or_unmanifested_archive(client):
     assert "does not match its manifest" in checksum_response.json()["detail"]
 
 
+def test_restore_rehydrates_deleted_parent_and_child_then_rolls_back(client):
+    with client.app.state.testing_session_local() as db:
+        customer = Customer(
+            organization_id=1,
+            name="Recovery Customer",
+            account_number="RECOVERY-100",
+        )
+        db.add(customer)
+        db.flush()
+        equipment = Equipment(
+            organization_id=1,
+            customer_id=customer.id,
+            asset_tag="RECOVERY-EQ-100",
+            model="ACME-9000",
+        )
+        db.add(equipment)
+        db.commit()
+        customer_id = customer.id
+        equipment_id = equipment.id
+
+    archive = _backup(client)
+    with client.app.state.testing_session_local() as db:
+        db.delete(db.get(Equipment, equipment_id))
+        db.delete(db.get(Customer, customer_id))
+        db.commit()
+
+    rehearsal = _rehearse(client, archive)
+    assert rehearsal.status_code == 200, rehearsal.text
+    result = rehearsal.json()
+    assert result["create_count"] == 2
+    assert result["update_count"] == 0
+    assert result["conflict_count"] == 0
+    assert result["table_summary"]["customers"]["creates"] == 1
+    assert result["table_summary"]["equipment"]["creates"] == 1
+
+    approved = client.post(
+        f"/api/organization/data-restores/{result['id']}/decision",
+        json={
+            "expected_version": result["version"],
+            "decision": "approve",
+            "note": "Rehydrate verified customer equipment",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    applied = _apply(
+        client,
+        result["id"],
+        approved.json()["version"],
+        archive,
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["create_count"] == 2
+    with client.app.state.testing_session_local() as db:
+        restored_customer = db.get(Customer, customer_id)
+        restored_equipment = db.get(Equipment, equipment_id)
+        assert restored_customer.name == "Recovery Customer"
+        assert restored_equipment.customer_id == customer_id
+        restored_updated_at = restored_equipment.updated_at
+
+        restored_equipment.model = "Edited after rehydration"
+        db.commit()
+
+    drift_blocked = client.post(
+        f"/api/organization/data-restores/{result['id']}/rollback",
+        json={"expected_version": applied.json()["version"]},
+    )
+    assert drift_blocked.status_code == 409
+    assert "changed after restore review" in drift_blocked.json()["detail"]
+
+    with client.app.state.testing_session_local() as db:
+        db.execute(
+            update(Equipment)
+            .where(Equipment.id == equipment_id)
+            .values(model="ACME-9000", updated_at=restored_updated_at)
+        )
+        db.commit()
+
+    rolled_back = client.post(
+        f"/api/organization/data-restores/{result['id']}/rollback",
+        json={"expected_version": applied.json()["version"]},
+    )
+    assert rolled_back.status_code == 200, rolled_back.text
+    with client.app.state.testing_session_local() as db:
+        assert db.get(Equipment, equipment_id) is None
+        assert db.get(Customer, customer_id) is None
+
+
 def test_restore_accepts_previous_portable_schema_revision(client, monkeypatch):
     archive = _backup(client)
     compatible = BytesIO()
@@ -192,6 +281,17 @@ def test_restore_conflicts_block_approval_and_live_drift_blocks_apply(client):
     with client.app.state.testing_session_local() as db:
         db.delete(db.get(Part, first["id"]))
         db.get(Part, second["id"]).name = "Changed before rehearsal"
+        other = Organization(name="Conflicting Tenant", slug="conflicting-tenant")
+        db.add(other)
+        db.flush()
+        db.add(
+            Part(
+                id=first["id"],
+                organization_id=other.id,
+                part_number="OTHER-RESTORE-200",
+                name="Other tenant row using deleted id",
+            )
+        )
         db.commit()
 
     conflicted = _rehearse(client, archive)
@@ -209,6 +309,31 @@ def test_restore_conflicts_block_approval_and_live_drift_blocks_apply(client):
     assert blocked.status_code == 409
 
     with client.app.state.testing_session_local() as db:
+        other_part = db.execute(
+            select(Part).where(Part.id == first["id"])
+        ).scalar_one()
+        db.delete(other_part)
+        db.flush()
+        unique_collision = Part(
+            id=first["id"] + 1000,
+            organization_id=1,
+            part_number="RESTORE-200",
+            name="Current row using archived unique key",
+        )
+        db.add(unique_collision)
+        db.commit()
+
+    unique_conflicted = _rehearse(client, archive)
+    assert unique_conflicted.status_code == 200, unique_conflicted.text
+    assert unique_conflicted.json()["conflict_count"] == 1
+    assert any(
+        "unique key" in message
+        for message in unique_conflicted.json()["validation_messages"]
+    )
+
+    with client.app.state.testing_session_local() as db:
+        db.delete(db.get(Part, first["id"] + 1000))
+        db.flush()
         db.add(
             Part(
                 id=first["id"],

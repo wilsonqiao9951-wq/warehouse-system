@@ -301,5 +301,7 @@ secrets are excluded. The archive contains sensitive business and customer data
 and is streamed only to the authenticated requester.
 
 Controlled restores never mutate authentication, billing, audit, ledger, or
-custody records. The initial application boundary updates only existing
-allowlisted master/configuration/knowledge rows; conflicts block approval.
+custody records. The application boundary updates existing allowlisted
+master/configuration/knowledge rows and can rehydrate deleted allowlisted rows
+only after global-id, unique-key, tenant, and foreign-key checks; conflicts
+block approval.

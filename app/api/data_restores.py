@@ -88,6 +88,7 @@ def _read_restore(row: OrganizationDataRestore) -> OrganizationDataRestoreRead:
         source_exported_at=row.source_exported_at,
         record_count=row.record_count,
         file_count=row.file_count,
+        create_count=row.create_count,
         update_count=row.update_count,
         unchanged_count=row.unchanged_count,
         conflict_count=row.conflict_count,
@@ -216,6 +217,7 @@ def create_restore_rehearsal(
         source_exported_at=analysis.source_exported_at,
         record_count=analysis.record_count,
         file_count=analysis.file_count,
+        create_count=analysis.create_count,
         update_count=analysis.update_count,
         unchanged_count=analysis.unchanged_count,
         conflict_count=analysis.conflict_count,
@@ -239,6 +241,7 @@ def create_restore_rehearsal(
             "matched_export_id": row.matched_export_id,
             "record_count": row.record_count,
             "file_count": row.file_count,
+            "create_count": row.create_count,
             "update_count": row.update_count,
             "unchanged_count": row.unchanged_count,
             "conflict_count": row.conflict_count,
@@ -271,7 +274,7 @@ def decide_restore_rehearsal(
     if payload.decision == "approve":
         if row.conflict_count:
             raise HTTPException(status_code=409, detail="Resolve all rehearsal conflicts before approval")
-        if row.update_count == 0:
+        if row.create_count == 0 and row.update_count == 0:
             raise HTTPException(status_code=409, detail="Restore rehearsal has no eligible changes")
         row.status = "approved"
         row.approved_by = actor.user_id
@@ -350,6 +353,7 @@ def apply_approved_restore(
         row,
         "organization_data_restore_applied",
         {
+            "create_count": row.create_count,
             "update_count": row.update_count,
             "rollback_sha256": row.rollback_sha256,
             "rollback_size_bytes": row.rollback_size_bytes,

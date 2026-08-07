@@ -558,3 +558,23 @@ tests passed; all 135 backend tests passed; fresh base-to-`0037`, empty
 configured-evidence downgrade passed on SQLite; ESLint and the Next.js 16.2.12
 production build passed for all 33 static routes; Python dependency consistency
 and full/production npm audits reported 0 known vulnerabilities.
+
+## 20260807_0038 - Restore record rehydration evidence
+
+- Adds a non-negative `create_count` to every controlled restore rehearsal so
+  administrators can distinguish safe rehydrations from field updates.
+- Extends the eligible restore plan to recreate missing allowlisted
+  master/configuration/knowledge rows only after global id, unique-key, tenant,
+  complete-payload, and foreign-key validation.
+- Applies creates in parent-to-child order and removes them in child-to-parent
+  rollback order while retaining exact archive, plan, version, and drift checks.
+- Propagates unresolved parent conflicts to dependent rows and leaves protected
+  transactional/control-plane records and archive media validation-only.
+- Refuses downgrade while rehydration evidence exists.
+
+Verification: six restore workflow/security tests and three export regression
+tests passed; all 136 backend tests passed; fresh base-to-`0038`, empty
+`0038 -> 0037 -> 0038`, schema/constraint inspection, and guarded rehydration-
+evidence downgrade passed on SQLite; ESLint and the Next.js production build
+passed for all 33 static routes; Python dependency consistency and
+full/production npm audits reported 0 known vulnerabilities.

@@ -244,12 +244,14 @@ export interface OrganizationDataRestore {
   source_exported_at?: string | null;
   record_count: number;
   file_count: number;
+  create_count: number;
   update_count: number;
   unchanged_count: number;
   conflict_count: number;
   protected_count: number;
   table_summary: Record<string, {
     records: number;
+    creates: number;
     updates: number;
     unchanged: number;
     conflicts: number;

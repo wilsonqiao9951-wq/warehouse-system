@@ -32,8 +32,8 @@ or archive contents.
 
 The validator rejects:
 
-- unsupported format or database schema revisions (`0036` and `0037` archives
-  are compatible with the initial `0037` restore workflow);
+- unsupported format or database schema revisions (`0036`, `0037`, and `0038`
+  archives are compatible with the `0038` restore workflow);
 - an organization id or slug that differs from the signed-in tenant;
 - missing, duplicate, absolute, parent-relative, backslash, symbolic-link, or
   encrypted ZIP entries;
@@ -47,11 +47,11 @@ Matching `organization_data_exports` evidence is shown when available. A match
 helps an operator trace the source export, but disaster recovery remains
 possible when the original evidence database is unavailable.
 
-## Initial application boundary
+## Controlled application boundary
 
-This first controlled application stage is **existing-row update only**. It
-does not create deleted rows, delete current rows, or rewrite primary keys,
-tenant ids, creation times, update times, or secret columns.
+The workflow updates existing eligible rows and can rehydrate missing eligible
+rows. It never deletes current records during application or changes the
+identity, tenant, or immutable timestamps of an existing row.
 
 Eligible tables:
 
@@ -65,8 +65,20 @@ Eligible tables:
 Authentication, devices, invitations, domains, billing, usage, external
 credentials, work-order execution/custody, inventory ledgers, approval
 workflows, synchronization logs, imports, export/restore evidence, and audit
-history are validation-only. Missing eligible target rows become conflicts and
-block approval instead of being recreated with unsafe foreign keys.
+history are validation-only.
+
+A missing eligible row is included in the create plan only when:
+
+- its archived id is globally unused, including by another tenant;
+- all archived columns needed for deterministic reconstruction are present;
+- its tenant id exactly matches the signed-in organization;
+- every current unique key remains available; and
+- every foreign key points to a current same-tenant row or another valid row in
+  the same rehydration plan.
+
+Invalid parent rows propagate conflicts to planned children. Creates run in
+parent-to-child dependency order. A uniqueness, ownership, or referential
+conflict blocks approval rather than selecting a different id or relationship.
 
 Archive media entries are checksum-verified but are not written to storage in
 this stage. Existing database file references may be restored only when their
@@ -79,11 +91,12 @@ before/after field values. Application reparses the same archive and recomputes
 the plan from the live database. Any intervening eligible data change produces
 a different plan and returns `409` before writes occur.
 
-After a successful application, the exact before/after plan is stored as the
-rollback snapshot with its own SHA-256 and byte count. Rollback first confirms
-that every affected field still equals the applied value; later edits stop the
-rollback rather than being overwritten. Application and rollback use one
-database transaction.
+After a successful application, the exact action/before/after plan is stored as
+the rollback snapshot with its own SHA-256 and byte count. Rollback first
+confirms that every updated or rehydrated row still equals the applied value;
+later edits stop rollback rather than being overwritten. Updated fields are
+restored and rehydrated rows are removed in child-to-parent order. Application
+and rollback each use one database transaction.
 
 ## API
 
@@ -108,7 +121,6 @@ All endpoints are administrator-only, tenant-filtered, and online-only.
 
 ## Future expansion boundary
 
-Deleted-row rehydration requires referential ordering and key-collision rules.
 Media writeback requires storage staging, atomic promotion, overwrite evidence,
-and file-level rollback. Those capabilities must be added as separate reviewed
-batches; they are not silently enabled by this workflow.
+and file-level rollback. It remains checksum-validation-only until that
+capability is added as a separate reviewed batch.

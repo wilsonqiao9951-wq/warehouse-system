@@ -188,6 +188,10 @@ class OrganizationDataRestore(Base):
             name="ck_organization_data_restore_counts_non_negative",
         ),
         CheckConstraint(
+            "create_count >= 0",
+            name="ck_organization_data_restore_create_count_non_negative",
+        ),
+        CheckConstraint(
             "length(archive_sha256) = 64 AND length(plan_sha256) = 64 "
             "AND (rollback_sha256 IS NULL OR length(rollback_sha256) = 64)",
             name="ck_organization_data_restore_hashes",
@@ -226,6 +230,7 @@ class OrganizationDataRestore(Base):
     source_exported_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     record_count: Mapped[int] = mapped_column(Integer, nullable=False)
     file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    create_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     update_count: Mapped[int] = mapped_column(Integer, nullable=False)
     unchanged_count: Mapped[int] = mapped_column(Integer, nullable=False)
     conflict_count: Mapped[int] = mapped_column(Integer, nullable=False)

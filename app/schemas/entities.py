@@ -599,6 +599,7 @@ class OrganizationDataRestoreRead(BaseModel):
     source_exported_at: datetime | None = None
     record_count: int = Field(ge=0)
     file_count: int = Field(ge=0)
+    create_count: int = Field(ge=0)
     update_count: int = Field(ge=0)
     unchanged_count: int = Field(ge=0)
     conflict_count: int = Field(ge=0)

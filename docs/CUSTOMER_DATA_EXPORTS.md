@@ -73,9 +73,10 @@ content. `DATA_EXPORT_PUBLIC_FILES_ROOT` and
 inclusion.
 
 `opf-portable-v1` is accepted only by the separate controlled restore workflow.
-It performs archive validation, an existing-row dry-run, explicit approval,
-exact-archive and live-plan revalidation, atomic eligible-field application,
-and drift-protected rollback. It does not recreate deleted rows or write media.
+It performs archive validation, an eligible-row dry-run, explicit approval,
+exact-archive and live-plan revalidation, atomic updates, guarded rehydration of
+missing allowlisted records, and drift-protected rollback. It does not write
+media.
 See [`CONTROLLED_DATA_RESTORES.md`](CONTROLLED_DATA_RESTORES.md).
 
 ## API

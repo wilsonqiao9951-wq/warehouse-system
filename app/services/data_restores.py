@@ -17,6 +17,7 @@ from sqlalchemy import DateTime as SqlDateTime
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy import Float as SqlFloat
 from sqlalchemy import LargeBinary, Numeric
+from sqlalchemy import UniqueConstraint, and_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -50,8 +51,29 @@ RESTORABLE_TABLES = {
     "work_order_form_fields",
     "work_order_form_templates",
 }
+CREATE_TABLE_ORDER = (
+    "customers",
+    "equipment",
+    "warehouses",
+    "storage_locations",
+    "parts",
+    "part_machine_associations",
+    "completion_policies",
+    "work_order_form_templates",
+    "work_order_form_fields",
+    "machine_knowledge_profiles",
+    "machine_knowledge_entries",
+)
+CREATE_TABLE_RANK = {
+    table_name: rank for rank, table_name in enumerate(CREATE_TABLE_ORDER)
+}
 RESTORE_SCHEMA_COMPATIBILITY = {
     "20260806_0037": {"20260806_0036", "20260806_0037"},
+    "20260807_0038": {
+        "20260806_0036",
+        "20260806_0037",
+        "20260807_0038",
+    },
 }
 
 
@@ -78,6 +100,7 @@ class RestoreAnalysis:
     source_exported_at: datetime | None
     record_count: int
     file_count: int
+    create_count: int
     update_count: int
     unchanged_count: int
     conflict_count: int
@@ -268,33 +291,205 @@ def _plan_row(
     if excluded.intersection(payload):
         raise DataRestoreInvalid(f"{table_name} contains prohibited authentication columns")
     row_id = payload.get("id")
-    if not isinstance(row_id, int) or isinstance(row_id, bool):
+    if not isinstance(row_id, int) or isinstance(row_id, bool) or row_id < 1:
         return "conflict", None, f"{table_name} contains a row without a valid integer id"
     if payload.get("organization_id") != organization_id:
         return "conflict", None, f"{table_name} row {row_id} belongs to another organization"
     target = db.get(model, row_id)
-    if target is None or getattr(target, "organization_id", None) != organization_id:
-        return "conflict", None, f"{table_name} row {row_id} does not exist in the target organization"
+    if target is None:
+        existing_owner = db.execute(
+            select(table.c.organization_id).where(table.c.id == row_id)
+        ).scalar_one_or_none()
+        if existing_owner is not None:
+            return (
+                "conflict",
+                None,
+                f"{table_name} row {row_id} is already owned by another organization",
+            )
+        missing = {
+            column.name
+            for column in table.columns
+            if column.name not in excluded and column.name not in payload
+        }
+        if missing:
+            raise DataRestoreInvalid(
+                f"{table_name} row {row_id} is missing columns required for rehydration"
+            )
+        columns = {column.name: column for column in table.columns}
+        after = {
+            name: _json_value(_deserialize(columns[name], value))
+            for name, value in payload.items()
+            if name not in excluded
+        }
+        unique_conflict = _unique_conflict(db, table, row_id, after)
+        if unique_conflict:
+            return (
+                "conflict",
+                None,
+                f"{table_name} row {row_id} conflicts with current unique key {unique_conflict}",
+            )
+        return (
+            "create",
+            {
+                "action": "create",
+                "table": table_name,
+                "id": row_id,
+                "before": None,
+                "after": after,
+            },
+            None,
+        )
+    if getattr(target, "organization_id", None) != organization_id:
+        return (
+            "conflict",
+            None,
+            f"{table_name} row {row_id} is already owned by another organization",
+        )
 
     before: dict[str, Any] = {}
     after: dict[str, Any] = {}
     columns = {column.name: column for column in table.columns}
+    proposed_row: dict[str, Any] = {}
     for name, value in payload.items():
-        if name in IMMUTABLE_COLUMNS or name in excluded:
+        if name in excluded:
             continue
         converted = _deserialize(columns[name], value)
         current = _json_value(getattr(target, name))
         proposed = _json_value(converted)
+        proposed_row[name] = current if name in IMMUTABLE_COLUMNS else proposed
+        if name in IMMUTABLE_COLUMNS:
+            continue
         if _canonical(current) != _canonical(proposed):
             before[name] = current
             after[name] = proposed
+    unique_conflict = _unique_conflict(db, table, row_id, proposed_row)
+    if unique_conflict:
+        return (
+            "conflict",
+            None,
+            f"{table_name} row {row_id} conflicts with current unique key {unique_conflict}",
+        )
     if not after:
         return "unchanged", None, None
     return (
         "update",
-        {"table": table_name, "id": row_id, "before": before, "after": after},
+        {
+            "action": "update",
+            "table": table_name,
+            "id": row_id,
+            "before": before,
+            "after": after,
+        },
         None,
     )
+
+
+def _unique_conflict(
+    db: Session,
+    table: Any,
+    row_id: int,
+    proposed: dict[str, Any],
+) -> str | None:
+    constraints = [
+        constraint
+        for constraint in table.constraints
+        if isinstance(constraint, UniqueConstraint)
+    ]
+    for constraint in constraints:
+        names = [column.name for column in constraint.columns]
+        if not names or any(name not in proposed or proposed[name] is None for name in names):
+            continue
+        found = db.execute(
+            select(table.c.id)
+            .where(and_(*(table.c[name] == proposed[name] for name in names)))
+            .limit(1)
+        ).scalar_one_or_none()
+        if found is not None and found != row_id:
+            return constraint.name or ",".join(names)
+    return None
+
+
+def _dependency_error(
+    db: Session,
+    item: dict[str, Any],
+    registry: dict[str, Any],
+    planned_creates: set[tuple[str, int]],
+    invalid_creates: set[tuple[str, int]],
+    organization_id: int,
+) -> str | None:
+    model = registry[item["table"]]
+    table = model.__table__
+    for column in table.columns:
+        value = item["after"].get(column.name)
+        if value is None:
+            continue
+        for foreign_key in column.foreign_keys:
+            remote_table = foreign_key.column.table
+            remote_name = remote_table.name
+            if foreign_key.column.name != "id" or not isinstance(value, int):
+                return f"{item['table']} row {item['id']} has an unsupported foreign key"
+            key = (remote_name, value)
+            if key in planned_creates:
+                if key in invalid_creates:
+                    return (
+                        f"{item['table']} row {item['id']} depends on an unresolved "
+                        f"{remote_name} row {value}"
+                    )
+                continue
+            if remote_name == "organizations":
+                if value != organization_id:
+                    return f"{item['table']} row {item['id']} references another organization"
+                continue
+            remote = db.execute(
+                select(remote_table).where(remote_table.c.id == value)
+            ).mappings().first()
+            if remote is None:
+                return (
+                    f"{item['table']} row {item['id']} references missing "
+                    f"{remote_name} row {value}"
+                )
+            if "organization_id" in remote_table.c and remote["organization_id"] != organization_id:
+                return (
+                    f"{item['table']} row {item['id']} references another organization's "
+                    f"{remote_name} row {value}"
+                )
+    return None
+
+
+def _invalid_plan_dependencies(
+    db: Session,
+    plan: list[dict[str, Any]],
+    registry: dict[str, Any],
+    organization_id: int,
+) -> dict[int, str]:
+    create_indexes = {
+        (item["table"], item["id"]): index
+        for index, item in enumerate(plan)
+        if item.get("action") == "create"
+    }
+    planned_creates = set(create_indexes)
+    invalid: dict[int, str] = {}
+    changed = True
+    while changed:
+        changed = False
+        invalid_creates = {
+            key for key, index in create_indexes.items() if index in invalid
+        }
+        for index, item in enumerate(plan):
+            if index in invalid:
+                continue
+            error = _dependency_error(
+                db,
+                item,
+                registry,
+                planned_creates,
+                invalid_creates,
+                organization_id,
+            )
+            if error:
+                invalid[index] = error
+                changed = True
+    return invalid
 
 
 def _validate_protected_row(
@@ -355,6 +550,7 @@ def analyze_restore_archive(
         messages: list[str] = []
         table_summary: dict[str, dict[str, int]] = {}
         record_count = 0
+        create_count = 0
         update_count = 0
         unchanged_count = 0
         conflict_count = 0
@@ -365,7 +561,15 @@ def analyze_restore_archive(
             model = registry[table_name]
             digest = sha256()
             rows_seen = 0
-            summary = {"records": 0, "updates": 0, "unchanged": 0, "conflicts": 0, "protected": 0}
+            seen_row_ids: set[int] = set()
+            summary = {
+                "records": 0,
+                "creates": 0,
+                "updates": 0,
+                "unchanged": 0,
+                "conflicts": 0,
+                "protected": 0,
+            }
             with archive.open(item["path"]) as source:
                 for raw_line in source:
                     digest.update(raw_line)
@@ -375,6 +579,13 @@ def analyze_restore_archive(
                     if not isinstance(payload, dict):
                         raise DataRestoreInvalid(f"{table_name} contains a non-object row")
                     rows_seen += 1
+                    row_id = payload.get("id")
+                    if isinstance(row_id, int) and row_id in seen_row_ids:
+                        raise DataRestoreInvalid(
+                            f"{table_name} contains duplicate row ids"
+                        )
+                    if isinstance(row_id, int):
+                        seen_row_ids.add(row_id)
                     if table_name not in RESTORABLE_TABLES:
                         _validate_protected_row(model, payload, organization.id)
                         summary["protected"] += 1
@@ -383,7 +594,11 @@ def analyze_restore_archive(
                     outcome, change, message = _plan_row(
                         db, model, payload, organization.id
                     )
-                    if outcome == "update":
+                    if outcome == "create":
+                        summary["creates"] += 1
+                        create_count += 1
+                        plan.append(change or {})
+                    elif outcome == "update":
                         summary["updates"] += 1
                         update_count += 1
                         plan.append(change or {})
@@ -400,6 +615,29 @@ def analyze_restore_archive(
             summary["records"] = rows_seen
             table_summary[table_name] = summary
             record_count += rows_seen
+
+        invalid_dependencies = _invalid_plan_dependencies(
+            db, plan, registry, organization.id
+        )
+        if invalid_dependencies:
+            filtered_plan: list[dict[str, Any]] = []
+            for index, item in enumerate(plan):
+                error = invalid_dependencies.get(index)
+                if not error:
+                    filtered_plan.append(item)
+                    continue
+                summary = table_summary[item["table"]]
+                if item.get("action") == "create":
+                    summary["creates"] -= 1
+                    create_count -= 1
+                else:
+                    summary["updates"] -= 1
+                    update_count -= 1
+                summary["conflicts"] += 1
+                conflict_count += 1
+                if len(messages) < 100:
+                    messages.append(error)
+            plan = filtered_plan
 
         for item in files:
             digest = sha256()
@@ -430,7 +668,17 @@ def analyze_restore_archive(
             messages.append(
                 "Media entries were checksum-verified; this restore stage does not write files to storage."
             )
-        plan.sort(key=lambda item: (item["table"], item["id"]))
+        if create_count:
+            messages.append(
+                "Missing eligible rows passed global id, unique-key, tenant, and foreign-key checks and can be rehydrated."
+            )
+        plan.sort(
+            key=lambda item: (
+                0 if item.get("action") == "create" else 1,
+                CREATE_TABLE_RANK.get(item["table"], len(CREATE_TABLE_RANK)),
+                item["id"],
+            )
+        )
         plan_json = _canonical(plan)
         plan_bytes = plan_json.encode("utf-8")
         if len(plan_bytes) > settings.max_data_restore_rollback_bytes:
@@ -442,6 +690,7 @@ def analyze_restore_archive(
             source_exported_at=_parse_utc(manifest.get("generated_at_utc")),
             record_count=record_count,
             file_count=len(files),
+            create_count=create_count,
             update_count=update_count,
             unchanged_count=unchanged_count,
             conflict_count=conflict_count,
@@ -465,7 +714,35 @@ def apply_restore_plan(db: Session, analysis: RestoreAnalysis, organization_id: 
     if analysis.conflict_count:
         raise DataRestoreConflict("Restore plan contains unresolved conflicts")
     registry = _table_registry()
-    for item in analysis.plan:
+    create_items = sorted(
+        (item for item in analysis.plan if item.get("action") == "create"),
+        key=lambda item: (
+            CREATE_TABLE_RANK.get(item["table"], len(CREATE_TABLE_RANK)),
+            item["id"],
+        ),
+    )
+    update_items = [
+        item for item in analysis.plan if item.get("action", "update") == "update"
+    ]
+    for item in create_items:
+        model = registry[item["table"]]
+        table = model.__table__
+        existing = db.execute(
+            select(table.c.id).where(table.c.id == item["id"])
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise DataRestoreConflict("A restore record id was claimed after approval")
+        columns = {column.name: column for column in table.columns}
+        values = {
+            name: _deserialize(columns[name], value)
+            for name, value in item["after"].items()
+        }
+        if values.get("organization_id") != organization_id:
+            raise DataRestoreConflict("Restore plan contains a cross-organization create")
+        db.add(model(**values))
+        db.flush()
+
+    for item in update_items:
         model = registry[item["table"]]
         row = db.get(model, item["id"])
         if row is None or getattr(row, "organization_id", None) != organization_id:
@@ -487,22 +764,50 @@ def rollback_restore_plan(db: Session, rollback_json: str, organization_id: int)
     if not isinstance(plan, list):
         raise DataRestoreConflict("Stored rollback snapshot is invalid")
     registry = _table_registry()
+    validated: list[tuple[dict[str, Any], Any, Any]] = []
     for item in plan:
         if not isinstance(item, dict) or item.get("table") not in RESTORABLE_TABLES:
             raise DataRestoreConflict("Stored rollback snapshot contains an invalid target")
+        action = item.get("action", "update")
+        if action not in {"create", "update"}:
+            raise DataRestoreConflict("Stored rollback snapshot contains an invalid action")
         model = registry[item["table"]]
         row = db.get(model, item.get("id"))
         if row is None or getattr(row, "organization_id", None) != organization_id:
             raise DataRestoreConflict("A restored record no longer exists")
         after = item.get("after")
         before = item.get("before")
-        if not isinstance(after, dict) or not isinstance(before, dict):
+        if not isinstance(after, dict) or (
+            action == "update" and not isinstance(before, dict)
+        ) or (action == "create" and before is not None):
             raise DataRestoreConflict("Stored rollback snapshot is invalid")
         _assert_current_values(row, after, f"{item['table']} row {item['id']}")
+        validated.append((item, model, row))
+
+    for item, model, row in validated:
+        if item.get("action", "update") != "update":
+            continue
+        before = item["before"]
         columns = {column.name: column for column in model.__table__.columns}
         for name, value in before.items():
             if name not in columns or name in IMMUTABLE_COLUMNS:
                 raise DataRestoreConflict("Stored rollback snapshot contains an invalid field")
             setattr(row, name, _deserialize(columns[name], value))
     db.flush()
+
+    create_rows = sorted(
+        (
+            (item, row)
+            for item, _model, row in validated
+            if item.get("action") == "create"
+        ),
+        key=lambda pair: (
+            CREATE_TABLE_RANK.get(pair[0]["table"], len(CREATE_TABLE_RANK)),
+            pair[0]["id"],
+        ),
+        reverse=True,
+    )
+    for _item, row in create_rows:
+        db.delete(row)
+        db.flush()
     return len(plan)
