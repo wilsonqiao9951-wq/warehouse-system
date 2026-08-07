@@ -1382,3 +1382,23 @@ Verification:
 - Fresh base-to-`0048` plus `0048 -> 0047 -> 0048` migration rehearsal passed on SQLite.
 - Frontend ESLint and TypeScript passed; the Next.js 16.2.12 production build generated all 38 static routes.
 - All 191 backend tests passed; requirements, production image tooling, and full/production npm security scans reported 0 known vulnerabilities after pinning pip 26.1.2 in the API image.
+
+## 2026-08-07 - Phase 9 single-use password reset
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added generic, rate-limited reset requests that do not reveal whether an account exists and do not create unbounded work after a limit is reached.
+- Added 32-byte tokens stored only as keyed hashes, 30-minute default expiry, prior-token invalidation, atomic single-use consumption, and replay rejection.
+- Added TLS SMTP delivery after response completion, safe delivery evidence, production configuration validation, and fail-closed availability.
+- Rotated the account authentication version on completion so every old browser and phone bearer token is immediately rejected.
+- Added Forgot Password and Reset Password pages plus password-reset outcomes in the administrator security-event view.
+- Added Alembic revision `20260807_0049`, portable export redaction, and controlled-restore/legacy-adoption compatibility.
+
+Verification:
+
+- Existing/unknown response equivalence, rate limiting, token secrecy, supersession, expiry, replay, SMTP success/failure, disabled-production behavior, password replacement, and session invalidation passed.
+- All 200 backend tests passed.
+- Fresh base-to-`0049` plus `0049 -> 0048 -> 0049` migration rehearsal passed on SQLite.
+- Frontend ESLint and TypeScript passed; the Next.js 16.2.12 production build generated all 40 static routes.

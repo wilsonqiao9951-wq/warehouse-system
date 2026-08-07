@@ -17,6 +17,10 @@ COUNTED_LOGIN_FAILURES = (
     "device_rejected",
     "rate_limited",
 )
+COUNTED_PASSWORD_RESET_REQUESTS = (
+    "reset_requested",
+    "reset_request_ignored",
+)
 
 
 def auth_fingerprint(namespace: str, value: str) -> str:
@@ -63,6 +67,36 @@ def login_is_rate_limited(
         )
     ) or 0
     return source_failures >= settings.login_rate_limit_source_failures
+
+
+def password_reset_is_rate_limited(
+    db: Session,
+    *,
+    principal_fingerprint: str,
+    source_fingerprint: str,
+    now: datetime,
+) -> bool:
+    since = now - timedelta(seconds=settings.password_reset_rate_limit_window_seconds)
+    common = (
+        AuthSecurityEvent.event_type == "password_reset",
+        AuthSecurityEvent.outcome.in_(COUNTED_PASSWORD_RESET_REQUESTS),
+        AuthSecurityEvent.occurred_at >= since,
+    )
+    principal_requests = db.scalar(
+        select(func.count(AuthSecurityEvent.id)).where(
+            *common,
+            AuthSecurityEvent.principal_fingerprint == principal_fingerprint,
+        )
+    ) or 0
+    if principal_requests >= settings.password_reset_principal_requests:
+        return True
+    source_requests = db.scalar(
+        select(func.count(AuthSecurityEvent.id)).where(
+            *common,
+            AuthSecurityEvent.source_fingerprint == source_fingerprint,
+        )
+    ) or 0
+    return source_requests >= settings.password_reset_source_requests
 
 
 def record_auth_security_event(

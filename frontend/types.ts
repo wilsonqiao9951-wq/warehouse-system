@@ -49,15 +49,32 @@ export interface AuthToken {
 export interface AuthSecurityEvent {
   id: number;
   user_id?: number | null;
-  event_type: "login" | "session_revocation";
+  event_type: "login" | "session_revocation" | "password_reset";
   outcome:
     | "success"
     | "invalid_credentials"
     | "rate_limited"
     | "subscription_denied"
     | "device_rejected"
-    | "sessions_revoked";
+    | "sessions_revoked"
+    | "reset_requested"
+    | "reset_request_ignored"
+    | "reset_delivered"
+    | "reset_delivery_failed"
+    | "reset_completed"
+    | "reset_rejected";
   occurred_at: string;
+}
+
+export interface PasswordResetConfiguration {
+  available: boolean;
+  expires_in_minutes: number;
+}
+
+export interface PasswordResetRequestResult {
+  accepted: boolean;
+  message: string;
+  reset_url?: string | null;
 }
 
 export interface AuditLogEntry {

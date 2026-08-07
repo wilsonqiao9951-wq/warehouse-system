@@ -775,3 +775,11 @@ vulnerabilities.
 - Added durable account/source login throttling with configurable production-validated bounds and `429 Retry-After` responses.
 - Added immutable login/session outcomes with keyed account and source fingerprints; raw identifiers, IP addresses, submitted credentials, bearer tokens, and device secrets are not retained or exposed.
 - Added a Profile security workspace, tenant-safe authentication history, export redaction, controlled-restore compatibility, and legacy-adoption current-head validation.
+
+## 20260807_0049 - Single-use password reset
+
+- Added hashed, tenant-scoped reset tokens with expiry, single-use conditional consumption, prior-token invalidation, delivery status, and safe failure evidence.
+- Added generic account-enumeration-resistant reset requests with keyed account/source rate limits and fail-closed production availability.
+- Added TLS-protected SMTP delivery after the HTTP response; production never stores or returns the raw token and validates relay settings before startup.
+- Added password completion that rotates the Argon2 hash and authentication version so all older bearer sessions are revoked immediately.
+- Added Forgot Password and Reset Password pages, administrator security-event visibility, export redaction, restore compatibility, and migration `0049`.

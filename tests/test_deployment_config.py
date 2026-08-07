@@ -50,6 +50,10 @@ def test_safe_production_configuration_and_cors_are_accepted():
         ({"login_rate_limit_window_seconds": 30}, "LOGIN_RATE_LIMIT_WINDOW_SECONDS"),
         ({"login_rate_limit_principal_failures": 2}, "LOGIN_RATE_LIMIT_PRINCIPAL_FAILURES"),
         ({"login_rate_limit_source_failures": 5}, "LOGIN_RATE_LIMIT_SOURCE_FAILURES"),
+        ({"password_reset_expire_minutes": 4}, "PASSWORD_RESET_EXPIRE_MINUTES"),
+        ({"password_reset_rate_limit_window_seconds": 30}, "PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS"),
+        ({"password_reset_principal_requests": 0}, "PASSWORD_RESET_PRINCIPAL_REQUESTS"),
+        ({"password_reset_source_requests": 2}, "PASSWORD_RESET_SOURCE_REQUESTS"),
         ({"database_url": "sqlite:///./production.db"}, "PostgreSQL"),
         ({"database_url": "not a url"}, "DATABASE_URL"),
         ({"frontend_public_url": "http://parts.example.com"}, "FRONTEND_PUBLIC_URL"),
@@ -73,6 +77,39 @@ def test_development_keeps_local_origins_and_does_not_require_production_secrets
     validate_deployment_settings(config)
 
     assert set(LOCAL_CORS_ORIGINS).issubset(cors_allowed_origins(config))
+
+
+def test_password_reset_email_configuration_is_fail_closed():
+    safe = deployment_settings(
+        password_reset_email_enabled=True,
+        auth_email_from="OpenPartsFlow <security@example.com>",
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_username="relay-user",
+        smtp_password="secure-relay-password",
+        smtp_use_starttls=True,
+        smtp_use_ssl=False,
+    )
+    validate_deployment_settings(safe)
+
+    with pytest.raises(DeploymentConfigurationError, match="SMTP_HOST"):
+        validate_deployment_settings(
+            deployment_settings(
+                password_reset_email_enabled=True,
+                auth_email_from="security@example.com",
+                smtp_host="",
+            )
+        )
+    with pytest.raises(DeploymentConfigurationError, match="Exactly one"):
+        validate_deployment_settings(
+            deployment_settings(
+                password_reset_email_enabled=True,
+                auth_email_from="security@example.com",
+                smtp_host="smtp.example.com",
+                smtp_use_starttls=True,
+                smtp_use_ssl=True,
+            )
+        )
 
 
 def test_stripe_production_configuration_is_fail_closed():

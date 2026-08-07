@@ -103,6 +103,27 @@ def validate_deployment_settings(config: Settings = settings) -> None:
             "LOGIN_RATE_LIMIT_SOURCE_FAILURES must be at least the principal limit and no more than 10000"
         )
 
+    if not 5 <= config.password_reset_expire_minutes <= 1440:
+        errors.append("PASSWORD_RESET_EXPIRE_MINUTES must be between 5 and 1440")
+    if not 60 <= config.password_reset_rate_limit_window_seconds <= 86400:
+        errors.append("PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS must be between 60 and 86400")
+    if not 1 <= config.password_reset_principal_requests <= 20:
+        errors.append("PASSWORD_RESET_PRINCIPAL_REQUESTS must be between 1 and 20")
+    if not (
+        config.password_reset_principal_requests
+        <= config.password_reset_source_requests
+        <= 1000
+    ):
+        errors.append(
+            "PASSWORD_RESET_SOURCE_REQUESTS must be at least the principal limit and no more than 1000"
+        )
+    if config.password_reset_email_enabled:
+        from app.services.password_reset_delivery import password_reset_configuration_errors
+
+        errors.extend(password_reset_configuration_errors(config))
+        if config.smtp_password and _is_placeholder(config.smtp_password):
+            errors.append("SMTP_PASSWORD must not be a placeholder")
+
     try:
         database = make_url(config.database_url)
         if not database.drivername.startswith("postgresql"):

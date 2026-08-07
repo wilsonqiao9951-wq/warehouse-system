@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import { OrganizationBranding } from "@/types";
 
@@ -82,6 +83,7 @@ export default function LoginPage() {
         </label>
         {error && <div className="error">{error}</div>}
         <button type="submit" disabled={busy}>{busy ? "Signing in…" : "Continue to workspace"}</button>
+        <Link href="/forgot-password" style={{ textAlign: "center" }}>Forgot your password?</Link>
       </form>
     </section>
   );
