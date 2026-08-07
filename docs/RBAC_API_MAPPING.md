@@ -134,6 +134,23 @@ oversized results, returns digest and row-count evidence, and records an audit
 event. Metric grain and caveats are documented in
 [`ENTERPRISE_ANALYTICS.md`](ENTERPRISE_ANALYTICS.md).
 
+## Enterprise operations Agent
+
+| Operation | Engineer | Manager | Organization admin | Warehouse |
+| --- | ---: | ---: | ---: | ---: |
+| Load Agent options and run history | Deny by default | Allow | Allow | Deny by default |
+| Run a read-only evidence review | Deny by default | Allow | Allow | Deny by default |
+| Mutate a work order, inventory, integration, or approval through Agent | Deny | Deny | Deny | Deny |
+
+`agent.use` is independently delegable through the enterprise permission
+matrix. Every query retains explicit tenant criteria plus session-wide tenant
+scope. Engineer options and engineer-specific filters also require `users.read`,
+so delegating Agent use does not implicitly disclose the employee directory. A
+successful run consumes one AI request and records digest-only run and
+audit evidence. The Agent has no business mutation tool; links lead to existing
+role, ownership, device, password, version, and custody-protected workflows.
+See [`ENTERPRISE_OPERATIONS_AGENT.md`](ENTERPRISE_OPERATIONS_AGENT.md).
+
 ## Commercial reporting access model
 
 | Operation | Engineer | Manager | Organization admin | Platform admin |

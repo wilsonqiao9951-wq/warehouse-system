@@ -697,3 +697,25 @@ reauthentication, export-safety, digest, audit, and size-limit tests passed; all
 migration rehearsals passed on SQLite; ESLint, TypeScript, and the Next.js
 production build passed for all 37 static routes; dependency checks and both npm
 audits passed with 0 known vulnerabilities.
+
+## 20260807_0045 - Enterprise operations Agent run evidence
+
+- Adds immutable, tenant-scoped Agent run evidence with actor, resolved intent,
+  question digest/length, bounded filters, tool trace, finding count, duration,
+  status, and timestamp; raw questions and generated narratives are not stored.
+- Adds effective `agent.use`, manager/administrator defaults, and explicit
+  enterprise permission overrides.
+- Adds allowlisted daily brief, backlog, service-quality, inventory-readiness,
+  and integration-health intents over server-owned query tools.
+- Adds one-request AI allowance metering per successful run, source definitions,
+  data-quality confidence, declared limitations, and hard read-only guardrails.
+- Adds the `/agent` workspace with preset questions, UTC/engineer/job-type
+  filters, prioritized evidence, protected workflow links, and digest-only run
+  history.
+
+Verification: three Agent grounding, tenant, privacy, read-only, audit, quota,
+classification, validation, and permission tests passed; all 161 backend tests
+passed; fresh base-to-`0045` and `0045 -> 0044 -> 0045` migration rehearsals
+passed on SQLite; ESLint, TypeScript, and the Next.js production build passed
+for all 38 static routes; dependency checks and both npm audits passed with 0
+known vulnerabilities.
