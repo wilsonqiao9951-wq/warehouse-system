@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 import json
 import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from sqlalchemy import select
+from sqlalchemy import and_, exists, func, not_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,10 @@ from app.models import (
 )
 from app.schemas import (
     OrganizationDataRestoreDecision,
+    OrganizationDataRetentionCleanup,
+    OrganizationDataRetentionCleanupRead,
+    OrganizationDataRetentionPolicyUpdate,
+    OrganizationDataRetentionRead,
     OrganizationDataRestoreRead,
     OrganizationDataRestoreRollback,
 )
@@ -35,11 +39,16 @@ from app.services.data_restores import (
     compensate_restore_file_rollback,
     copy_restore_upload,
     discard_restore_file_evidence,
+    finalize_staged_retention_cleanup,
+    list_staged_retention_cleanup_ids,
     prepare_restore_file_rollback,
     prepare_restore_files,
     promote_restore_files,
+    reconcile_staged_retention_cleanup,
+    rollback_staged_retention_cleanup,
     rollback_restore_files,
     rollback_restore_plan,
+    stage_restore_file_evidence_cleanup,
 )
 
 
@@ -118,6 +127,9 @@ def _read_restore(row: OrganizationDataRestore) -> OrganizationDataRestoreRead:
         rollback_size_bytes=row.rollback_size_bytes,
         file_rollback_sha256=row.file_rollback_sha256,
         file_rollback_size_bytes=row.file_rollback_size_bytes,
+        rollback_expires_at=row.rollback_expires_at,
+        rollback_evidence_purged_at=row.rollback_evidence_purged_at,
+        rollback_evidence_purged_by=row.rollback_evidence_purged_by,
         version=row.version,
         approved_at=row.approved_at,
         rejected_at=row.rejected_at,
@@ -173,6 +185,424 @@ def _restore_for_update(
     if not row or row.organization_id != actor.organization_id:
         raise HTTPException(status_code=404, detail="Restore rehearsal not found")
     return row
+
+
+def _retention_conditions(
+    organization: Organization,
+    now: datetime,
+):
+    export_cutoff = now - timedelta(
+        days=organization.data_export_evidence_retention_days
+    )
+    rehearsal_cutoff = now - timedelta(
+        days=organization.data_restore_rehearsal_retention_days
+    )
+    legacy_rollback_cutoff = now - timedelta(
+        days=organization.data_restore_rollback_retention_days
+    )
+    removable_restore = and_(
+        OrganizationDataRestore.organization_id == organization.id,
+        OrganizationDataRestore.status.in_(("validated", "rejected", "rolled_back")),
+        OrganizationDataRestore.updated_at < rehearsal_cutoff,
+    )
+    rollback_expired = and_(
+        OrganizationDataRestore.organization_id == organization.id,
+        OrganizationDataRestore.status == "applied",
+        OrganizationDataRestore.rollback_payload_json.is_not(None),
+        OrganizationDataRestore.rollback_evidence_purged_at.is_(None),
+        or_(
+            OrganizationDataRestore.rollback_expires_at <= now,
+            and_(
+                OrganizationDataRestore.rollback_expires_at.is_(None),
+                OrganizationDataRestore.applied_at < legacy_rollback_cutoff,
+            ),
+        ),
+    )
+    retained_restore_reference = exists(
+        select(OrganizationDataRestore.id).where(
+            OrganizationDataRestore.organization_id == organization.id,
+            OrganizationDataRestore.matched_export_id == OrganizationDataExport.id,
+            not_(
+                and_(
+                    OrganizationDataRestore.status.in_(
+                        ("validated", "rejected", "rolled_back")
+                    ),
+                    OrganizationDataRestore.updated_at < rehearsal_cutoff,
+                )
+            ),
+        )
+    )
+    removable_export = and_(
+        OrganizationDataExport.organization_id == organization.id,
+        OrganizationDataExport.generated_at < export_cutoff,
+        not_(retained_restore_reference),
+    )
+    return (
+        export_cutoff,
+        rehearsal_cutoff,
+        removable_restore,
+        rollback_expired,
+        removable_export,
+    )
+
+
+def _retention_overview(
+    db: Session,
+    organization: Organization,
+    now: datetime | None = None,
+) -> OrganizationDataRetentionRead:
+    generated_at = now or datetime.utcnow()
+    (
+        export_cutoff,
+        rehearsal_cutoff,
+        removable_restore,
+        rollback_expired,
+        removable_export,
+    ) = _retention_conditions(organization, generated_at)
+    return OrganizationDataRetentionRead(
+        organization_id=organization.id,
+        settings_version=organization.settings_version,
+        data_export_evidence_retention_days=(
+            organization.data_export_evidence_retention_days
+        ),
+        data_restore_rehearsal_retention_days=(
+            organization.data_restore_rehearsal_retention_days
+        ),
+        data_restore_rollback_retention_days=(
+            organization.data_restore_rollback_retention_days
+        ),
+        export_cutoff=export_cutoff,
+        restore_rehearsal_cutoff=rehearsal_cutoff,
+        generated_at=generated_at,
+        export_evidence_candidates=db.scalar(
+            select(func.count(OrganizationDataExport.id)).where(removable_export)
+        )
+        or 0,
+        restore_rehearsal_candidates=db.scalar(
+            select(func.count(OrganizationDataRestore.id)).where(removable_restore)
+        )
+        or 0,
+        rollback_evidence_candidates=db.scalar(
+            select(func.count(OrganizationDataRestore.id)).where(rollback_expired)
+        )
+        or 0,
+        rollback_database_bytes=db.scalar(
+            select(func.coalesce(func.sum(OrganizationDataRestore.rollback_size_bytes), 0))
+            .where(rollback_expired)
+        )
+        or 0,
+        rollback_file_bytes=db.scalar(
+            select(
+                func.coalesce(
+                    func.sum(OrganizationDataRestore.file_rollback_size_bytes), 0
+                )
+            ).where(rollback_expired)
+        )
+        or 0,
+    )
+
+
+@router.get(
+    "/organization/data-retention",
+    response_model=OrganizationDataRetentionRead,
+)
+def get_organization_data_retention(
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    organization = db.get(Organization, actor.organization_id)
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return _retention_overview(db, organization)
+
+
+@router.put(
+    "/organization/data-retention",
+    response_model=OrganizationDataRetentionRead,
+)
+def update_organization_data_retention(
+    payload: OrganizationDataRetentionPolicyUpdate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = db.scalar(
+        select(Organization)
+        .where(Organization.id == actor.organization_id)
+        .with_for_update()
+    )
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if organization.settings_version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Organization settings changed; refresh and retry")
+    previous = {
+        "data_export_evidence_retention_days": organization.data_export_evidence_retention_days,
+        "data_restore_rehearsal_retention_days": organization.data_restore_rehearsal_retention_days,
+        "data_restore_rollback_retention_days": organization.data_restore_rollback_retention_days,
+    }
+    organization.data_export_evidence_retention_days = (
+        payload.data_export_evidence_retention_days
+    )
+    organization.data_restore_rehearsal_retention_days = (
+        payload.data_restore_rehearsal_retention_days
+    )
+    organization.data_restore_rollback_retention_days = (
+        payload.data_restore_rollback_retention_days
+    )
+    organization.settings_version += 1
+    db.add(
+        AuditLog(
+            organization_id=organization.id,
+            user_id=actor.user_id,
+            action="organization_data_retention_policy_updated",
+            entity_type="organization",
+            entity_id=organization.id,
+            metadata_json=json.dumps(
+                {
+                    "actor_role": actor.role.value,
+                    "auth_method": actor.auth_method,
+                    "previous": previous,
+                    "current": {
+                        "data_export_evidence_retention_days": organization.data_export_evidence_retention_days,
+                        "data_restore_rehearsal_retention_days": organization.data_restore_rehearsal_retention_days,
+                        "data_restore_rollback_retention_days": organization.data_restore_rollback_retention_days,
+                    },
+                    "reason": payload.reason,
+                    "settings_version": organization.settings_version,
+                },
+                separators=(",", ":"),
+            ),
+            timestamp=datetime.utcnow(),
+        )
+    )
+    db.commit()
+    db.refresh(organization)
+    return _retention_overview(db, organization)
+
+
+@router.post(
+    "/organization/data-retention/cleanup",
+    response_model=OrganizationDataRetentionCleanupRead,
+)
+def cleanup_organization_data_retention(
+    payload: OrganizationDataRetentionCleanup,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    organization = db.scalar(
+        select(Organization)
+        .where(Organization.id == actor.organization_id)
+        .with_for_update()
+    )
+    if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if organization.settings_version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Organization settings changed; refresh and retry")
+
+    recovered_interrupted = 0
+    try:
+        staged_ids = list_staged_retention_cleanup_ids(organization.id)
+        if staged_ids:
+            staged_rows = db.scalars(
+                select(OrganizationDataRestore)
+                .where(
+                    OrganizationDataRestore.organization_id == organization.id,
+                    OrganizationDataRestore.id.in_(staged_ids),
+                )
+                .with_for_update()
+            ).all()
+            active_ids = {
+                row.id
+                for row in staged_rows
+                if row.rollback_payload_json is not None
+                and row.rollback_evidence_purged_at is None
+            }
+            recovered_interrupted = reconcile_staged_retention_cleanup(
+                organization.id, active_ids
+            )
+    except (DataRestoreConflict, OSError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Restore retention file reconciliation failed",
+        ) from exc
+
+    executed_at = datetime.utcnow()
+    (
+        export_cutoff,
+        rehearsal_cutoff,
+        removable_restore,
+        rollback_expired,
+        _removable_export,
+    ) = _retention_conditions(organization, executed_at)
+    remaining = payload.max_items
+    rollback_rows = db.scalars(
+        select(OrganizationDataRestore)
+        .where(rollback_expired)
+        .order_by(
+            OrganizationDataRestore.rollback_expires_at,
+            OrganizationDataRestore.applied_at,
+            OrganizationDataRestore.id,
+        )
+        .limit(remaining)
+        .with_for_update(skip_locked=True)
+    ).all()
+    remaining -= len(rollback_rows)
+    restore_rows = []
+    if remaining:
+        restore_rows = db.scalars(
+            select(OrganizationDataRestore)
+            .where(removable_restore)
+            .order_by(
+                OrganizationDataRestore.updated_at,
+                OrganizationDataRestore.id,
+            )
+            .limit(remaining)
+            .with_for_update(skip_locked=True)
+        ).all()
+        remaining -= len(restore_rows)
+
+    prepared_files = None
+    file_cleanup_pending = False
+    rollback_database_bytes = sum(row.rollback_size_bytes for row in rollback_rows)
+    rollback_file_bytes = sum(row.file_rollback_size_bytes for row in rollback_rows)
+    try:
+        prepared_files = stage_restore_file_evidence_cleanup(
+            organization.id,
+            [row.id for row in rollback_rows if row.file_rollback_size_bytes > 0],
+        )
+        for row in rollback_rows:
+            row.rollback_payload_json = None
+            row.rollback_sha256 = None
+            row.rollback_size_bytes = 0
+            row.file_rollback_sha256 = None
+            row.file_rollback_size_bytes = 0
+            row.rollback_evidence_purged_at = executed_at
+            row.rollback_evidence_purged_by = actor.user_id
+            row.version += 1
+        deleted_restore_ids = [row.id for row in restore_rows]
+        for row in restore_rows:
+            db.delete(row)
+        db.flush()
+
+        export_rows = []
+        if remaining:
+            retained_reference = exists(
+                select(OrganizationDataRestore.id).where(
+                    OrganizationDataRestore.organization_id == organization.id,
+                    OrganizationDataRestore.matched_export_id == OrganizationDataExport.id,
+                )
+            )
+            export_rows = db.scalars(
+                select(OrganizationDataExport)
+                .where(
+                    OrganizationDataExport.organization_id == organization.id,
+                    OrganizationDataExport.generated_at < export_cutoff,
+                    not_(retained_reference),
+                )
+                .order_by(
+                    OrganizationDataExport.generated_at,
+                    OrganizationDataExport.id,
+                )
+                .limit(remaining)
+                .with_for_update(skip_locked=True)
+            ).all()
+            for row in export_rows:
+                db.delete(row)
+
+        db.add(
+            AuditLog(
+                organization_id=organization.id,
+                user_id=actor.user_id,
+                action="organization_data_retention_cleanup",
+                entity_type="organization",
+                entity_id=organization.id,
+                metadata_json=json.dumps(
+                    {
+                        "actor_role": actor.role.value,
+                        "auth_method": actor.auth_method,
+                        "reason": payload.reason,
+                        "settings_version": organization.settings_version,
+                        "export_cutoff": export_cutoff.isoformat(),
+                        "restore_rehearsal_cutoff": rehearsal_cutoff.isoformat(),
+                        "export_evidence_deleted": len(export_rows),
+                        "export_ids": [row.id for row in export_rows],
+                        "restore_rehearsals_deleted": len(restore_rows),
+                        "restore_ids": deleted_restore_ids,
+                        "rollback_evidence_purged": len(rollback_rows),
+                        "rollback_restore_ids": [row.id for row in rollback_rows],
+                        "rollback_database_bytes_purged": rollback_database_bytes,
+                        "rollback_file_bytes_purged": rollback_file_bytes,
+                        "missing_file_evidence_ids": (
+                            prepared_files.missing_restore_ids if prepared_files else []
+                        ),
+                        "recovered_interrupted_file_cleanups": recovered_interrupted,
+                    },
+                    separators=(",", ":"),
+                ),
+                timestamp=executed_at,
+            )
+        )
+        db.commit()
+    except (DataRestoreConflict, OSError) as exc:
+        db.rollback()
+        rollback_staged_retention_cleanup(prepared_files)
+        raise HTTPException(
+            status_code=409,
+            detail="Restore retention file staging failed",
+        ) from exc
+    except Exception:
+        db.rollback()
+        rollback_staged_retention_cleanup(prepared_files)
+        raise
+
+    try:
+        finalize_staged_retention_cleanup(prepared_files)
+    except (DataRestoreConflict, OSError):
+        file_cleanup_pending = True
+        db.add(
+            AuditLog(
+                organization_id=organization.id,
+                user_id=actor.user_id,
+                action="organization_data_retention_file_cleanup_pending",
+                entity_type="organization",
+                entity_id=organization.id,
+                metadata_json=json.dumps(
+                    {
+                        "restore_ids": (
+                            prepared_files.moved_restore_ids if prepared_files else []
+                        ),
+                        "reason": "protected_quarantine_cleanup_failed",
+                    },
+                    separators=(",", ":"),
+                ),
+                timestamp=datetime.utcnow(),
+            )
+        )
+        db.commit()
+
+    db.refresh(organization)
+    overview = _retention_overview(db, organization)
+    return OrganizationDataRetentionCleanupRead(
+        organization_id=organization.id,
+        executed_at=executed_at,
+        export_evidence_deleted=len(export_rows),
+        restore_rehearsals_deleted=len(restore_rows),
+        rollback_evidence_purged=len(rollback_rows),
+        rollback_database_bytes_purged=rollback_database_bytes,
+        rollback_file_bytes_purged=rollback_file_bytes,
+        recovered_interrupted_file_cleanups=recovered_interrupted,
+        file_cleanup_pending=file_cleanup_pending,
+        remaining_candidates=(
+            overview.export_evidence_candidates
+            + overview.restore_rehearsal_candidates
+            + overview.rollback_evidence_candidates
+        ),
+    )
 
 
 @router.get(
@@ -375,6 +805,9 @@ def apply_approved_restore(
         row.status = "applied"
         row.applied_by = actor.user_id
         row.applied_at = datetime.utcnow()
+        row.rollback_expires_at = row.applied_at + timedelta(
+            days=organization.data_restore_rollback_retention_days
+        )
         row.rollback_payload_json = rollback_json
         row.rollback_sha256 = rollback_sha256
         row.rollback_size_bytes = len(rollback_json.encode("utf-8"))
@@ -395,6 +828,7 @@ def apply_approved_restore(
                 "rollback_size_bytes": row.rollback_size_bytes,
                 "file_rollback_sha256": row.file_rollback_sha256,
                 "file_rollback_size_bytes": row.file_rollback_size_bytes,
+                "rollback_expires_at": row.rollback_expires_at.isoformat(),
             },
         )
         db.commit()
@@ -449,6 +883,11 @@ def rollback_applied_restore(
     row = _restore_for_update(db, actor, restore_id)
     if row.status != "applied" or not row.rollback_payload_json:
         raise HTTPException(status_code=409, detail="Only an applied restore can be rolled back")
+    if row.rollback_expires_at and row.rollback_expires_at <= datetime.utcnow():
+        raise HTTPException(
+            status_code=409,
+            detail="The governed rollback window has expired; run retention cleanup",
+        )
     if row.version != payload.expected_version:
         raise HTTPException(status_code=409, detail="Restore evidence changed; refresh and retry")
     rollback_bytes = row.rollback_payload_json.encode("utf-8")

@@ -808,6 +808,67 @@ class OrganizationDataRestoreRollback(BaseModel):
     account_password: str | None = Field(default=None, min_length=10, max_length=128)
 
 
+class OrganizationDataRetentionPolicyUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    data_export_evidence_retention_days: int = Field(ge=30, le=3650)
+    data_restore_rehearsal_retention_days: int = Field(ge=7, le=3650)
+    data_restore_rollback_retention_days: int = Field(ge=7, le=3650)
+    reason: str = Field(min_length=3, max_length=500)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("reason must contain at least 3 non-whitespace characters")
+        return normalized
+
+
+class OrganizationDataRetentionCleanup(BaseModel):
+    expected_version: int = Field(ge=0)
+    reason: str = Field(min_length=3, max_length=500)
+    max_items: int = Field(default=100, ge=1, le=500)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("reason must contain at least 3 non-whitespace characters")
+        return normalized
+
+
+class OrganizationDataRetentionRead(BaseModel):
+    organization_id: int
+    settings_version: int = Field(ge=0)
+    data_export_evidence_retention_days: int = Field(ge=30, le=3650)
+    data_restore_rehearsal_retention_days: int = Field(ge=7, le=3650)
+    data_restore_rollback_retention_days: int = Field(ge=7, le=3650)
+    export_cutoff: datetime
+    restore_rehearsal_cutoff: datetime
+    generated_at: datetime
+    export_evidence_candidates: int = Field(ge=0)
+    restore_rehearsal_candidates: int = Field(ge=0)
+    rollback_evidence_candidates: int = Field(ge=0)
+    rollback_database_bytes: int = Field(ge=0)
+    rollback_file_bytes: int = Field(ge=0)
+
+
+class OrganizationDataRetentionCleanupRead(BaseModel):
+    organization_id: int
+    executed_at: datetime
+    export_evidence_deleted: int = Field(ge=0)
+    restore_rehearsals_deleted: int = Field(ge=0)
+    rollback_evidence_purged: int = Field(ge=0)
+    rollback_database_bytes_purged: int = Field(ge=0)
+    rollback_file_bytes_purged: int = Field(ge=0)
+    recovered_interrupted_file_cleanups: int = Field(ge=0)
+    file_cleanup_pending: bool = False
+    remaining_candidates: int = Field(ge=0)
+
+
 class OrganizationDataRestoreRead(BaseModel):
     id: int
     organization_id: int
@@ -841,6 +902,9 @@ class OrganizationDataRestoreRead(BaseModel):
     rollback_size_bytes: int = Field(ge=0)
     file_rollback_sha256: str | None = Field(default=None, min_length=64, max_length=64)
     file_rollback_size_bytes: int = Field(ge=0)
+    rollback_expires_at: datetime | None = None
+    rollback_evidence_purged_at: datetime | None = None
+    rollback_evidence_purged_by: int | None = None
     version: int = Field(ge=0)
     approved_at: datetime | None = None
     rejected_at: datetime | None = None

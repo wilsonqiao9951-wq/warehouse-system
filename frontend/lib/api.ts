@@ -25,6 +25,8 @@ import {
   OrganizationCommercialReport,
   OrganizationDataExport,
   OrganizationDataRestore,
+  OrganizationDataRetention,
+  OrganizationDataRetentionCleanupResult,
   OrganizationBranding,
   OrganizationSettings,
   PasswordResetConfiguration,
@@ -1300,6 +1302,28 @@ export const api = {
       account_password: accountPassword
     })
   }),
+  getOrganizationDataRetention: () =>
+    request<OrganizationDataRetention>("/organization/data-retention"),
+  updateOrganizationDataRetention: (payload: {
+    expected_version: number;
+    data_export_evidence_retention_days: number;
+    data_restore_rehearsal_retention_days: number;
+    data_restore_rollback_retention_days: number;
+    reason: string;
+    account_password: string;
+  }) => request<OrganizationDataRetention>("/organization/data-retention", {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  }),
+  cleanupOrganizationDataRetention: (payload: {
+    expected_version: number;
+    reason: string;
+    max_items?: number;
+    account_password: string;
+  }) => request<OrganizationDataRetentionCleanupResult>(
+    "/organization/data-retention/cleanup",
+    { method: "POST", body: JSON.stringify(payload) }
+  ),
   acknowledgeSubscriptionNotice: (noticeId: number, expectedVersion: number) =>
     request<SubscriptionNotice>(`/organization/billing/notices/${noticeId}/acknowledge`, {
       method: "POST",

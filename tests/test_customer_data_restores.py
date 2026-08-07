@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from io import BytesIO
 import json
 import zipfile
@@ -99,10 +100,25 @@ def test_controlled_restore_rehearsal_apply_and_rollback(client):
     applied_result = applied.json()
     assert applied_result["status"] == "applied"
     assert applied_result["rollback_size_bytes"] > 0
+    assert applied_result["rollback_expires_at"] is not None
     with client.app.state.testing_session_local() as db:
         restored = db.get(Part, part_id)
         assert restored.name == "Known good filter"
         assert restored.default_cost == 12.5
+        restore_row = db.get(OrganizationDataRestore, result["id"])
+        original_expiry = restore_row.rollback_expires_at
+        restore_row.rollback_expires_at = datetime.utcnow() - timedelta(seconds=1)
+        db.commit()
+
+    expired_window = client.post(
+        f"/api/organization/data-restores/{result['id']}/rollback",
+        json={"expected_version": applied_result["version"]},
+    )
+    assert expired_window.status_code == 409
+    assert "rollback window has expired" in expired_window.json()["detail"]
+    with client.app.state.testing_session_local() as db:
+        db.get(OrganizationDataRestore, result["id"]).rollback_expires_at = original_expiry
+        db.commit()
 
     with client.app.state.testing_session_local() as db:
         db.get(Part, part_id).name = "Edited after restore"

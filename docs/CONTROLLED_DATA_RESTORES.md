@@ -114,6 +114,12 @@ served media roots. Rollback first confirms that every affected row and live
 file still equals the applied value and that every evidence file still matches
 its recorded hash. Later edits or evidence corruption stop rollback.
 
+Application also fixes a governed rollback expiry using the organization's
+retention policy. Rollback is refused after that timestamp. Expired rollback
+packages can be removed only through the password-confirmed, version-checked,
+bounded retention workflow; the restore row keeps its application and purge
+attribution after the sensitive database/file package is gone.
+
 Updated fields are restored, rehydrated rows are removed in child-to-parent
 order, overwritten files are restored, and files created by the restore are
 removed. A failed rollback database commit reapplies the restored archive
@@ -130,6 +136,13 @@ files. Successful rollback removes the protected file evidence directory.
   password, and `expected_version`
 - `POST /api/organization/data-restores/{id}/rollback` — password and
   `expected_version`
+
+- `GET /api/organization/data-retention` - fixed-cutoff policy and cleanup
+  preview
+- `PUT /api/organization/data-retention` - password-confirmed, versioned policy
+  update
+- `POST /api/organization/data-retention/cleanup` - password-confirmed,
+  reasoned, bounded evidence cleanup
 
 All endpoints are administrator-only, tenant-filtered, and online-only.
 
@@ -151,3 +164,8 @@ must be included in encrypted server backup, excluded from direct web serving,
 and monitored for sufficient free space. Database and filesystem operations are
 coordinated with compensation; operators should preserve the evidence directory
 for every restore that remains in `applied` state.
+
+The retention cleanup adds a protected quarantine/repair boundary around file
+evidence deletion so an interruption before commit restores active evidence and
+an interruption after commit can finish deletion on the next run. See
+[`DATA_RETENTION.md`](DATA_RETENTION.md).

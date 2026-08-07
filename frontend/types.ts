@@ -492,6 +492,9 @@ export interface OrganizationDataRestore {
   rollback_size_bytes: number;
   file_rollback_sha256?: string | null;
   file_rollback_size_bytes: number;
+  rollback_expires_at?: string | null;
+  rollback_evidence_purged_at?: string | null;
+  rollback_evidence_purged_by?: number | null;
   version: number;
   approved_at?: string | null;
   rejected_at?: string | null;
@@ -499,6 +502,35 @@ export interface OrganizationDataRestore {
   rolled_back_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface OrganizationDataRetention {
+  organization_id: number;
+  settings_version: number;
+  data_export_evidence_retention_days: number;
+  data_restore_rehearsal_retention_days: number;
+  data_restore_rollback_retention_days: number;
+  export_cutoff: string;
+  restore_rehearsal_cutoff: string;
+  generated_at: string;
+  export_evidence_candidates: number;
+  restore_rehearsal_candidates: number;
+  rollback_evidence_candidates: number;
+  rollback_database_bytes: number;
+  rollback_file_bytes: number;
+}
+
+export interface OrganizationDataRetentionCleanupResult {
+  organization_id: number;
+  executed_at: string;
+  export_evidence_deleted: number;
+  restore_rehearsals_deleted: number;
+  rollback_evidence_purged: number;
+  rollback_database_bytes_purged: number;
+  rollback_file_bytes_purged: number;
+  recovered_interrupted_file_cleanups: number;
+  file_cleanup_pending: boolean;
+  remaining_candidates: number;
 }
 
 export interface PlatformCommercialReportRow {

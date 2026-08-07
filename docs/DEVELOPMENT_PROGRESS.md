@@ -1488,3 +1488,27 @@ Verification:
 - Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes.
 - Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.
 - No schema change is required; Alembic head remains `20260807_0051`.
+
+## 2026-08-07 - Phase 9 governed disaster-recovery evidence retention
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added per-organization retention periods for portable-export integrity metadata, terminal/abandoned restore rehearsals, and applied restore rollback packages.
+- Required administrator role, current-password confirmation, normalized operational reason, and optimistic organization settings version for policy changes and cleanup.
+- Added fixed UTC previews with candidate counts and database/file byte totals; cleanup is bounded to 500 records and prioritizes sensitive expired rollback packages.
+- Preserved approved restores, unexpired rollback windows, referenced exports, all customer business records, and immutable audit history.
+- Added fixed rollback expiry on new restore applications and explicit refusal after the governed window.
+- Added atomic protected file-evidence quarantine with compensation before commit and automatic recovery/completion after interrupted cleanup.
+- Cleared expired database rollback content while retaining application hashes, purge time/operator attribution, safe per-run audit evidence, and idempotent no-op behavior.
+- Added the Backups management controls, cross-tenant/role/password/version tests, old-archive compatibility, migration `0052`, and an operator runbook.
+
+Verification:
+
+- Retention, customer export, and controlled restore target suite passed (13 tests).
+- Fresh base-to-`0052` and empty `0052 -> 0051 -> 0052` migration rehearsals passed on SQLite.
+- Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes.
+- All 230 backend tests passed across authentication, tenant isolation, engineer ownership, inventory custody, billing, integrations, backups/restores, AI, and offline workflows.
+- Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.
+- Backed up the local `0051` database as `openpartsflow.pre-0052-20260807-153430.db` (SHA-256 `484140685A362D342A7B6942E2A587697A11EEB5423D096F78890D868B33B87F`) before upgrading the configured database to `0052` head.
