@@ -44,6 +44,8 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
   accountable-user, work-order, and date filters plus workflow evidence links
 - Read-only inventory reconciliation queue for pending count variances, legacy
   custody records, and broken replenishment/vehicle-return ledger evidence
+- Explainable vehicle inventory planning with engineer consumption trends,
+  pending-custody projection, and authenticated replenish/return handoff
 - Validated warehouse → shelf/bin → part scanning with stale-label and cross-warehouse protection
 - Real-time inventory balance
 - Excel export
@@ -74,6 +76,7 @@ The project now includes a Next.js admin dashboard at `frontend/` with:
 - Inventory views (warehouse stock and van inventory)
 - Inventory ledger workbench with traceable source/destination and reconciliation references
 - Inventory reconciliation workbench with severity/source filters and direct workflow drill-down
+- Van inventory planning with engineer trends and explainable replenish/return quantities
 - Warehouse replenishment queue with server-authorized picking, shipping, and completion actions
 - Engineer My Van deliveries with registered-phone and password-verified receipt
 - Employee page (roles and performance overview)
@@ -164,6 +167,7 @@ are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 - `POST /api/inventory/transactions` is limited to non-vehicle `INBOUND`, `OUTBOUND`, `TRANSFER`, and `DAMAGE`; vehicle, `RETURN`, and `WORK_ORDER_USED` changes require their authenticated business workflows.
 - `GET /api/inventory/ledger` provides a tenant-scoped, cursor-paginated business ledger for warehouse users, managers, and administrators; `GET /api/inventory/ledger/options` supplies only options referenced by that tenant's ledger. See [`docs/INVENTORY_LEDGER.md`](docs/INVENTORY_LEDGER.md).
 - `GET /api/inventory/reconciliation-exceptions` performs a bounded, read-only integrity review across counts, replenishments, returns, and their linked movements. See [`docs/INVENTORY_RECONCILIATION.md`](docs/INVENTORY_RECONCILIATION.md).
+- `GET /api/inventory/van-planning` returns tenant- and role-scoped engineer consumption trends plus forecast/threshold-based replenishment and return guidance without mutating stock. See [`docs/VAN_INVENTORY_PLANNING.md`](docs/VAN_INVENTORY_PLANNING.md).
 - Full custody contract: [`docs/REPLENISHMENT_CUSTODY_API.md`](docs/REPLENISHMENT_CUSTODY_API.md).
 - Work-order profit response now uses:
   - `revenue`

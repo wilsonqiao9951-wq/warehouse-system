@@ -6,9 +6,55 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-07 - Van inventory planning and consumption trends
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added tenant- and role-scoped vehicle planning for warehouse personnel,
+  managers, and administrators while denying engineers and assistants the
+  company-wide view.
+- Calculates on-hand, pending inbound/outbound custody, threshold, historical
+  work-order consumption, forward forecast, target, projected balance, and an
+  explainable replenish/return quantity for each assigned vehicle and part.
+- Added engineer consumption totals, distinct work-order counts, daily
+  averages, and daily trend evidence from canonical `WORK_ORDER_USED` ledger
+  movements.
+- Selects a preferred same-region/main-warehouse source, subtracts picking
+  reservations, and discloses whether the complete refill can be fulfilled.
+- Added a dedicated management workbench and safe prefill into the existing
+  authenticated replenishment workflow; vehicle returns remain initiated by
+  the assigned engineer from **My Van**.
+- Added revision `0060` with three tenant-leading planning indexes and extended
+  controlled restore compatibility.
+
+Verification so far:
+
+- Calculation, pending-custody projection, forecast, source availability,
+  filters, response bounds, tenant isolation, role enforcement, and second-
+  tenant scoping passed (3 tests).
+- Frontend ESLint, TypeScript, and Next.js production build passed for all 43
+  static routes.
+- All 261 backend tests passed.
+- Fresh SQLite base-to-`0060`, zero-drift, three-index presence, and
+  `0060 -> 0059 -> 0060` migration cycle passed.
+- PostgreSQL 16 fresh base-to-`0060`, zero-drift, migration cycle, planning-
+  index presence, and tenant RLS read/write/platform verification passed.
+- Python dependency consistency and vulnerability audit plus full/production
+  npm audits passed with no known vulnerabilities; Compose topology and API/web
+  production images built successfully.
+- Backed up the local `0059` database as
+  `openpartsflow.pre-0060-20260807-180706.db` (1,527,808 bytes; SHA-256
+  `8CD7CB8B43A343205CCF066DC5AB988FDC012F452B785A264BC01BF604BDA75D`)
+  before upgrading the configured database to `0060` and confirming zero model
+  drift.
+
 ## 2026-08-07 - Inventory reconciliation exception workbench
 
-Status: implemented and locally verified; GitHub CI pending.
+Status: implemented, locally verified, and published as draft PR #32. GitHub
+CI run 67 passed all backend, frontend, PostgreSQL/RLS, dependency-audit, and
+production-image jobs.
 
 Delivered:
 

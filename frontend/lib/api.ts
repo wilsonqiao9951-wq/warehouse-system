@@ -71,6 +71,8 @@ import {
   InventoryReconciliationPage,
   InventoryReconciliationSeverity,
   InventoryReconciliationSource,
+  VanPlanning,
+  VanPlanningAction,
   User,
   Warehouse,
   WorkOrder,
@@ -2050,6 +2052,22 @@ export const api = {
     if (filters.severity) query.set("severity", filters.severity);
     query.set("limit", String(filters.limit || 100));
     return request<InventoryReconciliationPage>(`/inventory/reconciliation-exceptions?${query.toString()}`);
+  },
+  getVanInventoryPlanning: (filters: {
+    lookback_days?: number;
+    coverage_days?: number;
+    engineer_id?: number;
+    part_id?: number;
+    action?: VanPlanningAction;
+    include_balanced?: boolean;
+    limit?: number;
+  } = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) query.set(key, String(value));
+    });
+    if (!query.has("limit")) query.set("limit", "200");
+    return request<VanPlanning>(`/inventory/van-planning?${query.toString()}`);
   },
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
