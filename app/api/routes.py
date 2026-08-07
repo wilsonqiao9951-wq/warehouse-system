@@ -51,6 +51,7 @@ from app.models import (
     OrganizationDomain,
     Part,
     PartMachineAssociation,
+    PartRecognitionAnalysis,
     PartRecognitionCandidate,
     PartRecognitionObservation,
     QCPicture,
@@ -116,8 +117,11 @@ from app.schemas import (
     PartCreate,
     PartRead,
     PartMachineAssociationRead,
+    PartRecognitionAnalysisRead,
+    PartRecognitionAnalyzeRequest,
     PartRecognitionCandidateAction,
     PartRecognitionCandidateRead,
+    PartRecognitionConfigurationRead,
     PartRecognitionObservationRead,
     WorkOrderPartRecommendation,
     InventoryNotificationRead,
@@ -186,7 +190,17 @@ from app.services.commercial import (
 )
 from app.services.recommendations import build_part_recommendations
 from app.services.service_intelligence import build_service_intelligence
-from app.services.visual_recognition import generate_visual_part_candidates
+from app.services.visual_recognition import (
+    VISION_PROMPT_VERSION,
+    VisionConfigurationError,
+    VisionRequestError,
+    active_part_catalog,
+    generate_visual_part_candidates,
+    request_visual_analysis,
+    require_vision_configuration,
+    vision_configuration_available,
+    visual_request_sha256,
+)
 from app.services.domains import lookup_txt_records, normalize_custom_domain
 from app.services.work_order_forms import (
     snapshot_template,
@@ -2520,6 +2534,73 @@ _PART_RECOGNITION_STATUSES = {
 }
 
 
+def _can_manage_recognition_observation(
+    actor: Actor,
+    observation: PartRecognitionObservation,
+    work_order: WorkOrder | None,
+) -> bool:
+    if actor.role == UserRole.ADMIN:
+        return True
+    if observation.work_order_id is not None:
+        return bool(
+            actor.role == UserRole.ENGINEER
+            and actor.user_id is not None
+            and actor.auth_method == "bearer"
+            and actor.device_verified
+            and actor.device_record_id is not None
+            and work_order is not None
+            and work_order.claimed_by_id == actor.user_id
+            and work_order.claimed_device_id == actor.device_record_id
+            and actor.claim_version == work_order.claim_version
+        )
+    return bool(actor.user_id is not None and observation.created_by == actor.user_id)
+
+
+def _require_manage_recognition_observation(
+    db: Session,
+    actor: Actor,
+    observation: PartRecognitionObservation,
+) -> WorkOrder | None:
+    if actor.role == UserRole.ADMIN:
+        return db.get(WorkOrder, observation.work_order_id) if observation.work_order_id else None
+    if observation.work_order_id is not None:
+        return require_work_order_execution_scope(db, actor, observation.work_order_id)
+    if actor.user_id is None or observation.created_by != actor.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the observation owner or an administrator can run analysis",
+        )
+    return None
+
+
+def _recognition_image_file(observation: PartRecognitionObservation) -> tuple[Path, str]:
+    if observation.image_url.startswith("private:"):
+        root = Path(settings.data_export_private_files_root).resolve()
+        relative = observation.image_url.removeprefix("private:")
+    elif observation.image_url.startswith("/uploads/"):
+        root = Path(settings.data_export_public_files_root).resolve()
+        relative = observation.image_url.removeprefix("/uploads/")
+    else:
+        raise HTTPException(status_code=409, detail="Recognition image reference is invalid")
+    target = (root / relative).resolve()
+    if (target == root or root not in target.parents) or not target.is_file():
+        raise HTTPException(status_code=409, detail="Recognition image is unavailable")
+    media_types = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }
+    media_type = media_types.get(target.suffix.lower())
+    if not media_type:
+        raise HTTPException(
+            status_code=422,
+            detail="AI analysis supports JPEG, PNG, WEBP, or non-animated GIF images",
+        )
+    return target, media_type
+
+
 def _part_recognition_observation_read(
     db: Session,
     actor: Actor,
@@ -2540,6 +2621,12 @@ def _part_recognition_observation_read(
         .where(PartRecognitionCandidate.observation_id == observation.id)
         .order_by(PartRecognitionCandidate.rank, PartRecognitionCandidate.id)
     ).all()
+    latest_analysis = db.scalar(
+        select(PartRecognitionAnalysis)
+        .where(PartRecognitionAnalysis.observation_id == observation.id)
+        .order_by(PartRecognitionAnalysis.attempt_number.desc())
+        .limit(1)
+    )
     selected_candidate_id = next(
         (
             row.id
@@ -2615,8 +2702,21 @@ def _part_recognition_observation_read(
         work_order_id=observation.work_order_id,
         machine_model=observation.machine_model,
         label_text=observation.label_text,
-        image_url=observation.image_url,
+        image_url=f"/api/parts/recognition/observations/{observation.id}/image",
         notes=observation.notes,
+        analysis_status=observation.analysis_status,
+        analysis_version=observation.analysis_version,
+        latest_analysis=(
+            PartRecognitionAnalysisRead.model_validate(latest_analysis)
+            if latest_analysis
+            else None
+        ),
+        can_analyze=bool(
+            vision_configuration_available()
+            and observation.analysis_status != "pending"
+            and _can_manage_recognition_observation(actor, observation, work_order)
+            and all(row.status in {"ai_candidate", "rejected"} for row in rows)
+        ),
         created_by=observation.created_by,
         created_at=observation.created_at,
         updated_at=observation.updated_at,
@@ -2659,24 +2759,17 @@ async def create_part_recognition_candidates(
     machine_value = (machine_model or (work_order.machine_type if work_order else None) or "").strip() or None
     label_value = (label_text or "").strip() or None
     notes_value = (notes or "").strip() or None
-    if not machine_value and not label_value and work_order is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Provide a machine model, visible label text, or work-order context",
-        )
-
     data = await file.read(settings.max_image_upload_bytes + 1)
     if len(data) > settings.max_image_upload_bytes:
         raise HTTPException(status_code=413, detail="Image exceeds the configured upload limit")
     extension = _image_extension(data)
     if not extension:
         raise HTTPException(status_code=400, detail="Unsupported or invalid image file")
-    consume_monthly_usage(db, actor.organization_id, ai_requests=1)
-    target_dir = Path(settings.data_export_public_files_root) / "part-recognition"
+    target_dir = Path(settings.data_export_private_files_root) / "part-recognition"
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4().hex}{extension}"
     (target_dir / filename).write_bytes(data)
-    image_url = f"/uploads/part-recognition/{filename}"
+    image_url = f"private:part-recognition/{filename}"
 
     observation = PartRecognitionObservation(
         work_order_id=work_order_id,
@@ -2714,6 +2807,351 @@ async def create_part_recognition_candidates(
             "work_order_id": work_order_id,
             "machine_model": machine_value,
             "candidate_count": len(suggestions),
+        },
+    )
+    db.commit()
+    db.refresh(observation)
+    return _part_recognition_observation_read(db, actor, observation)
+
+
+@router.get("/parts/recognition/observations/{observation_id}/image")
+def get_part_recognition_observation_image(
+    observation_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    observation = db.get(PartRecognitionObservation, observation_id)
+    if not observation:
+        raise HTTPException(status_code=404, detail="Recognition observation not found")
+    image_path, media_type = _recognition_image_file(observation)
+    return FileResponse(
+        image_path,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Content-Security-Policy": "sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get(
+    "/parts/recognition/config",
+    response_model=PartRecognitionConfigurationRead,
+)
+def part_recognition_configuration(
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    detail = settings.vision_recognition_image_detail
+    if detail not in {"low", "high", "original", "auto"}:
+        detail = "original"
+    return PartRecognitionConfigurationRead(
+        available=vision_configuration_available(),
+        model=settings.vision_recognition_model,
+        image_detail=detail,
+    )
+
+
+@router.post(
+    "/parts/recognition/observations/{observation_id}/analyze",
+    response_model=PartRecognitionObservationRead,
+)
+def analyze_part_recognition_observation(
+    observation_id: int,
+    payload: PartRecognitionAnalyzeRequest,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    observation = db.scalar(
+        select(PartRecognitionObservation)
+        .where(PartRecognitionObservation.id == observation_id)
+        .with_for_update()
+    )
+    if not observation:
+        raise HTTPException(status_code=404, detail="Recognition observation not found")
+    work_order = _require_manage_recognition_observation(db, actor, observation)
+
+    existing_request = db.scalar(
+        select(PartRecognitionAnalysis).where(
+            PartRecognitionAnalysis.client_request_id == payload.client_request_id
+        )
+    )
+    if existing_request:
+        if existing_request.observation_id != observation.id:
+            raise HTTPException(
+                status_code=409,
+                detail="Recognition request ID is already bound to another observation",
+            )
+        if existing_request.status == "pending":
+            raise HTTPException(status_code=409, detail="AI visual analysis is still running")
+        return _part_recognition_observation_read(db, actor, observation)
+
+    if observation.analysis_version != payload.expected_analysis_version:
+        raise HTTPException(
+            status_code=409,
+            detail="Recognition analysis changed; refresh before retrying",
+        )
+    candidates = db.scalars(
+        select(PartRecognitionCandidate).where(
+            PartRecognitionCandidate.observation_id == observation.id
+        )
+    ).all()
+    if any(row.status not in {"ai_candidate", "rejected"} for row in candidates):
+        raise HTTPException(
+            status_code=409,
+            detail="AI analysis cannot replace candidates after human confirmation",
+        )
+
+    now = datetime.utcnow()
+    latest_analysis = db.scalar(
+        select(PartRecognitionAnalysis)
+        .where(PartRecognitionAnalysis.observation_id == observation.id)
+        .order_by(PartRecognitionAnalysis.attempt_number.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    stale_analysis: PartRecognitionAnalysis | None = None
+    if observation.analysis_status == "pending":
+        stale_before = now - timedelta(
+            minutes=max(1, settings.vision_recognition_stale_minutes)
+        )
+        if latest_analysis and latest_analysis.created_at > stale_before:
+            raise HTTPException(status_code=409, detail="AI visual analysis is still running")
+        if latest_analysis and latest_analysis.status == "pending":
+            stale_analysis = latest_analysis
+
+    try:
+        require_vision_configuration()
+    except VisionConfigurationError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="AI visual recognition is not configured",
+        ) from exc
+    image_path, media_type = _recognition_image_file(observation)
+    if image_path.stat().st_size > settings.max_image_upload_bytes:
+        raise HTTPException(status_code=413, detail="Stored recognition image exceeds the upload limit")
+    image_data = image_path.read_bytes()
+    catalog = active_part_catalog(db)
+    request_sha256 = visual_request_sha256(
+        image_data=image_data,
+        media_type=media_type,
+        machine_model=observation.machine_model,
+        label_text=observation.label_text,
+        notes=observation.notes,
+        catalog=catalog,
+    )
+    attempt_number = observation.analysis_version + 1
+    analysis = PartRecognitionAnalysis(
+        organization_id=actor.organization_id,
+        observation_id=observation.id,
+        requested_by=actor.user_id,
+        client_request_id=payload.client_request_id,
+        attempt_number=attempt_number,
+        provider="openai",
+        model=settings.vision_recognition_model,
+        prompt_version=VISION_PROMPT_VERSION,
+        status="pending",
+        image_sha256=sha256(image_data).hexdigest(),
+        request_sha256=request_sha256,
+    )
+    consume_monthly_usage(db, actor.organization_id, ai_requests=1)
+    if stale_analysis is not None:
+        stale_analysis.status = "failed"
+        stale_analysis.failure_code = "analysis_interrupted"
+        stale_analysis.completed_at = now
+    observation.analysis_status = "pending"
+    observation.analysis_version = attempt_number
+    db.add(analysis)
+    db.flush()
+    analysis_id = analysis.id
+    _audit(
+        db,
+        actor,
+        "part_recognition_analysis_started",
+        "part_recognition_analysis",
+        analysis.id,
+        {
+            "observation_id": observation.id,
+            "attempt_number": attempt_number,
+            "provider": "openai",
+            "model": analysis.model,
+            "prompt_version": analysis.prompt_version,
+            "image_sha256": analysis.image_sha256,
+            "request_sha256": analysis.request_sha256,
+        },
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        duplicate = db.scalar(
+            select(PartRecognitionAnalysis).where(
+                PartRecognitionAnalysis.client_request_id == payload.client_request_id
+            )
+        )
+        if duplicate and duplicate.observation_id == observation_id and duplicate.status != "pending":
+            current = db.get(PartRecognitionObservation, observation_id)
+            return _part_recognition_observation_read(db, actor, current)
+        raise HTTPException(
+            status_code=409,
+            detail="AI visual analysis request is already being processed",
+        ) from exc
+
+    try:
+        provider_result = request_visual_analysis(
+            image_data=image_data,
+            media_type=media_type,
+            machine_model=observation.machine_model,
+            label_text=observation.label_text,
+            notes=observation.notes,
+            catalog=catalog,
+            client_request_id=payload.client_request_id,
+        )
+    except VisionRequestError as exc:
+        failed_analysis = db.get(PartRecognitionAnalysis, analysis_id)
+        failed_observation = db.get(PartRecognitionObservation, observation_id)
+        if failed_analysis and failed_analysis.status == "pending":
+            failed_analysis.status = "failed"
+            failed_analysis.failure_code = exc.code
+            failed_analysis.external_request_id = exc.request_id
+            failed_analysis.completed_at = datetime.utcnow()
+            if (
+                failed_observation
+                and failed_observation.analysis_version == attempt_number
+            ):
+                failed_observation.analysis_status = "failed"
+            _audit(
+                db,
+                actor,
+                "part_recognition_analysis_failed",
+                "part_recognition_analysis",
+                failed_analysis.id,
+                {
+                    "observation_id": observation_id,
+                    "attempt_number": attempt_number,
+                    "failure_code": exc.code,
+                    "external_request_id": exc.request_id,
+                },
+            )
+            db.commit()
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=f"AI visual analysis failed ({exc.code})",
+        ) from exc
+
+    analysis = db.get(PartRecognitionAnalysis, analysis_id)
+    observation = db.scalar(
+        select(PartRecognitionObservation)
+        .where(PartRecognitionObservation.id == observation_id)
+        .with_for_update()
+    )
+    if (
+        not analysis
+        or not observation
+        or analysis.status != "pending"
+        or observation.analysis_version != attempt_number
+    ):
+        if analysis and analysis.status == "pending":
+            analysis.status = "failed"
+            analysis.failure_code = "analysis_superseded"
+            analysis.completed_at = datetime.utcnow()
+            db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail="AI visual analysis was superseded by a newer attempt",
+        )
+
+    rejected_part_ids = {
+        row.part_id
+        for row in db.scalars(
+            select(PartRecognitionCandidate).where(
+                PartRecognitionCandidate.observation_id == observation.id,
+                PartRecognitionCandidate.status == "rejected",
+            )
+        ).all()
+    }
+    for row in db.scalars(
+        select(PartRecognitionCandidate).where(
+            PartRecognitionCandidate.observation_id == observation.id,
+            PartRecognitionCandidate.status == "ai_candidate",
+        )
+    ).all():
+        db.delete(row)
+    db.flush()
+
+    work_order = db.get(WorkOrder, observation.work_order_id) if observation.work_order_id else None
+    suggestions = generate_visual_part_candidates(
+        db,
+        machine_model=(
+            observation.machine_model
+            or provider_result.analysis.machine_model.strip()
+            or None
+        ),
+        label_text=observation.label_text,
+        work_order=work_order,
+        vision_analysis=provider_result.analysis,
+    )
+    accepted_suggestions = [
+        suggestion
+        for suggestion in suggestions
+        if suggestion.part.id not in rejected_part_ids
+    ]
+    for rank, suggestion in enumerate(accepted_suggestions, start=1):
+        db.add(
+            PartRecognitionCandidate(
+                observation_id=observation.id,
+                part_id=suggestion.part.id,
+                rank=rank,
+                confidence=suggestion.confidence,
+                reason=suggestion.reason,
+            )
+        )
+
+    completed_at = datetime.utcnow()
+    analysis.status = "succeeded"
+    analysis.request_sha256 = provider_result.request_sha256
+    analysis.output_sha256 = provider_result.output_sha256
+    analysis.external_request_id = provider_result.request_id
+    analysis.result_json = provider_result.analysis.model_dump(mode="json")
+    analysis.candidate_count = len(accepted_suggestions)
+    analysis.completed_at = completed_at
+    observation.analysis_status = "succeeded"
+    _audit(
+        db,
+        actor,
+        "part_recognition_analysis_succeeded",
+        "part_recognition_analysis",
+        analysis.id,
+        {
+            "observation_id": observation.id,
+            "attempt_number": attempt_number,
+            "provider": analysis.provider,
+            "model": analysis.model,
+            "prompt_version": analysis.prompt_version,
+            "candidate_count": analysis.candidate_count,
+            "output_sha256": analysis.output_sha256,
+            "external_request_id": analysis.external_request_id,
         },
     )
     db.commit()
@@ -2896,7 +3334,9 @@ def act_on_part_recognition_candidate(
         if association:
             association.confirmed_count += 1
             association.last_confirmed_at = now
-            association.photo_url = observation.image_url
+            association.photo_url = (
+                f"/api/parts/recognition/observations/{observation.id}/image"
+            )
             association.recognition_source = "verified_visual"
             association.confidence = max(association.confidence, 0.99)
         else:
@@ -2904,7 +3344,9 @@ def act_on_part_recognition_candidate(
                 PartMachineAssociation(
                     machine_model=observation.machine_model,
                     part_id=candidate.part_id,
-                    photo_url=observation.image_url,
+                    photo_url=(
+                        f"/api/parts/recognition/observations/{observation.id}/image"
+                    ),
                     recognition_source="verified_visual",
                     confidence=0.99,
                     confirmed_count=1,

@@ -742,3 +742,29 @@ passed after dependency security upgrades; fresh base-to-`0046` and
 `0046 -> 0045 -> 0046` migration rehearsals passed on SQLite; ESLint,
 TypeScript, and the Next.js production build passed for all 38 static routes;
 Python and both npm dependency audits reported 0 known vulnerabilities.
+
+## 20260807_0047 - Auditable AI visual recognition
+
+- Adds versioned recognition status to photographed observations and immutable,
+  tenant-scoped provider attempts with idempotency, actor, provider/model/prompt,
+  request hashes, safe failure codes, structured result, and completion evidence.
+- Adds real server-side OpenAI Responses image analysis with base64 image input,
+  original-detail OCR, strict JSON Schema output, `store: false`, official-host
+  enforcement, bounded catalog context, timeouts, and no redirect following.
+- Restricts model output to advisory matching against existing tenant parts;
+  hallucinated catalog references are discarded and all human/usage verification
+  stages remain mandatory before trusted knowledge changes.
+- Adds automatic mobile analysis, visible attempt state, safe retry, photo-only
+  upload, and configuration-aware fallback to deterministic context ranking.
+- Moves new recognition photos to private random storage and serves them only
+  through a tenant-authenticated, sandboxed, MIME-protected media endpoint.
+- Extends portable export and controlled-restore schema compatibility through
+  `0047`; downgrade is refused while provider-attempt evidence exists.
+
+Verification: nine recognition/provider contract, success,
+failure, retry, idempotency, quota, audit, inventory-isolation, and human-lock
+tests passed; fresh base-to-`0047` and `0047 -> 0046 -> 0047` migration rehearsal
+passed on SQLite; frontend ESLint, TypeScript, and the production build passed
+for all 38 static routes; all 186 backend tests, Python dependency consistency,
+Python vulnerability audit, and both npm audits passed with 0 known
+vulnerabilities.

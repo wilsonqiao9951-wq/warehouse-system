@@ -1323,3 +1323,44 @@ Verification completed so far:
 - Upgraded FastAPI, Starlette, python-multipart, and pytest to remove all known
   dependency advisories; 181 backend tests, the reversible migration rehearsal,
   frontend lint/build, and Python/npm security scans passed.
+
+## 2026-08-07 - Phase 4 real AI visual recognition
+
+Status: implemented, locally migrated, and verified.
+
+Delivered:
+
+- Replaced the photo-byte placeholder with an opt-in OpenAI Responses vision
+  adapter using original-detail image input and strict structured output.
+- Kept configuration fail-closed, keys server-only, the external host fixed to
+  official HTTPS, redirects disabled, payload/output/catalog bounds enforced,
+  and every response request set to `store: false`.
+- Added tenant-scoped, versioned recognition attempts with client idempotency,
+  provider/model/prompt evidence, image/request/output hashes, safe failure
+  codes, validated normalized results, candidate count, and timestamps.
+- Matched only existing tenant catalog rows, rejected mismatched model IDs/part
+  numbers, preserved the complete human and work-order usage confirmation chain,
+  and kept all recognition operations outside inventory mutation services.
+- Enforced creator ownership for standalone analysis and the claiming engineer's
+  registered phone plus current claim version for work-order-linked analysis.
+- Added automatic mobile photo analysis, visible provider/attempt/status/output,
+  safe error display, explicit retry, and graceful context-ranking fallback when
+  AI is disabled.
+- Moved new recognition photos out of public static storage and added
+  authenticated tenant-wide photo delivery with private caching, sandboxing,
+  and MIME-sniffing protection.
+- Added Alembic revision `20260807_0047`, portable export participation,
+  controlled-restore compatibility, configuration, API/RBAC, and operator docs.
+
+Verification:
+
+- Nine recognition/provider contract, success, failure, retry, idempotency,
+  quota, audit, inventory-isolation, and human-lock tests passed.
+- Fresh base-to-`0047` plus `0047 -> 0046 -> 0047` passed on SQLite.
+- Frontend ESLint and TypeScript passed; the Next.js 16.2.12 production build
+  generated all 38 static routes.
+- All 186 backend tests passed after the private-media hardening; Python
+  compilation and dependency consistency passed, and Python plus both npm
+  audits reported 0 known vulnerabilities.
+- Alembic model comparison reported only the documented pre-existing drift and
+  no missing `0047` table, column, constraint, or index operation.

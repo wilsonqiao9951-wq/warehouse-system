@@ -16,6 +16,14 @@ from app.models import (
 PNG = b"\x89PNG\r\n\x1a\n" + b"controlled-visual-candidate"
 
 
+def _stored_image_path(client, observation_id: int) -> Path:
+    with client.app.state.testing_session_local() as db:
+        reference = db.get(PartRecognitionObservation, observation_id).image_url
+    if reference.startswith("private:"):
+        return Path(settings.data_export_private_files_root) / reference.removeprefix("private:")
+    return Path(settings.data_export_public_files_root) / reference.removeprefix("/uploads/")
+
+
 def _candidate_action(client, candidate: dict, action: str, **extra):
     return client.post(
         f"/api/parts/recognition/candidates/{candidate['id']}/actions",
@@ -87,7 +95,12 @@ def test_visual_candidate_requires_full_human_and_usage_verification(client):
     assert observation["candidates"][0]["status"] == "ai_candidate"
     assert observation["candidates"][0]["confidence"] >= 0.92
     candidate = observation["candidates"][0]
-    stored_image = Path(observation["image_url"].lstrip("/"))
+    assert observation["image_url"].endswith(f"/{observation['id']}/image")
+    protected_image = client.get(observation["image_url"])
+    assert protected_image.status_code == 200
+    assert protected_image.content == PNG
+    assert protected_image.headers["cache-control"].startswith("private")
+    stored_image = _stored_image_path(client, observation["id"])
     assert stored_image.read_bytes() == PNG
 
     with client.app.state.testing_session_local() as db:
@@ -198,7 +211,7 @@ def test_candidate_actions_require_current_version_and_rejection_reason(client):
 
     cannot_promote = _candidate_action(client, rejected_candidate, "promote_trusted")
     assert cannot_promote.status_code == 409
-    Path(created.json()["image_url"].lstrip("/")).unlink()
+    _stored_image_path(client, created.json()["id"]).unlink()
 
 
 def test_visual_candidates_are_tenant_scoped(client):
@@ -359,6 +372,14 @@ def test_only_claim_owner_or_admin_can_attach_visual_evidence_to_work_order(clie
         )
         assert owner_created.status_code == 200, owner_created.text
         assert owner_created.json()["created_by"] == owner["id"]
+        other_can_view = client.get(
+            owner_created.json()["image_url"],
+            headers=other_headers,
+        )
+        assert other_can_view.status_code == 200
+        assert other_can_view.content == PNG
+        unauthenticated = client.get(owner_created.json()["image_url"])
+        assert unauthenticated.status_code == 401
         owner_candidate = owner_created.json()["candidates"][0]
         owner_confirmed = client.post(
             f"/api/parts/recognition/candidates/{owner_candidate['id']}/actions",
@@ -381,7 +402,7 @@ def test_only_claim_owner_or_admin_can_attach_visual_evidence_to_work_order(clie
             },
         )
         assert independently_confirmed.status_code == 200, independently_confirmed.text
-        Path(owner_created.json()["image_url"].lstrip("/")).unlink()
+        _stored_image_path(client, owner_created.json()["id"]).unlink()
 
         admin_created = client.post(
             "/api/parts/recognition/candidates",
@@ -412,7 +433,7 @@ def test_only_claim_owner_or_admin_can_attach_visual_evidence_to_work_order(clie
         )
         assert same_admin.status_code == 409
         assert "different account" in same_admin.text
-        Path(admin_created.json()["image_url"].lstrip("/")).unlink()
+        _stored_image_path(client, admin_created.json()["id"]).unlink()
     finally:
         settings.rbac_enforce = original_rbac
         settings.legacy_header_auth = original_legacy

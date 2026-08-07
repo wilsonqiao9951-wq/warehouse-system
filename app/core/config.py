@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     invitation_expire_hours: int = 72
     frontend_public_url: str = "http://localhost:3000"
     max_image_upload_bytes: int = 10 * 1024 * 1024
+    vision_recognition_enabled: bool = False
+    openai_api_key: str = ""
+    openai_api_base_url: str = "https://api.openai.com"
+    vision_recognition_model: str = "gpt-5.6-terra"
+    vision_recognition_image_detail: str = "original"
+    vision_recognition_timeout_seconds: int = 45
+    vision_recognition_max_output_tokens: int = 1600
+    vision_recognition_max_catalog_parts: int = 250
+    vision_recognition_stale_minutes: int = 5
     max_audio_upload_bytes: int = 15 * 1024 * 1024
     max_knowledge_media_upload_bytes: int = 50 * 1024 * 1024
     max_import_upload_bytes: int = 5 * 1024 * 1024

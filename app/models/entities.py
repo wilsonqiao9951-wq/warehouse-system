@@ -851,6 +851,16 @@ class PartMachineAssociation(Base):
 
 class PartRecognitionObservation(Base):
     __tablename__ = "part_recognition_observations"
+    __table_args__ = (
+        CheckConstraint(
+            "analysis_status IN ('not_requested', 'pending', 'succeeded', 'failed')",
+            name="ck_part_recognition_observation_analysis_status",
+        ),
+        CheckConstraint(
+            "analysis_version >= 0",
+            name="ck_part_recognition_observation_analysis_version_non_negative",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(
@@ -863,6 +873,10 @@ class PartRecognitionObservation(Base):
     label_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     image_url: Mapped[str] = mapped_column(String(500), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis_status: Mapped[str] = mapped_column(
+        String(20), default="not_requested", nullable=False, index=True
+    )
+    analysis_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -876,6 +890,99 @@ class PartRecognitionObservation(Base):
         back_populates="observation",
         cascade="all, delete-orphan",
     )
+    analyses = relationship(
+        "PartRecognitionAnalysis",
+        back_populates="observation",
+        cascade="all, delete-orphan",
+    )
+
+
+class PartRecognitionAnalysis(Base):
+    __tablename__ = "part_recognition_analyses"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "client_request_id",
+            name="uq_part_recognition_analysis_org_request",
+        ),
+        UniqueConstraint(
+            "observation_id",
+            "attempt_number",
+            name="uq_part_recognition_analysis_attempt",
+        ),
+        CheckConstraint(
+            "provider = 'openai'",
+            name="ck_part_recognition_analysis_provider",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'succeeded', 'failed')",
+            name="ck_part_recognition_analysis_status",
+        ),
+        CheckConstraint(
+            "attempt_number > 0",
+            name="ck_part_recognition_analysis_attempt_positive",
+        ),
+        CheckConstraint(
+            "candidate_count >= 0",
+            name="ck_part_recognition_analysis_candidate_count_non_negative",
+        ),
+        CheckConstraint(
+            "length(image_sha256) = 64 AND length(request_sha256) = 64",
+            name="ck_part_recognition_analysis_input_hashes",
+        ),
+        CheckConstraint(
+            "output_sha256 IS NULL OR length(output_sha256) = 64",
+            name="ck_part_recognition_analysis_output_hash",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND completed_at IS NULL AND failure_code IS NULL) OR "
+            "(status = 'succeeded' AND completed_at IS NOT NULL "
+            "AND failure_code IS NULL AND output_sha256 IS NOT NULL "
+            "AND result_json IS NOT NULL) OR "
+            "(status = 'failed' AND completed_at IS NOT NULL "
+            "AND failure_code IS NOT NULL)",
+            name="ck_part_recognition_analysis_completion",
+        ),
+        Index(
+            "ix_part_recognition_analysis_org_created",
+            "organization_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    observation_id: Mapped[int] = mapped_column(
+        ForeignKey("part_recognition_observations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requested_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    client_request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider: Mapped[str] = mapped_column(String(30), default="openai", nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    image_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    output_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    external_request_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    result_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    candidate_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    observation = relationship("PartRecognitionObservation", back_populates="analyses")
+    requester = relationship("User")
 
 
 class PartRecognitionCandidate(Base):

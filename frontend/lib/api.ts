@@ -38,6 +38,7 @@ import {
   PilotChecklist,
   Part,
   PartRecognitionCandidate,
+  PartRecognitionConfiguration,
   PartRecognitionObservation,
   QCPicture,
   ReturnEquipment,
@@ -1491,6 +1492,42 @@ export const api = {
       method: "POST",
       body: form
     });
+  },
+  getPartRecognitionConfiguration: () =>
+    request<PartRecognitionConfiguration>("/parts/recognition/config"),
+  analyzePartRecognitionObservation: (
+    observation: Pick<PartRecognitionObservation, "id" | "analysis_version">
+  ) => request<PartRecognitionObservation>(
+    `/parts/recognition/observations/${observation.id}/analyze`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        client_request_id: `web-photo-${crypto.randomUUID()}`,
+        expected_analysis_version: observation.analysis_version
+      })
+    }
+  ),
+  loadPartRecognitionImage: async (observationId: number) => {
+    if (typeof window === "undefined") throw new Error("Photo preview requires a browser.");
+    const token = window.localStorage.getItem("opf_access_token");
+    const response = await fetch(
+      `${API_BASE}/parts/recognition/observations/${observationId}/image`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: "no-store"
+      }
+    );
+    if (!response.ok) {
+      let detail = `Unable to load recognition photo (${response.status})`;
+      try {
+        const body = await response.json() as { detail?: string };
+        if (body.detail) detail = body.detail;
+      } catch {
+        // Keep the status fallback.
+      }
+      throw new Error(detail);
+    }
+    return URL.createObjectURL(await response.blob());
   },
   listPartRecognitionCandidates: (status?: string) =>
     request<PartRecognitionObservation[]>(

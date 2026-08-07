@@ -303,13 +303,15 @@ Location labels are validated against both their database ID and current printed
 |---|---:|---:|---:|---:|---:|
 | Create standalone observation | Allow | Allow | Allow | Allow | Allow |
 | Create/confirm work-order-linked observation | Allow, bound device + claim version | Deny | Deny | Allow | Deny |
+| Run AI on own standalone observation | Allow | Own only | Own only | Allow | Own only |
+| Run AI on work-order-linked observation | Allow, bound device + claim version | Deny | Deny | Allow | Deny |
 | View organization recognition queue | Allow | Allow | Allow | Allow | Allow |
 | Administrator-confirm candidate | Deny | Deny | Deny | Allow | Deny |
 | Verify actual work-order usage | Deny | Deny | Deny | Allow | Deny |
 | Promote to trusted knowledge | Deny | Deny | Deny | Allow | Deny |
 | Reject with reason | Deny | Deny | Deny | Allow | Deny |
 
-Recognition actions never mutate inventory. A candidate can reach trusted knowledge only after server-recorded use of the same part on the linked work order.
+Recognition actions never mutate inventory. AI retries stop after human confirmation, and a candidate can reach trusted knowledge only after server-recorded use of the same part on the linked work order.
 
 ## Machine service knowledge
 
