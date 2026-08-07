@@ -917,3 +917,37 @@ Verification:
   all 33 static routes.
 - Python dependency consistency and full/production npm audits passed with 0
   known vulnerabilities.
+
+## 2026-08-07 - Phase 9 safe restore record rehydration
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added explicit create counts and per-table create summaries to restore API,
+  persistence, audits, operator workspace, and rollback display.
+- Added deterministic rehydration of deleted allowlisted customer/equipment,
+  warehouse/location, part/machine, completion-policy, configurable-form, and
+  reviewed machine-knowledge records.
+- Added global primary-key ownership, current unique-key, full archived column,
+  tenant, and foreign-key checks before a missing row enters the plan.
+- Added dependency-aware conflict propagation plus parent-to-child application
+  and child-to-parent rollback ordering.
+- Added exact-state rollback protection for rehydrated records, so later edits
+  prevent the system from deleting them.
+- Added Alembic revision `20260807_0038` and updated restore/export/RBAC/operator
+  documentation. Media remains checksum-validation-only for the next batch.
+
+Verification:
+
+- Restore validation, parent/child rehydration, rollback drift, global-id
+  collision, plan drift, roles, reauthentication, and audit tests: 6 passed;
+  export regressions: 3 passed.
+- Backend: all 136 tests passed.
+- Fresh base-to-`0038`, empty `0038 -> 0037 -> 0038`, schema/constraint
+  inspection, and configured rehydration-evidence downgrade refusal passed on
+  SQLite.
+- Frontend: ESLint, TypeScript, and Next.js production build passed for all 33
+  static routes.
+- Python dependency consistency and full/production npm audits passed with 0
+  known vulnerabilities.

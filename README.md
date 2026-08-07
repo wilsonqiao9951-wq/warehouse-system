@@ -22,7 +22,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Provider-neutral signed subscription events, ordered idempotent billing evidence, and durable lifecycle notices
 - Tenant and platform commercial usage reports with password-confirmed, audited CSV export
 - Tenant-isolated portable ZIP backups with secret redaction, media manifests, and durable SHA-256 evidence
-- Controlled existing-row restore rehearsal, approval, exact-plan application, and drift-protected rollback
+- Controlled restore rehearsal, safe record rehydration, exact-plan application, and drift-protected rollback
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
 - Manager/administrator replenishment approval with rejection evidence before warehouse picking
 - Reserved picking stock with separate shipment OUTBOUND and receipt INBOUND inventory movements
@@ -168,7 +168,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260806_0037` (controlled customer data restores).
+- Current schema head: `20260807_0038` (safe restore record rehydration evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

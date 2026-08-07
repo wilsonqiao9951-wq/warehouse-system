@@ -71,7 +71,7 @@ export default function BackupsPage() {
       setMessage(
         result.conflict_count
           ? `Rehearsal recorded with ${result.conflict_count} conflict(s); approval is blocked.`
-          : `Rehearsal recorded with ${result.update_count} eligible update(s).`
+          : `Rehearsal recorded with ${result.create_count} safe rehydration(s) and ${result.update_count} eligible update(s).`
       );
       await refresh();
     } catch (value) {
@@ -195,8 +195,9 @@ export default function BackupsPage() {
         <p className="muted">
           Upload an <code>opf-portable-v1</code> ZIP to verify every manifest checksum and preview
           existing-row changes. Authentication, billing, audit, inventory transaction, custody,
-          and other control-plane records are protected. Missing records are reported as conflicts;
-          media is verified but is not written to storage in this stage.
+          and other control-plane records are protected. Missing eligible records are recreated only
+          after global ID, unique-key, tenant, and foreign-key checks; media is verified but is not
+          written to storage in this stage.
         </p>
         <form onSubmit={rehearse} style={{ display: "grid", gap: 12 }}>
           <label>
@@ -253,6 +254,7 @@ export default function BackupsPage() {
                 <tr>
                   <th>Created</th>
                   <th>Status</th>
+                  <th>Creates</th>
                   <th>Updates</th>
                   <th>Conflicts</th>
                   <th>Protected</th>
@@ -266,6 +268,7 @@ export default function BackupsPage() {
                   <tr key={row.id}>
                     <td>{new Date(row.created_at).toLocaleString()}</td>
                     <td>{row.status.replace("_", " ")}</td>
+                    <td>{row.create_count.toLocaleString()}</td>
                     <td>{row.update_count.toLocaleString()}</td>
                     <td>{row.conflict_count.toLocaleString()}</td>
                     <td>{row.protected_count.toLocaleString()}</td>
@@ -280,10 +283,10 @@ export default function BackupsPage() {
                         <summary>Dry-run details</summary>
                         <ul style={{ margin: "8px 0", paddingLeft: 18 }}>
                           {Object.entries(row.table_summary)
-                            .filter(([, summary]) => summary.updates || summary.conflicts || summary.protected)
+                            .filter(([, summary]) => summary.creates || summary.updates || summary.conflicts || summary.protected)
                             .map(([table, summary]) => (
                               <li key={table}>
-                                <code>{table}</code>: {summary.updates} update(s), {summary.conflicts} conflict(s), {summary.protected} protected
+                                <code>{table}</code>: {summary.creates} create(s), {summary.updates} update(s), {summary.conflicts} conflict(s), {summary.protected} protected
                               </li>
                             ))}
                           {row.validation_messages.map((entry) => <li key={entry}>{entry}</li>)}
@@ -301,7 +304,7 @@ export default function BackupsPage() {
                                 restorePassword.length < 10 ||
                                 decisionNote.trim().length < 3 ||
                                 row.conflict_count > 0 ||
-                                row.update_count === 0
+                                (row.create_count === 0 && row.update_count === 0)
                               }
                               onClick={() => decide(row, "approve")}
                             >
@@ -333,7 +336,7 @@ export default function BackupsPage() {
                             disabled={restoreBusy !== null || restorePassword.length < 10}
                             onClick={() => rollbackRestore(row)}
                           >
-                            Roll back {row.update_count} row(s)
+                            Roll back {row.create_count + row.update_count} row(s)
                           </button>
                         )}
                         {row.approval_note && <span className="muted">{row.approval_note}</span>}
