@@ -835,3 +835,30 @@ Verification: all 227 backend tests passed; frontend ESLint, TypeScript, and the
 - Added purge time/operator attribution, Backups workspace controls, tenant/role/password boundaries, migration `0052`, and the operator runbook.
 
 Verification: all 230 backend tests passed, including cross-tenant selection, active approval preservation, password/version enforcement, fixed rollback expiry, repeat cleanup, and interrupted file reconciliation; fresh base-to-`0052` and `0052 -> 0051 -> 0052` migration rehearsals passed on SQLite; frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes; Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.
+
+## 20260807_0053 - PostgreSQL tenant row-level security
+
+- Enabled and forced one tenant read/write RLS policy on all 51 current tenant
+  tables; the migration coverage set is contract-tested against the ORM tenant
+  model registry.
+- Added transaction-local PostgreSQL organization/platform settings, immediate
+  scope narrowing after user or API-key resolution, and explicit reviewed
+  platform scope for platform administrators and cross-tenant workers.
+- Replaced ad-hoc ORM session scope mutation with shared database helpers while
+  preserving API authorization, work-order ownership, device, claim-version,
+  inventory-custody, and field-disclosure controls.
+- Split production schema-owner migration and restricted API database
+  credentials. The idempotent role bootstrap enforces
+  `NOSUPERUSER NOBYPASSRLS NOINHERIT` and repairs existing/default grants.
+- Added a real PostgreSQL 16 verifier for empty-scope reads, tenant reads,
+  cross-tenant write denial, platform access, role capability, policy coverage,
+  and downgrade/re-upgrade behavior.
+- Extended controlled-restore schema compatibility through `0053` and added the
+  production adoption, verification, and rollback runbook.
+
+Verification: all 234 backend tests passed; real PostgreSQL 16 base-to-`0053`,
+role-bootstrap repetition, `0053 -> 0052 -> 0053`, and RLS read/write/platform
+checks passed; the SQLite migration cycle passed; frontend ESLint, TypeScript,
+and the Next.js 16.2.12 production build passed for all 40 static routes;
+Python and npm dependency audits reported 0 known vulnerabilities; production
+configuration, Compose configuration, and API/web image builds passed.

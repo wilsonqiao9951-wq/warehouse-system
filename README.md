@@ -113,6 +113,8 @@ exposing only port `8080` to the enterprise ingress:
 ```bash
 cp .env.production.example .env.production
 # Replace every CHANGE_ME value before continuing.
+# Keep MIGRATION_DATABASE_URL on the owner role and DATABASE_URL on the
+# separate NOSUPERUSER/NOBYPASSRLS application role.
 docker compose --env-file .env.production -f docker-compose.production.yml build
 docker compose --env-file .env.production -f docker-compose.production.yml run --rm --no-deps migrate python -m scripts.validate_production_config
 docker compose --env-file .env.production -f docker-compose.production.yml up -d

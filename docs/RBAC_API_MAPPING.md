@@ -13,6 +13,11 @@ delegable. All changes require a reason and append an audit event. See
 These policy overrides do not weaken work-order ownership, registered-device,
 claim-version, completion-password, inventory-custody, or tenant checks.
 
+PostgreSQL deployments additionally force tenant read/write row-level security
+on all tenant models. API/ORM authorization remains authoritative for roles,
+ownership, devices, and field-level disclosure; RLS is the final organization
+boundary. See [`POSTGRES_RLS.md`](POSTGRES_RLS.md).
+
 ## Work-order access model
 
 OpenPartsFlow separates visibility, field execution, and management. Frontend capability flags are a usability aid only; every rule is enforced again by the API.
