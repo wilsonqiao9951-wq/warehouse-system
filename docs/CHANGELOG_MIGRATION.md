@@ -1,5 +1,19 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260807_0061 - Persisted completed-work-order profit snapshots
+
+- Added one immutable, fingerprinted tenant record per completed work order,
+  captured in the same transaction as completion.
+- Added historical engineer, service-region, warehouse-attribution, machine,
+  revenue, labor, parts-cost, and profit evidence.
+- Added tenant-leading date, engineer, region, and machine ranking indexes plus
+  forced PostgreSQL row-level security.
+- Added bounded, password-confirmed and audited backfill with idempotency and
+  conflict retention.
+- Extends controlled tenant restore compatibility through revision `0061`.
+- Downgrade removes only the snapshot table; work-order and inventory evidence
+  is unchanged.
+
 ## 20260807_0060 - Van inventory planning indexes
 
 - Added tenant-leading source-vehicle/type/time ledger indexing for bounded

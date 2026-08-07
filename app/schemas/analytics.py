@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -112,6 +113,75 @@ class EnterpriseAnalyticsRead(BaseModel):
     regions: list[AnalyticsRegionRowRead]
     data_quality: AnalyticsDataQualityRead
     source_freshness: AnalyticsSourceFreshnessRead
+
+
+class ProfitSnapshotSummaryRead(BaseModel):
+    completed_work_orders: int = Field(ge=0)
+    snapshot_count: int = Field(ge=0)
+    missing_snapshot_count: int = Field(ge=0)
+    coverage_rate: float = Field(ge=0, le=1)
+    revenue: float
+    labor_cost: float
+    parts_cost: float
+    profit: float
+    margin_rate: float | None = None
+
+
+class ProfitSnapshotDailyRead(BaseModel):
+    snapshot_date: date
+    completed_count: int = Field(ge=0)
+    revenue: float
+    labor_cost: float
+    parts_cost: float
+    profit: float
+
+
+class ProfitSnapshotRankingRead(BaseModel):
+    dimension: Literal["engineer", "region", "machine_type"]
+    key: str
+    label: str
+    completed_count: int = Field(ge=0)
+    revenue: float
+    labor_cost: float
+    parts_cost: float
+    profit: float
+    margin_rate: float | None = None
+
+
+class ProfitSnapshotDashboardRead(BaseModel):
+    generated_at: datetime
+    from_date: date
+    to_date: date
+    summary: ProfitSnapshotSummaryRead
+    daily: list[ProfitSnapshotDailyRead]
+    engineers: list[ProfitSnapshotRankingRead]
+    regions: list[ProfitSnapshotRankingRead]
+    machine_types: list[ProfitSnapshotRankingRead]
+    last_captured_at: datetime | None = None
+
+
+class ProfitSnapshotBackfillRequest(BaseModel):
+    from_date: date | None = None
+    to_date: date | None = None
+    after_work_order_id: int | None = Field(default=None, ge=1)
+    limit: int = Field(default=500, ge=1, le=1000)
+    account_password: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_period(self):
+        if self.from_date and self.to_date and self.to_date < self.from_date:
+            raise ValueError("to_date must be on or after from_date")
+        if self.from_date and self.to_date and (self.to_date - self.from_date).days + 1 > 3660:
+            raise ValueError("Profit snapshot backfill range cannot exceed 3660 days")
+        return self
+
+
+class ProfitSnapshotBackfillRead(BaseModel):
+    scanned: int = Field(ge=0)
+    created: int = Field(ge=0)
+    existing: int = Field(ge=0)
+    conflicts: int = Field(ge=0)
+    next_after_work_order_id: int | None = None
 
 
 class AnalyticsExportRequest(BaseModel):

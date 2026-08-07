@@ -53,6 +53,7 @@ from app.models.entities import (
     WorkOrderFormField,
     WorkOrderFormTemplate,
     WorkOrderPart,
+    WorkOrderProfitSnapshot,
     WorkOrderPartMemory,
     WorkOrderVoiceNote,
 )
@@ -112,6 +113,7 @@ __all__ = [
     "WorkOrderFormField",
     "WorkOrderFormTemplate",
     "WorkOrderPart",
+    "WorkOrderProfitSnapshot",
     "WorkOrderPartMemory",
     "WorkOrderVoiceNote",
 ]
