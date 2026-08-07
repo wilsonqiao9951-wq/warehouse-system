@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     data_export_public_files_root: str = "uploads"
     data_export_private_files_root: str = "private_uploads"
     max_data_export_bytes: int = 512 * 1024 * 1024
+    max_audit_export_rows: int = 100_000
     # Includes room for the manifest/ZIP overhead around a max-sized export.
     max_data_restore_archive_bytes: int = 528 * 1024 * 1024
     max_data_restore_uncompressed_bytes: int = 528 * 1024 * 1024

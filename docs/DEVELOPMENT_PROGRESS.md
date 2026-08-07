@@ -1022,3 +1022,38 @@ Verification:
   all 33 static routes.
 - Full and production npm audits passed with 0 known vulnerabilities.
 - GitHub PR #7 backend and frontend CI jobs passed.
+
+## 2026-08-07 - Phase 9 enterprise audit console
+
+Status: implemented, locally migrated, and verified.
+
+Delivered:
+
+- Replaced the raw audit-only experience with a structured tenant-scoped
+  search API while retaining the legacy list response for existing clients.
+- Added exact action, entity, actor, and UTC time filters, descending cursor
+  pagination, parsed metadata with explicit malformed-legacy evidence, and
+  no-store response controls.
+- Added bounded activity summaries for event totals, unique authenticated
+  actors, latest activity, top actions, and top entity types.
+- Added administrator-only CSV export with Bearer/current-password
+  reauthentication, spreadsheet-formula hardening, a configurable 100,000-row
+  cap, SHA-256 and row-count headers, and a secret-free export audit event.
+- Added a manager/administrator Audit Logs workspace with summary cards,
+  filtering, metadata inspection, load-more pagination, and administrator-only
+  export controls that display the returned digest evidence.
+- Added Alembic revision `20260807_0041` with tenant-first time, action, and
+  entity lookup indexes plus API/RBAC/operator documentation.
+- Upgraded the configured local database from `0040` to `0041` and inspected
+  all three composite indexes in SQLite.
+
+Verification:
+
+- Audit tenant isolation, filters, cursor pagination, malformed metadata,
+  compatibility response, role enforcement, password rejection, formula-safe
+  CSV, SHA-256 evidence, no-store behavior, and export audit tests passed.
+- Backend: all 144 tests passed, including full Alembic history and legacy
+  adoption coverage.
+- Python compilation passed.
+- Frontend: ESLint, TypeScript, and the Next.js 16.2.12 production build passed
+  for all 34 static routes.

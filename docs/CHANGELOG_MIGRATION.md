@@ -625,3 +625,22 @@ configured local legacy database completed backed-up adoption and a second
 preparation run was idempotent; ESLint and the Next.js production build passed
 for all 33 static routes; full and production npm audits reported 0 known
 vulnerabilities.
+
+## 20260807_0041 - Enterprise audit console query indexes
+
+- Adds tenant/time, tenant/action/time, and tenant/entity composite indexes for
+  bounded audit search, summaries, and compliance exports.
+- Adds cursor-paginated, tenant-scoped audit search with exact action, entity,
+  actor, and UTC time-range filters while preserving the legacy list response.
+- Adds 30-day activity summaries for managers and administrators.
+- Adds administrator-only, current-password-confirmed CSV export with formula
+  hardening, configured row limits, SHA-256 response evidence, and an
+  `audit_log_exported` event that never retains the password.
+- Adds the manager audit workspace with filtering, metadata inspection,
+  pagination, activity summaries, and administrator export controls.
+
+Verification: audit search, tenant isolation, cursor behavior, metadata safety,
+role boundaries, password verification, CSV hardening, and digest evidence
+tests passed; fresh migration through `0041` and legacy-adoption regression
+tests passed; all 144 backend tests passed; ESLint, TypeScript, and the Next.js
+production build passed for all 34 static routes.

@@ -1,4 +1,7 @@
 import {
+  AuditLogFilters,
+  AuditLogPage,
+  AuditLogSummary,
   BillingLifecycleEvent,
   BillingProvider,
   EngineerDashboard,
@@ -92,7 +95,7 @@ async function downloadAuthenticatedFile(
   path: string,
   payload: object,
   fallbackFilename: string
-): Promise<void> {
+): Promise<{ filename: string; sha256: string | null; recordCount: number | null }> {
   if (typeof window === "undefined") throw new Error("File export requires a browser.");
   const token = window.localStorage.getItem("opf_access_token");
   const response = await fetch(`${API_BASE}${path}`, {
@@ -122,6 +125,15 @@ async function downloadAuthenticatedFile(
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  const recordCountHeader = response.headers.get("X-Record-Count");
+  const parsedRecordCount = recordCountHeader == null ? null : Number(recordCountHeader);
+  return {
+    filename: fallbackFilename,
+    sha256: response.headers.get("X-Content-SHA256"),
+    recordCount: parsedRecordCount != null && Number.isFinite(parsedRecordCount)
+      ? parsedRecordCount
+      : null
+  };
 }
 
 interface OfflineQueueItem {
@@ -1019,6 +1031,31 @@ export const api = {
     request<OrganizationBillingOverview>("/organization/billing"),
   getOrganizationCommercialReport: (months = 12) =>
     request<OrganizationCommercialReport>(`/organization/commercial-report?months=${months}`),
+  getAuditLogs: (filters: AuditLogFilters = {}, beforeId?: number, limit = 50) => {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (filters.action) query.set("action", filters.action);
+    if (filters.entity_type) query.set("entity_type", filters.entity_type);
+    if (filters.entity_id) query.set("entity_id", String(filters.entity_id));
+    if (filters.user_id) query.set("user_id", String(filters.user_id));
+    if (filters.from_at) query.set("from_at", filters.from_at);
+    if (filters.to_at) query.set("to_at", filters.to_at);
+    if (beforeId) query.set("before_id", String(beforeId));
+    return request<AuditLogPage>(`/audit-logs/search?${query.toString()}`);
+  },
+  getAuditLogSummary: (days = 30, filters: AuditLogFilters = {}) => {
+    const query = new URLSearchParams({ days: String(days) });
+    if (filters.action) query.set("action", filters.action);
+    if (filters.entity_type) query.set("entity_type", filters.entity_type);
+    if (filters.entity_id) query.set("entity_id", String(filters.entity_id));
+    if (filters.user_id) query.set("user_id", String(filters.user_id));
+    return request<AuditLogSummary>(`/audit-logs/summary?${query.toString()}`);
+  },
+  downloadAuditLogs: (filters: AuditLogFilters, accountPassword: string) =>
+    downloadAuthenticatedFile(
+      "/audit-logs/export",
+      { ...filters, account_password: accountPassword },
+      "openpartsflow-audit.csv"
+    ),
   downloadOrganizationCommercialReport: (months: number, accountPassword: string) =>
     downloadAuthenticatedFile(
       "/organization/commercial-report/export",

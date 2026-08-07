@@ -3,7 +3,7 @@ import base64
 import binascii
 import json
 from urllib.parse import urlsplit
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
@@ -2319,3 +2319,61 @@ class ReturnEquipmentRead(ReturnEquipmentCreate):
 
     class Config:
         from_attributes = True
+
+
+class AuditLogRead(BaseModel):
+    id: int
+    organization_id: int
+    user_id: int | None = None
+    user_name: str | None = None
+    action: str
+    entity_type: str
+    entity_id: int | None = None
+    timestamp: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata_valid: bool = True
+
+
+class AuditLogPageRead(BaseModel):
+    items: list[AuditLogRead] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    next_before_id: int | None = None
+
+
+class AuditLogSummaryBucket(BaseModel):
+    value: str
+    count: int = Field(ge=0)
+
+
+class AuditLogSummaryRead(BaseModel):
+    window_days: int = Field(ge=1, le=365)
+    total_events: int = Field(ge=0)
+    unique_actors: int = Field(ge=0)
+    latest_event_at: datetime | None = None
+    by_action: list[AuditLogSummaryBucket] = Field(default_factory=list)
+    by_entity_type: list[AuditLogSummaryBucket] = Field(default_factory=list)
+
+
+class AuditLogExportRequest(BaseModel):
+    action: str | None = Field(default=None, max_length=120)
+    entity_type: str | None = Field(default=None, max_length=120)
+    entity_id: int | None = Field(default=None, ge=1)
+    user_id: int | None = Field(default=None, ge=1)
+    from_at: datetime | None = None
+    to_at: datetime | None = None
+    account_password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("from_at", "to_at")
+    @classmethod
+    def normalize_audit_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+
+    @model_validator(mode="after")
+    def validate_time_range(self):
+        if self.from_at and self.to_at and self.to_at < self.from_at:
+            raise ValueError("to_at must be on or after from_at")
+        self.action = self.action.strip() if self.action else None
+        self.entity_type = self.entity_type.strip() if self.entity_type else None
+        return self
