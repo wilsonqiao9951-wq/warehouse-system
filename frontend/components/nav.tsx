@@ -48,7 +48,7 @@ const links: NavLink[] = [
   { href: "/my-jobs", label: "My Jobs", roles: ["engineer"] },
   { href: "/my-van-inventory", label: "My Van", roles: ["engineer"] },
   { href: "/sync-center", label: "Sync", roles: ["engineer", "warehouse", "manager", "admin"] },
-  { href: "/profile", label: "Profile", roles: ["engineer"] }
+  { href: "/profile", label: "Profile", roles: ["engineer", "warehouse", "manager", "admin", "assistant"] }
 ];
 
 function sortEngineerLinks(items: typeof links) {

@@ -1364,3 +1364,21 @@ Verification:
   audits reported 0 known vulnerabilities.
 - Alembic model comparison reported only the documented pre-existing drift and
   no missing `0047` table, column, constraint, or index operation.
+## 2026-08-07 - Phase 9 authentication hardening
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added durable dual-scope login throttling by keyed account and direct-peer fingerprints with bounded production configuration and `Retry-After` responses.
+- Added tenant-scoped authentication security evidence without retaining raw email, IP, password, token, or device-secret values.
+- Added versioned JWT sessions so administrator password changes and password-confirmed user revocation immediately invalidate all older access tokens.
+- Added a Profile security workspace for every role and a safe recent-event view for tenant administrators.
+- Added Alembic revision `20260807_0048`, portable export redaction, controlled-restore compatibility, and dynamic legacy-adoption head assertions.
+
+Verification:
+
+- Rate-limit threshold, source/account isolation, tenant isolation, sensitive-field exclusion, password-change invalidation, explicit revocation, and relogin tests passed.
+- Fresh base-to-`0048` plus `0048 -> 0047 -> 0048` migration rehearsal passed on SQLite.
+- Frontend ESLint and TypeScript passed; the Next.js 16.2.12 production build generated all 38 static routes.
+- All 191 backend tests passed; requirements, production image tooling, and full/production npm security scans reported 0 known vulnerabilities after pinning pip 26.1.2 in the API image.

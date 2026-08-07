@@ -6,7 +6,7 @@ import secrets
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
@@ -33,6 +33,7 @@ from app.core.rbac import (
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import (
     AuditLog,
+    AuthSecurityEvent,
     CompletionPolicy,
     Customer,
     Equipment,
@@ -69,6 +70,7 @@ from app.models import (
 )
 from app.schemas import (
     AbnormalUsageRow,
+    AuthSecurityEventRead,
     CustomerCreate,
     CustomerRead,
     EquipmentCreate,
@@ -143,6 +145,7 @@ from app.schemas import (
     OrganizationSettingsRead,
     OrganizationUpdate,
     PasswordSet,
+    SessionRevoke,
     StockBalance,
     StorageLocationCreate,
     StorageLocationRead,
@@ -175,6 +178,12 @@ from app.services.inventory import (
     use_part_on_work_order,
     warehouse_is_vehicle,
     begin_inventory_write,
+)
+from app.services.auth_security import (
+    auth_fingerprint,
+    login_is_rate_limited,
+    login_source_fingerprint,
+    record_auth_security_event,
 )
 from app.services.integration_delivery import enqueue_work_order_event
 from app.services.regions import ensure_default_region
@@ -268,13 +277,39 @@ def _parse_non_negative_number(value, cast, field_name: str):
 
 @router.post("/auth/login", response_model=TokenResponse)
 def login(
+    request: Request,
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
     x_device_id: str | None = Header(default=None, alias="X-Device-Id"),
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
     x_device_name: str | None = Header(default=None, alias="X-Device-Name"),
 ):
-    user = db.scalar(select(User).where(func.lower(User.email) == form.username.strip().lower()))
+    now = datetime.utcnow()
+    email = form.username.strip().lower()
+    principal_fingerprint = auth_fingerprint("login-principal", email)
+    source_fingerprint = login_source_fingerprint(request)
+    user = db.scalar(select(User).where(func.lower(User.email) == email))
+    if login_is_rate_limited(
+        db,
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        now=now,
+    ):
+        record_auth_security_event(
+            db,
+            event_type="login",
+            outcome="rate_limited",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts; try again later",
+            headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
+        )
     organization = db.get(Organization, user.organization_id) if user else None
     if (
         not user
@@ -285,31 +320,68 @@ def login(
         )
         or not verify_password(form.password, user.password_hash)
     ):
+        record_auth_security_event(
+            db,
+            event_type="login",
+            outcome="invalid_credentials",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
         raise HTTPException(
             status_code=401,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    require_subscription_access(
-        organization,
-        platform_admin=user.is_platform_admin,
-    )
+    try:
+        require_subscription_access(
+            organization,
+            platform_admin=user.is_platform_admin,
+        )
+    except HTTPException:
+        record_auth_security_event(
+            db,
+            event_type="login",
+            outcome="subscription_denied",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        raise
+
+    def reject_device(status_code: int, detail: str) -> None:
+        record_auth_security_event(
+            db,
+            event_type="login",
+            outcome="device_rejected",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        raise HTTPException(status_code=status_code, detail=detail)
+
     device_id = None
     if x_device_id or x_device_token:
         if not x_device_id or not x_device_token or not (16 <= len(x_device_id) <= 128) or len(x_device_token) < 32:
-            raise HTTPException(status_code=400, detail="Valid device id and device token are required together")
+            reject_device(400, "Valid device id and device token are required together")
         if any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for character in x_device_id):
-            raise HTTPException(status_code=400, detail="Device id contains invalid characters")
+            reject_device(400, "Device id contains invalid characters")
         token_hash = sha256(x_device_token.encode("utf-8")).hexdigest()
         device = db.scalar(select(UserDevice).where(
             UserDevice.organization_id == user.organization_id, UserDevice.device_id == x_device_id
         ))
         if device and device.user_id != user.id:
-            raise HTTPException(status_code=409, detail="This device is bound to another account")
+            reject_device(409, "This device is bound to another account")
         if device and (not device.is_active or device.revoked_at is not None):
-            raise HTTPException(status_code=401, detail="This device registration has been revoked")
+            reject_device(401, "This device registration has been revoked")
         if device and not secrets.compare_digest(device.device_token_hash, token_hash):
-            raise HTTPException(status_code=401, detail="Device authentication failed")
+            reject_device(401, "Device authentication failed")
         if not device:
             device = UserDevice(
                 organization_id=user.organization_id,
@@ -322,9 +394,23 @@ def login(
         else:
             device.device_name = (x_device_name or device.device_name or "Registered device")[:255]
             device.last_seen_at = datetime.utcnow()
-        db.commit()
         device_id = x_device_id
-    token, expires_in = create_access_token(user.id, user.organization_id, device_id=device_id)
+    record_auth_security_event(
+        db,
+        event_type="login",
+        outcome="success",
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        user=user,
+        occurred_at=now,
+    )
+    db.commit()
+    token, expires_in = create_access_token(
+        user.id,
+        user.organization_id,
+        auth_version=user.auth_version,
+        device_id=device_id,
+    )
     return TokenResponse(access_token=token, expires_in=expires_in, user=user, device_id=device_id)
 
 
@@ -336,6 +422,56 @@ def auth_me(db: Session = Depends(get_db), actor: Actor = Depends(get_current_ac
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
     return user
+
+
+@router.post("/auth/sessions/revoke-all", status_code=204)
+def revoke_all_sessions(
+    payload: SessionRevoke,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    if actor.auth_method != "bearer" or actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Bearer authentication required")
+    user = db.get(User, actor.user_id)
+    if not user or not verify_password(payload.account_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Account password verification failed")
+    user.auth_version += 1
+    now = datetime.utcnow()
+    _audit(
+        db,
+        actor,
+        "revoke_all_sessions",
+        "user",
+        user.id,
+        {"new_auth_version": user.auth_version},
+    )
+    record_auth_security_event(
+        db,
+        event_type="session_revocation",
+        outcome="sessions_revoked",
+        principal_fingerprint=auth_fingerprint("login-principal", user.email or str(user.id)),
+        source_fingerprint=login_source_fingerprint(request),
+        user=user,
+        occurred_at=now,
+    )
+    db.add(user)
+    db.commit()
+
+
+@router.get("/auth/security-events", response_model=list[AuthSecurityEventRead])
+def list_auth_security_events(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN)
+    return db.scalars(
+        select(AuthSecurityEvent)
+        .where(AuthSecurityEvent.organization_id == actor.organization_id)
+        .order_by(AuthSecurityEvent.occurred_at.desc(), AuthSecurityEvent.id.desc())
+        .limit(limit)
+    ).all()
 
 
 @router.post("/users/invitations", response_model=InvitationCreated)
@@ -1399,6 +1535,15 @@ def set_user_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.password_hash = hash_password(payload.password)
+    user.auth_version += 1
+    _audit(
+        db,
+        actor,
+        "set_user_password",
+        "user",
+        user.id,
+        {"sessions_revoked": True, "new_auth_version": user.auth_version},
+    )
     db.add(user)
     db.commit()
 

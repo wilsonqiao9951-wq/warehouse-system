@@ -644,6 +644,9 @@ class SubscriptionNotice(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint("auth_version >= 0", name="ck_users_auth_version_non_negative"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
@@ -652,12 +655,68 @@ class User(Base):
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     role: Mapped[UserRole] = mapped_column(SqlEnum(UserRole), default=UserRole.ENGINEER, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    auth_version: Mapped[int] = mapped_column(
+        Integer, default=0, server_default=text("0"), nullable=False
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     organization = relationship("Organization")
+
+
+class AuthSecurityEvent(Base):
+    __tablename__ = "auth_security_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('login', 'session_revocation')",
+            name="ck_auth_security_events_type",
+        ),
+        CheckConstraint(
+            "outcome IN ('success', 'invalid_credentials', 'rate_limited', "
+            "'subscription_denied', 'device_rejected', 'sessions_revoked')",
+            name="ck_auth_security_events_outcome",
+        ),
+        CheckConstraint(
+            "length(principal_fingerprint) = 64 AND length(source_fingerprint) = 64",
+            name="ck_auth_security_events_fingerprints",
+        ),
+        Index(
+            "ix_auth_security_events_principal_occurred",
+            "principal_fingerprint",
+            "occurred_at",
+        ),
+        Index(
+            "ix_auth_security_events_source_occurred",
+            "source_fingerprint",
+            "occurred_at",
+        ),
+        Index(
+            "ix_auth_security_events_org_occurred",
+            "organization_id",
+            "occurred_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(40), nullable=False)
+    principal_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    organization = relationship("Organization")
+    user = relationship("User")
 
 
 class UserPermissionGrant(Base):

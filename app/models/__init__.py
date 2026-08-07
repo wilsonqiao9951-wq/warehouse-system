@@ -1,5 +1,6 @@
 from app.models.entities import (
     AuditLog,
+    AuthSecurityEvent,
     BillingLifecycleEvent,
     CompletionPolicy,
     Customer,
@@ -57,6 +58,7 @@ __all__ = [
     "InventoryTransaction",
     "ImportBatch",
     "AuditLog",
+    "AuthSecurityEvent",
     "BillingLifecycleEvent",
     "CompletionPolicy",
     "Customer",

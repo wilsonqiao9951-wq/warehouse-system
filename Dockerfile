@@ -15,7 +15,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements-runtime.txt ./
-RUN python -m pip install --no-cache-dir -r requirements-runtime.txt \
+RUN python -m pip install --no-cache-dir --upgrade pip==26.1.2 \
+    && python -m pip install --no-cache-dir -r requirements-runtime.txt \
     && groupadd --gid 10001 openpartsflow \
     && useradd --uid 10001 --gid openpartsflow --no-create-home --shell /usr/sbin/nologin openpartsflow
 

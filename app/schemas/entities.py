@@ -75,6 +75,27 @@ class PasswordSet(BaseModel):
     password: str = Field(min_length=10, max_length=128)
 
 
+class SessionRevoke(BaseModel):
+    account_password: str = Field(min_length=10, max_length=128)
+
+
+class AuthSecurityEventRead(BaseModel):
+    id: int
+    user_id: int | None
+    event_type: Literal["login", "session_revocation"]
+    outcome: Literal[
+        "success",
+        "invalid_credentials",
+        "rate_limited",
+        "subscription_denied",
+        "device_rejected",
+        "sessions_revoked",
+    ]
+    occurred_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class InvitationCreate(BaseModel):
     email: str = Field(min_length=3, max_length=255)
     name: str = Field(min_length=2, max_length=120)

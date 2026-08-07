@@ -15,10 +15,12 @@ import app.models  # noqa: F401
 from app.services.legacy_database_adoption import (
     LegacyDatabaseAdoptionError,
     adopt_legacy_sqlite_database,
+    current_schema_head,
 )
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CURRENT_SCHEMA_HEAD = current_schema_head(PROJECT_ROOT)
 
 
 def _config(database_path: Path) -> Config:
@@ -113,7 +115,7 @@ def test_legacy_adoption_dry_run_is_read_only_and_validates_derivations(tmp_path
     report = adopt_legacy_sqlite_database(database, project_root=PROJECT_ROOT)
 
     assert report.status == "validated"
-    assert report.head_revision == "20260807_0047"
+    assert report.head_revision == CURRENT_SCHEMA_HEAD
     assert report.source_row_count >= 10
     assert report.backup_database is None
     assert report.report_file is None
@@ -151,7 +153,7 @@ def test_legacy_adoption_apply_preserves_data_backup_and_audit_report(tmp_path):
 
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [
-            ("20260807_0047",)
+            (CURRENT_SCHEMA_HEAD,)
         ]
         assert connection.execute(
             "SELECT code, name, timezone, is_default FROM inventory_regions"

@@ -90,6 +90,18 @@ def validate_deployment_settings(config: Settings = settings) -> None:
         errors.append("JWT_SECRET_KEY must be a non-placeholder secret of at least 32 characters")
     if config.jwt_algorithm not in {"HS256", "HS384", "HS512"}:
         errors.append("JWT_ALGORITHM must be HS256, HS384, or HS512")
+    if not 60 <= config.login_rate_limit_window_seconds <= 86400:
+        errors.append("LOGIN_RATE_LIMIT_WINDOW_SECONDS must be between 60 and 86400")
+    if not 3 <= config.login_rate_limit_principal_failures <= 100:
+        errors.append("LOGIN_RATE_LIMIT_PRINCIPAL_FAILURES must be between 3 and 100")
+    if not (
+        config.login_rate_limit_principal_failures
+        <= config.login_rate_limit_source_failures
+        <= 10000
+    ):
+        errors.append(
+            "LOGIN_RATE_LIMIT_SOURCE_FAILURES must be at least the principal limit and no more than 10000"
+        )
 
     try:
         database = make_url(config.database_url)

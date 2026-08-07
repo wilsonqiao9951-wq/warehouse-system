@@ -768,3 +768,10 @@ passed on SQLite; frontend ESLint, TypeScript, and the production build passed
 for all 38 static routes; all 186 backend tests, Python dependency consistency,
 Python vulnerability audit, and both npm audits passed with 0 known
 vulnerabilities.
+## 20260807_0048 - Authentication security evidence and revocable sessions
+
+- Added a non-negative user authentication version and embedded it in every new JWT so password changes and explicit session revocation invalidate older tokens immediately.
+- Added password-confirmed `POST /api/auth/sessions/revoke-all` for every signed-in role and safe tenant-administrator security event reads at `GET /api/auth/security-events`.
+- Added durable account/source login throttling with configurable production-validated bounds and `429 Retry-After` responses.
+- Added immutable login/session outcomes with keyed account and source fingerprints; raw identifiers, IP addresses, submitted credentials, bearer tokens, and device secrets are not retained or exposed.
+- Added a Profile security workspace, tenant-safe authentication history, export redaction, controlled-restore compatibility, and legacy-adoption current-head validation.

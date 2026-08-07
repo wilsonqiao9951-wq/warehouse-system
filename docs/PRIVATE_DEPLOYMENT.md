@@ -21,6 +21,13 @@ an internal data network. The API is reachable only by the web proxy and may
 make outbound integration calls. Public uploads, protected knowledge media,
 and restore rollback evidence use three distinct persistent volumes.
 
+The production API accepts proxy-derived client addresses only because its
+`edge` network is unpublished and the only peer on that network is the managed
+Nginx ingress. This preserves per-source login throttling without trusting raw
+forwarding headers in application code. A deployment that exposes the API
+directly must remove the proxy-header command flags or establish an equivalent
+trusted-proxy boundary.
+
 The API and web containers run as non-root users with all Linux capabilities
 dropped, `no-new-privileges`, and read-only root filesystems. `/tmp` and the
 three explicitly mounted evidence locations are the only runtime write paths.

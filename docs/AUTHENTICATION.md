@@ -12,9 +12,30 @@ LEGACY_HEADER_AUTH=false
 JWT_SECRET_KEY=<at least 32 random bytes, supplied by secret management>
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=480
+LOGIN_RATE_LIMIT_WINDOW_SECONDS=900
+LOGIN_RATE_LIMIT_PRINCIPAL_FAILURES=10
+LOGIN_RATE_LIMIT_SOURCE_FAILURES=50
 ```
 
 The application refuses to issue tokens in staging or production when the development JWT secret is still configured.
+
+## Login abuse protection and session revocation
+
+Login failures are rate limited in a durable database window by both the normalized account identifier and the request's authenticated network peer. The default policy blocks after 10 account failures or 50 source failures in 15 minutes and returns `429` with `Retry-After`. Application code never parses client-supplied forwarding headers. The production Compose topology lets Uvicorn accept the Nginx-provided peer address only inside the isolated, unpublished API network; direct deployments must configure an equivalently trusted proxy boundary before enabling forwarded-header processing.
+
+Every login result is retained as a security event. Account identifiers and network sources are stored only as keyed SHA-256 fingerprints derived from the server JWT secret. The event record never contains a raw email address, IP address, password, bearer token, device secret, or submitted credential. Administrators may inspect safe tenant-only outcomes through:
+
+```text
+GET /api/auth/security-events
+```
+
+Every access token carries the user's current authentication version. An administrator password change increments that version, so every previously issued token stops working immediately. Any signed-in user can re-enter their current password and revoke all sessions through:
+
+```text
+POST /api/auth/sessions/revoke-all
+```
+
+The profile workspace exposes this control to every role and shows the tenant-scoped event history to administrators. Device registrations are not silently deleted by session revocation; users must authenticate again, and the existing device-secret checks still apply.
 
 ## Account onboarding
 
@@ -76,8 +97,6 @@ The application is fail-closed in every runnable environment: RBAC is enabled an
 ## Remaining commercial hardening
 
 - Password reset with single-use, short-lived tokens
-- Refresh-token rotation or secure server-managed sessions
-- Login rate limiting and security event logging
 - Optional MFA for administrators
 - Prefer HttpOnly secure cookies for browser deployments that do not require standalone Bearer-token clients
-- Organization invitation and email verification workflow
+- Invitation acceptance exists; verified email delivery and invitation-email ownership proof remain to be connected to a transactional email provider
