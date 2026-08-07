@@ -19,6 +19,48 @@ export interface AuthToken {
   device_id?: string | null;
 }
 
+export interface AuditLogEntry {
+  id: number;
+  organization_id: number;
+  user_id?: number | null;
+  user_name?: string | null;
+  action: string;
+  entity_type: string;
+  entity_id?: number | null;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+  metadata_valid: boolean;
+}
+
+export interface AuditLogPage {
+  items: AuditLogEntry[];
+  total: number;
+  next_before_id?: number | null;
+}
+
+export interface AuditLogSummaryBucket {
+  value: string;
+  count: number;
+}
+
+export interface AuditLogSummary {
+  window_days: number;
+  total_events: number;
+  unique_actors: number;
+  latest_event_at?: string | null;
+  by_action: AuditLogSummaryBucket[];
+  by_entity_type: AuditLogSummaryBucket[];
+}
+
+export interface AuditLogFilters {
+  action?: string;
+  entity_type?: string;
+  entity_id?: number;
+  user_id?: number;
+  from_at?: string;
+  to_at?: string;
+}
+
 export type PlanCode = "starter" | "professional" | "enterprise";
 export type SubscriptionStatus =
   | "trialing"

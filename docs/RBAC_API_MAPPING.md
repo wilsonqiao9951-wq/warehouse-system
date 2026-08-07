@@ -82,6 +82,10 @@ Structured learning fields (`fault_type`, `error_code`, `environment_info`, `fin
 
 Claim, release, execution, approval, rejection, and completion actions record the actor, role, authentication method, device record, claim version, server timestamp, and action-specific metadata. Passwords and device secrets are never included.
 
+Managers and administrators may search and summarize their organization's audit events through `GET /api/audit-logs/search` and `GET /api/audit-logs/summary`. The tenant condition is explicit in each query in addition to the session-wide tenant filter. Other operational roles are denied.
+
+Only administrators may call `POST /api/audit-logs/export`. A Bearer-authenticated administrator must re-enter the current account password. The CSV uses the active filters, hardens spreadsheet-formula cells, returns a SHA-256 digest and row count, and then appends an `audit_log_exported` event containing the digest and filters. The password is discarded after verification and never enters the CSV, response metadata, or audit event. See [`AUDIT_LOGS.md`](AUDIT_LOGS.md).
+
 ## Automated acceptance coverage
 
 - Same-organization engineers all see the pool; cross-tenant data remains isolated.

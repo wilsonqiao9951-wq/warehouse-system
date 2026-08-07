@@ -1657,6 +1657,16 @@ class ReturnEquipment(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = (
+        Index("ix_audit_logs_org_timestamp", "organization_id", "timestamp"),
+        Index("ix_audit_logs_org_action_timestamp", "organization_id", "action", "timestamp"),
+        Index(
+            "ix_audit_logs_org_entity",
+            "organization_id",
+            "entity_type",
+            "entity_id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)

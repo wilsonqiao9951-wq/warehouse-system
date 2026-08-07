@@ -5533,29 +5533,6 @@ def create_return_equipment(
     return item
 
 
-@router.get("/audit-logs")
-def list_audit_logs(
-    skip: int = Query(default=0, ge=0),
-    limit: int = Query(default=100, ge=1, le=500),
-    db: Session = Depends(get_db),
-    actor: Actor = Depends(get_current_actor),
-):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
-    rows = db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).offset(skip).limit(limit)).all()
-    return [
-        {
-            "id": row.id,
-            "user_id": row.user_id,
-            "action": row.action,
-            "entity_type": row.entity_type,
-            "entity_id": row.entity_id,
-            "timestamp": row.timestamp.isoformat() if row.timestamp else None,
-            "metadata": row.metadata_json,
-        }
-        for row in rows
-    ]
-
-
 @router.get("/return-equipments", response_model=list[ReturnEquipmentRead])
 def list_return_equipments(
     work_order_id: int | None = Query(default=None, ge=1),
