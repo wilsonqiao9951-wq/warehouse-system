@@ -6,9 +6,48 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
-## 2026-08-07 - Persisted work-order profit snapshots and rankings
+## 2026-08-07 - Employee performance scorecards and role dashboards
 
 Status: implemented; release verification in progress.
+
+Delivered:
+
+- Added bounded, tenant-scoped employee scorecards that keep completed
+  throughput, created-cohort completion, first-time-fix, rework, duration, and
+  parts-use evidence as separate, documented metrics.
+- Added explicit first-time-fix, duration, and parts-usage coverage so incomplete
+  evidence cannot silently become a favorable or unfavorable score.
+- Added manager/administrator team and engineer filters with financial parts
+  efficiency, revenue, labor, and contribution evidence.
+- Added an engineer self dashboard that rejects coworker queries, omits team
+  identities, and redacts every financial field while retaining the engineer's
+  own operational and parts-quantity evidence.
+- Added non-engineer/missing completion attribution disclosure, inactive-user
+  preservation, maximum 366-day ranges, live `no-store` responses, and the
+  `/performance` responsive workbench.
+
+Verification so far:
+
+- Calculation reconciliation, period-end cohort semantics, post-period
+  completion exclusion, quality coverage, parts efficiency, financial
+  redaction, self-only access, manager filters, role denial, range bounds, and
+  tenant isolation passed (3 tests).
+- Enterprise analytics, RBAC, and profit-snapshot regression suite passed (14
+  tests including the new scorecard tests).
+- Frontend ESLint, TypeScript, and Next.js production build passed for all 45
+  static routes.
+- All 268 backend tests passed.
+- The local `0061` database remains at model zero drift; this read-only feature
+  requires no schema revision or data rewrite.
+- Python dependency consistency/vulnerability checks and full/production npm
+  audits passed with no known vulnerabilities; Compose topology and API/web
+  production images built successfully.
+
+## 2026-08-07 - Persisted work-order profit snapshots and rankings
+
+Status: implemented, locally verified, and published as draft PR #34. GitHub
+CI run 69 passed all backend, frontend, PostgreSQL/RLS, dependency-audit, and
+production-image jobs.
 
 Delivered:
 

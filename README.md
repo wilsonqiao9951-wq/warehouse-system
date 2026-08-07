@@ -48,6 +48,8 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
   pending-custody projection, and authenticated replenish/return handoff
 - Persisted completed-work-order profit snapshots with explicit coverage and
   region, engineer, and machine-type rankings
+- Role-specific employee performance scorecards with transparent completion,
+  throughput, quality-coverage, duration, and parts-efficiency definitions
 - Validated warehouse → shelf/bin → part scanning with stale-label and cross-warehouse protection
 - Real-time inventory balance
 - Excel export
@@ -80,6 +82,7 @@ The project now includes a Next.js admin dashboard at `frontend/` with:
 - Inventory reconciliation workbench with severity/source filters and direct workflow drill-down
 - Van inventory planning with engineer trends and explainable replenish/return quantities
 - Profit snapshot workbench with daily evidence coverage and three-dimensional rankings
+- Manager team and engineer self-service performance scorecards with financial redaction
 - Warehouse replenishment queue with server-authorized picking, shipping, and completion actions
 - Engineer My Van deliveries with registered-phone and password-verified receipt
 - Employee page (roles and performance overview)
@@ -172,6 +175,7 @@ are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 - `GET /api/inventory/reconciliation-exceptions` performs a bounded, read-only integrity review across counts, replenishments, returns, and their linked movements. See [`docs/INVENTORY_RECONCILIATION.md`](docs/INVENTORY_RECONCILIATION.md).
 - `GET /api/inventory/van-planning` returns tenant- and role-scoped engineer consumption trends plus forecast/threshold-based replenishment and return guidance without mutating stock. See [`docs/VAN_INVENTORY_PLANNING.md`](docs/VAN_INVENTORY_PLANNING.md).
 - `GET /api/analytics/profit-snapshots` returns persisted daily profit evidence and region, engineer, and machine-type rankings; the password-confirmed backfill endpoint creates missing historical snapshots without overwriting conflicts. See [`docs/PROFIT_SNAPSHOTS.md`](docs/PROFIT_SNAPSHOTS.md).
+- `GET /api/performance/scorecards` returns a manager team view or an engineer-only self view with bounded, source-defined completion, throughput, quality, repair-duration, and parts-use metrics. See [`docs/PERFORMANCE_SCORECARDS.md`](docs/PERFORMANCE_SCORECARDS.md).
 - Full custody contract: [`docs/REPLENISHMENT_CUSTODY_API.md`](docs/REPLENISHMENT_CUSTODY_API.md).
 - Work-order profit response now uses:
   - `revenue`

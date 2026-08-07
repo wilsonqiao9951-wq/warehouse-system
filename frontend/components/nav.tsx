@@ -33,6 +33,7 @@ const links: NavLink[] = [
   { href: "/reports", label: "Reports", roles: ["manager", "admin"], permission: "reports.read" },
   { href: "/analytics", label: "Analytics", roles: ["manager", "admin"], permission: "reports.read" },
   { href: "/profit-snapshots", label: "Profit Snapshots", roles: ["manager", "admin"], permission: "reports.read" },
+  { href: "/performance", label: "Performance", roles: ["manager", "admin", "engineer"] },
   { href: "/agent", label: "Operations Agent", roles: ["manager", "admin"], permission: "agent.use" },
   { href: "/audit-logs", label: "Audit Logs", roles: ["manager", "admin"], permission: "audit.read" },
   { href: "/backups", label: "Backups", roles: ["admin"] },
@@ -56,7 +57,7 @@ const links: NavLink[] = [
 ];
 
 function sortEngineerLinks(items: typeof links) {
-  const order = ["/today", "/my-jobs", "/my-van-inventory", "/knowledge-base", "/inventory-scan", "/sync-center", "/profile", "/map", "/part-observation"];
+  const order = ["/today", "/my-jobs", "/performance", "/my-van-inventory", "/knowledge-base", "/inventory-scan", "/sync-center", "/profile", "/map", "/part-observation"];
   return [...items].sort((a, b) => {
     const ai = order.indexOf(a.href); const bi = order.indexOf(b.href);
     return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);

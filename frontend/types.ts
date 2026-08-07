@@ -885,6 +885,63 @@ export interface ProfitSnapshotBackfill {
   next_after_work_order_id?: number | null;
 }
 
+export interface PerformanceScorecard {
+  engineer_id?: number | null;
+  engineer_name: string;
+  is_active: boolean;
+  cohort_received: number;
+  cohort_completed: number;
+  completion_rate?: number | null;
+  completed_in_period: number;
+  throughput_per_30_days: number;
+  first_time_fix_labeled: number;
+  first_time_fix_rate?: number | null;
+  first_time_fix_coverage: number;
+  rework_rate: number;
+  repair_duration_labeled: number;
+  average_repair_minutes?: number | null;
+  repair_duration_coverage: number;
+  parts_usage_work_orders: number;
+  parts_usage_coverage: number;
+  parts_quantity: number;
+  parts_quantity_per_completed: number;
+  parts_cost?: number | null;
+  parts_cost_per_completed?: number | null;
+  parts_cost_to_revenue_rate?: number | null;
+  revenue?: number | null;
+  labor_cost?: number | null;
+  contribution?: number | null;
+}
+
+export interface PerformanceDashboard {
+  generated_at: string;
+  viewer_scope: "self" | "team";
+  can_view_team: boolean;
+  can_view_financials: boolean;
+  from_date: string;
+  to_date: string;
+  days: number;
+  selected_engineer_id?: number | null;
+  engineer_options: Array<{ value: string; label: string }>;
+  definitions: Record<string, string>;
+  team: {
+    engineer_count: number;
+    active_engineers: number;
+    cohort_received: number;
+    cohort_completed: number;
+    completion_rate?: number | null;
+    completed_in_period: number;
+    throughput_per_30_days: number;
+    first_time_fix_rate?: number | null;
+    first_time_fix_coverage: number;
+    rework_rate: number;
+    average_repair_minutes?: number | null;
+    parts_quantity_per_completed: number;
+    parts_cost_per_completed?: number | null;
+  };
+  scorecards: PerformanceScorecard[];
+}
+
 export type EnterpriseAgentIntent =
   | "daily_brief"
   | "backlog_risk"
