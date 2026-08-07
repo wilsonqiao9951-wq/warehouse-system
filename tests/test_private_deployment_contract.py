@@ -28,6 +28,7 @@ def test_production_compose_keeps_data_private_and_migrations_one_shot():
     assert services["migrate"]["restart"] == "no"
     assert services["api"]["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
     assert services["web"]["depends_on"]["api"]["condition"] == "service_healthy"
+    assert services["web"]["build"]["args"]["NEXT_PUBLIC_AUTH_SESSION_MODE"] == "${PUBLIC_AUTH_SESSION_MODE:-auto}"
 
 
 def test_runtime_services_are_non_root_read_only_and_have_explicit_writes():

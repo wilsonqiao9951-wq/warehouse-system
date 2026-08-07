@@ -159,7 +159,15 @@ class InvitationAccept(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    user: UserRead
+    device_id: str | None = None
+
+
+class BrowserSessionResponse(BaseModel):
+    token_type: Literal["cookie"] = "cookie"
+    csrf_token: str
     expires_in: int
     user: UserRead
     device_id: str | None = None

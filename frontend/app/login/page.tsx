@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api, storeAuthenticatedSession } from "@/lib/api";
 import { OrganizationBranding } from "@/types";
 
 export default function LoginPage() {
@@ -45,9 +45,7 @@ export default function LoginPage() {
         setPassword("");
         return;
       }
-      window.localStorage.setItem("opf_access_token", result.access_token);
-      window.localStorage.setItem("opf_role", result.user.role);
-      window.localStorage.setItem("opf_user_id", String(result.user.id));
+      storeAuthenticatedSession(result);
       window.location.href = result.user.role === "engineer" ? "/today" : "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in.");

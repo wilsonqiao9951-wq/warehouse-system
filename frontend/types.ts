@@ -46,13 +46,22 @@ export interface AuthToken {
   device_id?: string | null;
 }
 
+export interface BrowserSession {
+  token_type: "cookie";
+  csrf_token: string;
+  expires_in: number;
+  user: User;
+  device_id?: string | null;
+}
+
 export interface MfaChallenge {
   mfa_required: true;
   challenge_token: string;
   expires_in: number;
 }
 
-export type AuthLoginResult = AuthToken | MfaChallenge;
+export type AuthLoginResult = AuthToken | BrowserSession | MfaChallenge;
+export type AuthSession = AuthToken | BrowserSession;
 
 export interface MfaStatus {
   eligible: boolean;

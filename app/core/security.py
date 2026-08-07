@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import base64
+from hashlib import sha256
 
 import jwt
 from jwt import InvalidTokenError
@@ -27,6 +28,7 @@ def create_access_token(
     *,
     auth_version: int,
     device_id: str | None = None,
+    csrf_token: str | None = None,
 ) -> tuple[str, int]:
     if (
         settings.app_env.lower() in {"production", "staging"}
@@ -44,6 +46,8 @@ def create_access_token(
     }
     if device_id:
         payload["device_id"] = device_id
+    if csrf_token:
+        payload["csrf_token_hash"] = sha256(csrf_token.encode("utf-8")).hexdigest()
     token = jwt.encode(
         payload,
         settings.jwt_secret_key,
@@ -52,7 +56,7 @@ def create_access_token(
     return token, expires_in
 
 
-def decode_access_token(token: str) -> tuple[int, int, int, str | None]:
+def decode_access_token(token: str) -> tuple[int, int, int, str | None, str | None]:
     try:
         # Reject non-canonical base64url segments. Without this check, changing
         # unused padding bits in the final signature character can decode to the
@@ -74,11 +78,19 @@ def decode_access_token(token: str) -> tuple[int, int, int, str | None]:
         auth_version = int(payload["auth_version"])
         if auth_version < 0:
             raise ValueError("Invalid authentication version")
+        csrf_token_hash = payload.get("csrf_token_hash")
+        if csrf_token_hash is not None and (
+            not isinstance(csrf_token_hash, str)
+            or len(csrf_token_hash) != 64
+            or any(character not in "0123456789abcdef" for character in csrf_token_hash)
+        ):
+            raise ValueError("Invalid CSRF binding")
         return (
             int(payload["sub"]),
             int(payload["organization_id"]),
             auth_version,
             payload.get("device_id"),
+            csrf_token_hash,
         )
     except (InvalidTokenError, KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid or expired access token") from exc

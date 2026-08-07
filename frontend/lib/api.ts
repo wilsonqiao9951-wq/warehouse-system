@@ -68,7 +68,7 @@ import {
   AbnormalUsageRow,
   AuthSecurityEvent,
   AuthLoginResult,
-  AuthToken,
+  AuthSession,
   ImportBatch,
   InvitationCreated,
   InvitationInfo,
@@ -111,6 +111,74 @@ import {
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/api";
 const OFFLINE_QUEUE_KEY = "opf_offline_queue";
 const CLAIM_VERSIONS_KEY = "opf_claim_versions";
+const AUTH_SESSION_MODE_KEY = "opf_auth_session";
+const CSRF_TOKEN_KEY = "opf_csrf_token";
+
+function prefersBrowserSession(): boolean {
+  if (typeof window === "undefined") return false;
+  const configured = (process.env.NEXT_PUBLIC_AUTH_SESSION_MODE || "auto").trim().toLowerCase();
+  if (configured === "cookie") return true;
+  if (configured === "bearer") return false;
+  try {
+    const apiUrl = new URL(API_BASE, window.location.origin);
+    return window.isSecureContext && apiUrl.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+function authenticationHeaders(method: string, workOrderId?: number): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  const headers: Record<string, string> = {};
+  const token = window.localStorage.getItem("opf_access_token");
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const deviceToken = getCurrentDeviceToken();
+  if (deviceToken) headers["X-Device-Token"] = deviceToken;
+  const normalizedMethod = method.toUpperCase();
+  if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(normalizedMethod)) {
+    if (!token && window.localStorage.getItem(AUTH_SESSION_MODE_KEY) === "cookie") {
+      const csrfToken = window.localStorage.getItem(CSRF_TOKEN_KEY);
+      if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+    }
+    if (workOrderId !== undefined) {
+      const claimVersion = readClaimVersions()[String(workOrderId)];
+      if (Number.isInteger(claimVersion)) headers["X-Claim-Version"] = String(claimVersion);
+    }
+  }
+  return headers;
+}
+
+export function hasStoredAuthentication(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean(
+    window.localStorage.getItem("opf_access_token")
+    || window.localStorage.getItem(AUTH_SESSION_MODE_KEY) === "cookie"
+  );
+}
+
+export function storeAuthenticatedSession(session: AuthSession): void {
+  if (session.token_type === "cookie") {
+    window.localStorage.removeItem("opf_access_token");
+    window.localStorage.setItem(AUTH_SESSION_MODE_KEY, "cookie");
+    window.localStorage.setItem(CSRF_TOKEN_KEY, session.csrf_token);
+  } else {
+    window.localStorage.setItem("opf_access_token", session.access_token);
+    window.localStorage.setItem(AUTH_SESSION_MODE_KEY, "bearer");
+    window.localStorage.removeItem(CSRF_TOKEN_KEY);
+  }
+  window.localStorage.setItem("opf_role", session.user.role);
+  window.localStorage.setItem("opf_user_id", String(session.user.id));
+}
+
+export function clearLocalAuthentication(): void {
+  if (typeof window === "undefined") return;
+  clearOfflineSession();
+  window.localStorage.removeItem("opf_access_token");
+  window.localStorage.removeItem(AUTH_SESSION_MODE_KEY);
+  window.localStorage.removeItem(CSRF_TOKEN_KEY);
+  window.localStorage.removeItem("opf_role");
+  window.localStorage.removeItem("opf_user_id");
+}
 
 async function downloadAuthenticatedFile(
   path: string,
@@ -118,15 +186,15 @@ async function downloadAuthenticatedFile(
   fallbackFilename: string
 ): Promise<{ filename: string; sha256: string | null; recordCount: number | null }> {
   if (typeof window === "undefined") throw new Error("File export requires a browser.");
-  const token = window.localStorage.getItem("opf_access_token");
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
+      ...authenticationHeaders("POST")
     },
     body: JSON.stringify(payload),
-    cache: "no-store"
+    cache: "no-store",
+    credentials: "include"
   });
   if (!response.ok) {
     let detail = `Unable to export file (${response.status})`;
@@ -458,19 +526,12 @@ async function xhrUploadPartPhoto(
   if (typeof navigator !== "undefined" && !navigator.onLine) {
     throw new Error("You are offline. Connect to the network and try again.");
   }
-  const token = typeof window !== "undefined" ? window.localStorage.getItem("opf_access_token") : null;
-  const headers: Record<string, string> = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-    const deviceToken = getCurrentDeviceToken();
-    if (deviceToken) headers["X-Device-Token"] = deviceToken;
-    const claimVersion = readClaimVersions()[String(workOrderId)];
-    if (Number.isInteger(claimVersion)) headers["X-Claim-Version"] = String(claimVersion);
-  }
+  const headers = authenticationHeaders("POST", workOrderId);
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${API_BASE}/uploads/work-order-parts`);
+    xhr.withCredentials = true;
     Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
     xhr.upload.onprogress = (ev) => {
       if (ev.lengthComputable) {
@@ -534,19 +595,7 @@ async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQ
     throw new Error("You are offline. This action will be available when connection returns.");
   }
   const isFormData = init?.body instanceof FormData;
-  let authHeaders: Record<string, string> = {};
-  if (typeof window !== "undefined") {
-    const token = window.localStorage.getItem("opf_access_token");
-    if (token) {
-      authHeaders = { Authorization: `Bearer ${token}` };
-      const deviceToken = getCurrentDeviceToken();
-      if (deviceToken) authHeaders["X-Device-Token"] = deviceToken;
-      if (method !== "GET" && workOrderId !== undefined) {
-        const claimVersion = readClaimVersions()[String(workOrderId)];
-        if (Number.isInteger(claimVersion)) authHeaders["X-Claim-Version"] = String(claimVersion);
-      }
-    }
-  }
+  const authHeaders = authenticationHeaders(method, workOrderId);
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
@@ -556,7 +605,8 @@ async function request<T>(path: string, init?: RequestInit, allowNetworkFailureQ
         ...authHeaders,
         ...(init?.headers || {})
       },
-      cache: "no-store"
+      cache: "no-store",
+      credentials: "include"
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Network error";
@@ -1002,25 +1052,29 @@ export const api = {
   login: (email: string, password: string) => {
     const device = ensureDeviceCredentials();
     const form = new URLSearchParams({ username: email, password });
+    const sessionMode = prefersBrowserSession() ? "cookie" : "bearer";
     return request<AuthLoginResult>("/auth/login", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         "X-Device-Id": device.deviceId,
         "X-Device-Token": device.deviceToken,
-        "X-Device-Name": device.deviceName
+        "X-Device-Name": device.deviceName,
+        "X-Session-Mode": sessionMode
       },
       body: form.toString()
     });
   },
   completeMfaLogin: (challengeToken: string, code: string) => {
     const device = ensureDeviceCredentials();
-    return request<AuthToken>("/auth/mfa/login/complete", {
+    const sessionMode = prefersBrowserSession() ? "cookie" : "bearer";
+    return request<AuthSession>("/auth/mfa/login/complete", {
       method: "POST",
       headers: {
         "X-Device-Id": device.deviceId,
         "X-Device-Token": device.deviceToken,
-        "X-Device-Name": device.deviceName
+        "X-Device-Name": device.deviceName,
+        "X-Session-Mode": sessionMode
       },
       body: JSON.stringify({ challenge_token: challengeToken, code })
     });
@@ -1052,6 +1106,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ account_password: accountPassword })
     }),
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
   listAuthSecurityEvents: (limit = 50) =>
     request<AuthSecurityEvent[]>(`/auth/security-events?limit=${limit}`),
   getPasswordResetConfiguration: () =>
@@ -1568,12 +1623,12 @@ export const api = {
   ),
   loadPartRecognitionImage: async (observationId: number) => {
     if (typeof window === "undefined") throw new Error("Photo preview requires a browser.");
-    const token = window.localStorage.getItem("opf_access_token");
     const response = await fetch(
       `${API_BASE}/parts/recognition/observations/${observationId}/image`,
       {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        cache: "no-store"
+        headers: authenticationHeaders("GET"),
+        cache: "no-store",
+        credentials: "include"
       }
     );
     if (!response.ok) {
@@ -1726,10 +1781,10 @@ export const api = {
   openMachineKnowledgeMedia: async (entryId: number) => {
     if (typeof window === "undefined") throw new Error("Media preview requires a browser.");
     const preview = window.open("about:blank", "_blank");
-    const token = window.localStorage.getItem("opf_access_token");
     try {
       const response = await fetch(`${API_BASE}/machine-knowledge/media/${entryId}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
+        headers: authenticationHeaders("GET"),
+        credentials: "include"
       });
       if (!response.ok) {
         let detail = `Unable to open media (${response.status})`;

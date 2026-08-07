@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { api, clearOfflineSession } from "@/lib/api";
+import { api, clearLocalAuthentication, hasStoredAuthentication } from "@/lib/api";
 
 type NavLink = {
   href: string;
@@ -68,11 +68,11 @@ export default function Nav() {
 
   useEffect(() => {
     const saved = window.localStorage.getItem("opf_role");
-    const token = window.localStorage.getItem("opf_access_token");
+    const hasSession = hasStoredAuthentication();
     if (saved) {
       setRole(saved);
     }
-    if (token) {
+    if (hasSession) {
       if (!navigator.onLine) {
         setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
         return;
@@ -93,7 +93,7 @@ export default function Nav() {
             || message.includes("API unavailable")
           );
           if (navigator.onLine && !networkUnavailable) {
-            window.localStorage.removeItem("opf_access_token");
+            clearLocalAuthentication();
             setAuthenticated(false);
           } else {
             setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
@@ -134,12 +134,13 @@ export default function Nav() {
         {authenticated && (
           <button
             type="button"
-            onClick={() => {
-              clearOfflineSession();
-              window.localStorage.removeItem("opf_access_token");
-              window.localStorage.removeItem("opf_role");
-              window.localStorage.removeItem("opf_user_id");
-              window.location.href = "/login";
+            onClick={async () => {
+              try {
+                await api.logout();
+              } finally {
+                clearLocalAuthentication();
+                window.location.href = "/login";
+              }
             }}
           >
             Sign out
