@@ -3,6 +3,8 @@ import json
 import zipfile
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.security import hash_password
@@ -11,6 +13,8 @@ from app.models import (
     AuditLog,
     Customer,
     Equipment,
+    MachineKnowledgeEntry,
+    MachineKnowledgeProfile,
     Organization,
     OrganizationDataRestore,
     Part,
@@ -19,10 +23,10 @@ from app.models import (
 )
 
 
-def _backup(client) -> bytes:
+def _backup(client, *, include_files: bool = False) -> bytes:
     response = client.post(
         "/api/organization/data-exports",
-        json={"include_files": False},
+        json={"include_files": include_files},
     )
     assert response.status_code == 200, response.text
     return response.content
@@ -249,6 +253,211 @@ def test_restore_rehydrates_deleted_parent_and_child_then_rolls_back(client):
     with client.app.state.testing_session_local() as db:
         assert db.get(Equipment, equipment_id) is None
         assert db.get(Customer, customer_id) is None
+
+
+def test_restore_stages_writes_and_rolls_back_public_and_private_media(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    public_root = tmp_path / "uploads"
+    private_root = tmp_path / "private_uploads"
+    rollback_root = tmp_path / "restore_rollbacks"
+    public_file = public_root / "part-images" / "filter.png"
+    private_file = private_root / "machine-knowledge" / "guide.png"
+    public_file.parent.mkdir(parents=True)
+    private_file.parent.mkdir(parents=True)
+    public_file.write_bytes(b"archived-public-media")
+    private_file.write_bytes(b"archived-private-media")
+    monkeypatch.setattr(settings, "data_export_public_files_root", str(public_root))
+    monkeypatch.setattr(settings, "data_export_private_files_root", str(private_root))
+    monkeypatch.setattr(
+        settings,
+        "data_restore_rollback_files_root",
+        str(rollback_root),
+    )
+
+    with client.app.state.testing_session_local() as db:
+        profile = MachineKnowledgeProfile(
+            organization_id=1,
+            model="MEDIA-9000",
+            model_key="media-9000",
+        )
+        db.add(profile)
+        db.flush()
+        db.add_all(
+            [
+                Part(
+                    organization_id=1,
+                    part_number="RESTORE-MEDIA-100",
+                    name="Media filter",
+                    image_url="/uploads/part-images/filter.png",
+                ),
+                MachineKnowledgeEntry(
+                    organization_id=1,
+                    profile_id=profile.id,
+                    entry_type="photo",
+                    title="Media restore guide",
+                    content="Validated media restore evidence",
+                    media_storage_key="machine-knowledge/guide.png",
+                    media_mime_type="image/png",
+                    media_size_bytes=len(b"archived-private-media"),
+                ),
+            ]
+        )
+        db.commit()
+
+    archive = _backup(client, include_files=True)
+    public_file.write_bytes(b"live-public-media-before-restore")
+    private_file.unlink()
+
+    with client.app.state.testing_session_local() as db:
+        other = Organization(name="Other Media Tenant", slug="other-media-tenant")
+        db.add(other)
+        db.flush()
+        other_part = Part(
+            organization_id=other.id,
+            part_number="OTHER-MEDIA-100",
+            name="Other tenant media reference",
+            image_url="/uploads/part-images/filter.png",
+        )
+        db.add(other_part)
+        db.commit()
+        other_id = other.id
+        other_part_id = other_part.id
+
+    cross_tenant_target = _rehearse(client, archive)
+    assert cross_tenant_target.status_code == 200, cross_tenant_target.text
+    assert cross_tenant_target.json()["file_conflict_count"] == 1
+    assert any(
+        "another organization" in message
+        for message in cross_tenant_target.json()["validation_messages"]
+    )
+    with client.app.state.testing_session_local() as db:
+        db.delete(db.get(Part, other_part_id))
+        db.delete(db.get(Organization, other_id))
+        db.commit()
+
+    private_file.mkdir()
+    unsafe_target = _rehearse(client, archive)
+    assert unsafe_target.status_code == 200, unsafe_target.text
+    assert unsafe_target.json()["file_conflict_count"] == 1
+    assert unsafe_target.json()["conflict_count"] == 1
+    private_file.rmdir()
+
+    rehearsal = _rehearse(client, archive)
+    assert rehearsal.status_code == 200, rehearsal.text
+    result = rehearsal.json()
+    assert result["create_count"] == 0
+    assert result["update_count"] == 0
+    assert result["file_create_count"] == 1
+    assert result["file_overwrite_count"] == 1
+    assert result["file_unchanged_count"] == 0
+    assert result["file_conflict_count"] == 0
+
+    approved = client.post(
+        f"/api/organization/data-restores/{result['id']}/decision",
+        json={
+            "expected_version": result["version"],
+            "decision": "approve",
+            "note": "Restore verified customer media",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    evidence_root = rollback_root / "organization-1" / f"restore-{result['id']}"
+    atomic_copy = data_restores._atomic_copy
+    promotion_calls = 0
+
+    def fail_second_promotion(source, target):
+        nonlocal promotion_calls
+        promotion_calls += 1
+        if promotion_calls == 2:
+            raise OSError("simulated promotion failure")
+        atomic_copy(source, target)
+
+    monkeypatch.setattr(data_restores, "_atomic_copy", fail_second_promotion)
+    failed_apply = _apply(
+        client,
+        result["id"],
+        approved.json()["version"],
+        archive,
+    )
+    assert failed_apply.status_code == 409
+    assert public_file.read_bytes() == b"live-public-media-before-restore"
+    assert not private_file.exists()
+    assert not evidence_root.exists()
+    monkeypatch.setattr(data_restores, "_atomic_copy", atomic_copy)
+
+    session_commit = Session.commit
+
+    def fail_restore_commit(_session):
+        raise IntegrityError("simulated restore commit failure", {}, Exception())
+
+    monkeypatch.setattr(Session, "commit", fail_restore_commit)
+    failed_commit = _apply(
+        client,
+        result["id"],
+        approved.json()["version"],
+        archive,
+    )
+    assert failed_commit.status_code == 409
+    assert public_file.read_bytes() == b"live-public-media-before-restore"
+    assert not private_file.exists()
+    assert not evidence_root.exists()
+    monkeypatch.setattr(Session, "commit", session_commit)
+
+    applied = _apply(
+        client,
+        result["id"],
+        approved.json()["version"],
+        archive,
+    )
+    assert applied.status_code == 200, applied.text
+    applied_result = applied.json()
+    assert applied_result["file_rollback_sha256"] is not None
+    assert applied_result["file_rollback_size_bytes"] > 0
+    assert public_file.read_bytes() == b"archived-public-media"
+    assert private_file.read_bytes() == b"archived-private-media"
+    assert evidence_root.is_dir()
+
+    monkeypatch.setattr(Session, "commit", fail_restore_commit)
+    failed_rollback_commit = client.post(
+        f"/api/organization/data-restores/{result['id']}/rollback",
+        json={"expected_version": applied_result["version"]},
+    )
+    assert failed_rollback_commit.status_code == 409
+    assert public_file.read_bytes() == b"archived-public-media"
+    assert private_file.read_bytes() == b"archived-private-media"
+    assert evidence_root.is_dir()
+    monkeypatch.setattr(Session, "commit", session_commit)
+
+    evidence_after_public = evidence_root / "after" / "public" / "part-images" / "filter.png"
+    evidence_after_public.write_bytes(b"corrupt-rollback-evidence")
+    corrupt_evidence = client.post(
+        f"/api/organization/data-restores/{result['id']}/rollback",
+        json={"expected_version": applied_result["version"]},
+    )
+    assert corrupt_evidence.status_code == 409
+    assert "evidence is corrupt" in corrupt_evidence.json()["detail"]
+    evidence_after_public.write_bytes(b"archived-public-media")
+
+    public_file.write_bytes(b"changed-after-media-restore")
+    drift_blocked = client.post(
+        f"/api/organization/data-restores/{result['id']}/rollback",
+        json={"expected_version": applied_result["version"]},
+    )
+    assert drift_blocked.status_code == 409
+    assert "media changed after review" in drift_blocked.json()["detail"]
+    public_file.write_bytes(b"archived-public-media")
+
+    rolled_back = client.post(
+        f"/api/organization/data-restores/{result['id']}/rollback",
+        json={"expected_version": applied_result["version"]},
+    )
+    assert rolled_back.status_code == 200, rolled_back.text
+    assert public_file.read_bytes() == b"live-public-media-before-restore"
+    assert not private_file.exists()
+    assert not evidence_root.exists()
 
 
 def test_restore_accepts_previous_portable_schema_revision(client, monkeypatch):

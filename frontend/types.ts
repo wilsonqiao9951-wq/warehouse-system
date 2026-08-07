@@ -245,6 +245,10 @@ export interface OrganizationDataRestore {
   record_count: number;
   file_count: number;
   create_count: number;
+  file_create_count: number;
+  file_overwrite_count: number;
+  file_unchanged_count: number;
+  file_conflict_count: number;
   update_count: number;
   unchanged_count: number;
   conflict_count: number;
@@ -260,6 +264,8 @@ export interface OrganizationDataRestore {
   validation_messages: string[];
   approval_note?: string | null;
   rollback_size_bytes: number;
+  file_rollback_sha256?: string | null;
+  file_rollback_size_bytes: number;
   version: number;
   approved_at?: string | null;
   rejected_at?: string | null;

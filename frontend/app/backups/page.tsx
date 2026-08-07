@@ -71,7 +71,7 @@ export default function BackupsPage() {
       setMessage(
         result.conflict_count
           ? `Rehearsal recorded with ${result.conflict_count} conflict(s); approval is blocked.`
-          : `Rehearsal recorded with ${result.create_count} safe rehydration(s) and ${result.update_count} eligible update(s).`
+          : `Rehearsal recorded with ${result.create_count} safe rehydration(s), ${result.update_count} eligible update(s), and ${result.file_create_count + result.file_overwrite_count} media write(s).`
       );
       await refresh();
     } catch (value) {
@@ -119,7 +119,7 @@ export default function BackupsPage() {
         restorePassword
       );
       setRestorePassword("");
-      setMessage("Approved database restore applied; rollback evidence is available.");
+      setMessage("Approved database and media restore applied; rollback evidence is available.");
       await refresh();
     } catch (value) {
       setError(value instanceof Error ? value.message : "Unable to apply approved restore.");
@@ -196,8 +196,8 @@ export default function BackupsPage() {
           Upload an <code>opf-portable-v1</code> ZIP to verify every manifest checksum and preview
           existing-row changes. Authentication, billing, audit, inventory transaction, custody,
           and other control-plane records are protected. Missing eligible records are recreated only
-          after global ID, unique-key, tenant, and foreign-key checks; media is verified but is not
-          written to storage in this stage.
+          after global ID, unique-key, tenant, and foreign-key checks. Media is checksum-verified,
+          staged outside served storage, atomically promoted, and retained with file-level rollback evidence.
         </p>
         <form onSubmit={rehearse} style={{ display: "grid", gap: 12 }}>
           <label>
@@ -256,6 +256,7 @@ export default function BackupsPage() {
                   <th>Status</th>
                   <th>Creates</th>
                   <th>Updates</th>
+                  <th>Media writes</th>
                   <th>Conflicts</th>
                   <th>Protected</th>
                   <th>Archive / plan</th>
@@ -270,6 +271,9 @@ export default function BackupsPage() {
                     <td>{row.status.replace("_", " ")}</td>
                     <td>{row.create_count.toLocaleString()}</td>
                     <td>{row.update_count.toLocaleString()}</td>
+                    <td>
+                      {row.file_create_count.toLocaleString()} new / {row.file_overwrite_count.toLocaleString()} overwrite
+                    </td>
                     <td>{row.conflict_count.toLocaleString()}</td>
                     <td>{row.protected_count.toLocaleString()}</td>
                     <td>
@@ -282,6 +286,11 @@ export default function BackupsPage() {
                       <details>
                         <summary>Dry-run details</summary>
                         <ul style={{ margin: "8px 0", paddingLeft: 18 }}>
+                          {row.file_count > 0 && (
+                            <li>
+                              <code>media</code>: {row.file_create_count} create(s), {row.file_overwrite_count} overwrite(s), {row.file_unchanged_count} unchanged, {row.file_conflict_count} conflict(s)
+                            </li>
+                          )}
                           {Object.entries(row.table_summary)
                             .filter(([, summary]) => summary.creates || summary.updates || summary.conflicts || summary.protected)
                             .map(([table, summary]) => (
@@ -304,7 +313,10 @@ export default function BackupsPage() {
                                 restorePassword.length < 10 ||
                                 decisionNote.trim().length < 3 ||
                                 row.conflict_count > 0 ||
-                                (row.create_count === 0 && row.update_count === 0)
+                                (row.create_count === 0 &&
+                                  row.update_count === 0 &&
+                                  row.file_create_count === 0 &&
+                                  row.file_overwrite_count === 0)
                               }
                               onClick={() => decide(row, "approve")}
                             >
@@ -336,7 +348,7 @@ export default function BackupsPage() {
                             disabled={restoreBusy !== null || restorePassword.length < 10}
                             onClick={() => rollbackRestore(row)}
                           >
-                            Roll back {row.create_count + row.update_count} row(s)
+                            Roll back {row.create_count + row.update_count} row(s) / {row.file_create_count + row.file_overwrite_count} file(s)
                           </button>
                         )}
                         {row.approval_note && <span className="muted">{row.approval_note}</span>}

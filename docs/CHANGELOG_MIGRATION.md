@@ -578,3 +578,27 @@ tests passed; all 136 backend tests passed; fresh base-to-`0038`, empty
 evidence downgrade passed on SQLite; ESLint and the Next.js production build
 passed for all 33 static routes; Python dependency consistency and
 full/production npm audits reported 0 known vulnerabilities.
+
+## 20260807_0039 - Controlled restore media evidence
+
+- Adds per-restore media create, overwrite, unchanged, and conflict counts plus
+  durable file rollback SHA-256 and byte-size evidence.
+- Maps archive files only to exact configured public/private roots and rejects
+  unsafe references, mismatched paths, duplicate targets, symbolic links, and
+  non-regular destinations.
+- Requires every target to remain referenced by the resulting tenant data and
+  blocks paths referenced by any other organization.
+- Stages verified archive bytes outside served storage, preserves overwritten
+  originals, and atomically promotes each target through a same-directory file.
+- Compensates file writes when database application fails and reapplies archive
+  files when a rollback database commit fails.
+- Blocks file rollback on live-file drift or evidence corruption, then removes
+  protected evidence after a successful rollback.
+- Refuses downgrade while media writeback or rollback evidence exists.
+
+Verification: seven restore workflow/security/media tests and three export
+regression tests passed; all 137 backend tests passed; fresh base-to-`0039`,
+empty `0039 -> 0038 -> 0039`, schema/constraint inspection, and guarded media-
+evidence downgrade passed on SQLite; ESLint and the Next.js production build
+passed for all 33 static routes; Python dependency consistency and
+full/production npm audits reported 0 known vulnerabilities.

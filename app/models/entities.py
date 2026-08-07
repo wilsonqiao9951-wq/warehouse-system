@@ -192,9 +192,19 @@ class OrganizationDataRestore(Base):
             name="ck_organization_data_restore_create_count_non_negative",
         ),
         CheckConstraint(
+            "file_create_count >= 0 AND file_overwrite_count >= 0 "
+            "AND file_unchanged_count >= 0 AND file_conflict_count >= 0 "
+            "AND file_rollback_size_bytes >= 0",
+            name="ck_organization_data_restore_file_counts_non_negative",
+        ),
+        CheckConstraint(
             "length(archive_sha256) = 64 AND length(plan_sha256) = 64 "
             "AND (rollback_sha256 IS NULL OR length(rollback_sha256) = 64)",
             name="ck_organization_data_restore_hashes",
+        ),
+        CheckConstraint(
+            "file_rollback_sha256 IS NULL OR length(file_rollback_sha256) = 64",
+            name="ck_organization_data_restore_file_rollback_hash",
         ),
         Index(
             "ix_organization_data_restore_org_created",
@@ -231,6 +241,10 @@ class OrganizationDataRestore(Base):
     record_count: Mapped[int] = mapped_column(Integer, nullable=False)
     file_count: Mapped[int] = mapped_column(Integer, nullable=False)
     create_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    file_create_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    file_overwrite_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    file_unchanged_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    file_conflict_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     update_count: Mapped[int] = mapped_column(Integer, nullable=False)
     unchanged_count: Mapped[int] = mapped_column(Integer, nullable=False)
     conflict_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -241,6 +255,8 @@ class OrganizationDataRestore(Base):
     rollback_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     rollback_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     rollback_size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    file_rollback_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    file_rollback_size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

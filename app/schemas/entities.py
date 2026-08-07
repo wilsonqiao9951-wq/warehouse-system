@@ -600,6 +600,10 @@ class OrganizationDataRestoreRead(BaseModel):
     record_count: int = Field(ge=0)
     file_count: int = Field(ge=0)
     create_count: int = Field(ge=0)
+    file_create_count: int = Field(ge=0)
+    file_overwrite_count: int = Field(ge=0)
+    file_unchanged_count: int = Field(ge=0)
+    file_conflict_count: int = Field(ge=0)
     update_count: int = Field(ge=0)
     unchanged_count: int = Field(ge=0)
     conflict_count: int = Field(ge=0)
@@ -608,6 +612,8 @@ class OrganizationDataRestoreRead(BaseModel):
     validation_messages: list[str]
     approval_note: str | None = None
     rollback_size_bytes: int = Field(ge=0)
+    file_rollback_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+    file_rollback_size_bytes: int = Field(ge=0)
     version: int = Field(ge=0)
     approved_at: datetime | None = None
     rejected_at: datetime | None = None

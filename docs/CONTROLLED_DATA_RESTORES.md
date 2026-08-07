@@ -28,12 +28,16 @@ validated -> approved -> applied -> rolled_back
 Every state transition creates a tenant audit event without storing a password
 or archive contents.
 
+Rehearsals approved before revision `0039` must be run again because file state
+is now part of the signed plan. Rollback snapshots from already-applied `0037`
+or `0038` restores remain supported.
+
 ## Archive validation
 
 The validator rejects:
 
-- unsupported format or database schema revisions (`0036`, `0037`, and `0038`
-  archives are compatible with the `0038` restore workflow);
+- unsupported format or database schema revisions (`0036` through `0039`
+  archives are compatible with the `0039` restore workflow);
 - an organization id or slug that differs from the signed-in tenant;
 - missing, duplicate, absolute, parent-relative, backslash, symbolic-link, or
   encrypted ZIP entries;
@@ -80,9 +84,20 @@ Invalid parent rows propagate conflicts to planned children. Creates run in
 parent-to-child dependency order. A uniqueness, ownership, or referential
 conflict blocks approval rather than selecting a different id or relationship.
 
-Archive media entries are checksum-verified but are not written to storage in
-this stage. Existing database file references may be restored only when their
-target files are already present.
+Archive media entries are mapped only from exact `/uploads/...` or
+`private:...` manifest references to their configured public/private storage
+roots. Absolute, parent-relative, backslash, mismatched, duplicate-target,
+symbolic-link, and non-regular-file destinations are rejected or recorded as
+approval-blocking conflicts. A target must still be referenced by the current
+organization or the approved database plan, and any reference from another
+organization blocks writeback.
+
+The rehearsal reports media creates, overwrites, unchanged files, and
+conflicts. Application stages every changed archive file under the protected
+rollback root, copies every overwritten original, verifies all hashes again,
+then uses a same-directory temporary file and atomic replacement for each live
+target. If the database commit fails, promoted files are compensated back to
+their pre-application state.
 
 ## Plan stability and rollback
 
@@ -91,12 +106,17 @@ before/after field values. Application reparses the same archive and recomputes
 the plan from the live database. Any intervening eligible data change produces
 a different plan and returns `409` before writes occur.
 
-After a successful application, the exact action/before/after plan is stored as
-the rollback snapshot with its own SHA-256 and byte count. Rollback first
-confirms that every updated or rehydrated row still equals the applied value;
-later edits stop rollback rather than being overwritten. Updated fields are
-restored and rehydrated rows are removed in child-to-parent order. Application
-and rollback each use one database transaction.
+After a successful application, the exact database and file action plan is
+stored as the rollback snapshot with SHA-256 and byte counts. The durable file
+evidence retains archive content plus every overwritten original outside the
+served media roots. Rollback first confirms that every affected row and live
+file still equals the applied value and that every evidence file still matches
+its recorded hash. Later edits or evidence corruption stop rollback.
+
+Updated fields are restored, rehydrated rows are removed in child-to-parent
+order, overwritten files are restored, and files created by the restore are
+removed. A failed rollback database commit reapplies the restored archive
+files. Successful rollback removes the protected file evidence directory.
 
 ## API
 
@@ -117,10 +137,16 @@ All endpoints are administrator-only, tenant-filtered, and online-only.
 - `MAX_DATA_RESTORE_ARCHIVE_BYTES` — maximum compressed upload size;
 - `MAX_DATA_RESTORE_UNCOMPRESSED_BYTES` — maximum declared uncompressed ZIP
   content;
-- `MAX_DATA_RESTORE_ROLLBACK_BYTES` — maximum persisted before/after plan.
+- `MAX_DATA_RESTORE_ROLLBACK_BYTES` — maximum persisted before/after plan;
+- `DATA_RESTORE_ROLLBACK_FILES_ROOT` — protected, non-public directory for
+  archive and overwritten-original file evidence;
+- `MAX_DATA_RESTORE_FILE_ROLLBACK_BYTES` — maximum combined staged archive and
+  overwritten-original bytes for one restore.
 
-## Future expansion boundary
+## Operational boundary
 
-Media writeback requires storage staging, atomic promotion, overwrite evidence,
-and file-level rollback. It remains checksum-validation-only until that
-capability is added as a separate reviewed batch.
+The rollback root must not be inside either public or private media root. It
+must be included in encrypted server backup, excluded from direct web serving,
+and monitored for sufficient free space. Database and filesystem operations are
+coordinated with compensation; operators should preserve the evidence directory
+for every restore that remains in `applied` state.

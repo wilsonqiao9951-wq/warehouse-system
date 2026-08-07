@@ -4,12 +4,15 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from hashlib import sha256
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from tempfile import SpooledTemporaryFile
 from typing import Any, BinaryIO
 import base64
 import json
+import os
+import shutil
 import stat
+import uuid
 import zipfile
 
 from sqlalchemy import Date as SqlDate
@@ -26,6 +29,7 @@ from app.models import Organization
 from app.services.data_exports import (
     FORMAT_VERSION,
     _excluded_columns,
+    _find_public_file_references,
     _json_value,
     _schema_revision,
 )
@@ -35,7 +39,7 @@ MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 20_000
 IMMUTABLE_COLUMNS = {"id", "organization_id", "version", "created_at", "updated_at"}
 
-# Initial restore application is deliberately limited to existing master,
+# Database restore application is deliberately limited to master,
 # configuration, and reviewed knowledge rows. Transactions, work-order custody,
 # authentication, billing, integrations, and audit evidence remain immutable.
 RESTORABLE_TABLES = {
@@ -74,6 +78,12 @@ RESTORE_SCHEMA_COMPATIBILITY = {
         "20260806_0037",
         "20260807_0038",
     },
+    "20260807_0039": {
+        "20260806_0036",
+        "20260806_0037",
+        "20260807_0038",
+        "20260807_0039",
+    },
 }
 
 
@@ -101,6 +111,10 @@ class RestoreAnalysis:
     record_count: int
     file_count: int
     create_count: int
+    file_create_count: int
+    file_overwrite_count: int
+    file_unchanged_count: int
+    file_conflict_count: int
     update_count: int
     unchanged_count: int
     conflict_count: int
@@ -108,8 +122,22 @@ class RestoreAnalysis:
     table_summary: dict[str, dict[str, int]]
     validation_messages: list[str]
     plan: list[dict[str, Any]]
+    file_plan: list[dict[str, Any]]
     plan_json: str
     plan_sha256: str
+
+
+@dataclass
+class PreparedRestoreFiles:
+    key: str | None
+    operation_root: Path | None
+    file_plan: list[dict[str, Any]]
+    rollback_size_bytes: int = 0
+    rollback_sha256: str | None = None
+    promoted: bool = False
+    rolled_back: bool = False
+    promoted_items: list[dict[str, Any]] | None = None
+    rolled_back_items: list[dict[str, Any]] | None = None
 
 
 def copy_restore_upload(source: BinaryIO) -> RestoreUpload:
@@ -201,9 +229,196 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+def _storage_root(kind: str) -> Path:
+    if kind == "public":
+        configured = settings.data_export_public_files_root
+    elif kind == "private":
+        configured = settings.data_export_private_files_root
+    else:
+        raise DataRestoreConflict("Stored restore media target is invalid")
+    return Path(configured).resolve()
+
+
+def _root_fingerprint(root: Path) -> str:
+    return sha256(os.path.normcase(str(root)).encode("utf-8")).hexdigest()
+
+
+def _safe_relative_storage_path(relative: str) -> PurePosixPath:
+    if not isinstance(relative, str) or "\\" in relative or ":" in relative:
+        raise DataRestoreInvalid("Restore manifest contains an unsafe media reference")
+    path = PurePosixPath(relative)
+    if (
+        not relative
+        or path.is_absolute()
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise DataRestoreInvalid("Restore manifest contains an unsafe media reference")
+    return path
+
+
+def _media_descriptor(item: dict[str, Any]) -> tuple[str, str]:
+    reference = item.get("reference")
+    archive_path = item.get("path")
+    if not isinstance(reference, str) or not isinstance(archive_path, str):
+        raise DataRestoreInvalid("Restore manifest contains an invalid media reference")
+    if reference.startswith("/uploads/"):
+        kind = "public"
+        relative = reference.removeprefix("/uploads/")
+    elif reference.startswith("private:"):
+        kind = "private"
+        relative = reference.removeprefix("private:")
+    else:
+        raise DataRestoreInvalid("Restore manifest contains an unsupported media reference")
+    safe_path = _safe_relative_storage_path(relative)
+    normalized = safe_path.as_posix()
+    if archive_path != f"files/{kind}/{normalized}":
+        raise DataRestoreInvalid(
+            "Restore manifest media reference does not match its archive path"
+        )
+    return kind, normalized
+
+
+def _storage_target(
+    kind: str,
+    relative: str,
+    *,
+    expected_root_sha256: str | None = None,
+) -> tuple[Path, Path]:
+    safe_path = _safe_relative_storage_path(relative)
+    root = _storage_root(kind)
+    if (
+        expected_root_sha256 is not None
+        and _root_fingerprint(root) != expected_root_sha256
+    ):
+        raise DataRestoreConflict(
+            "Restore media storage configuration changed after approval"
+        )
+    target = root.joinpath(*safe_path.parts)
+    resolved = target.resolve(strict=False)
+    if resolved == root or root not in resolved.parents:
+        raise DataRestoreInvalid("Restore media target escapes its configured storage root")
+    current = target
+    while current != root:
+        if current.is_symlink():
+            raise DataRestoreConflict("Restore media target contains a symbolic link")
+        current = current.parent
+    return root, target
+
+
+def _file_size_sha256(path: Path) -> tuple[int, str]:
+    digest = sha256()
+    size = 0
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return size, digest.hexdigest()
+
+
+def _plan_file_restore(
+    item: dict[str, Any],
+    allowed_references: dict[str, set[str]],
+    other_tenant_references: dict[str, set[str]],
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    kind, relative = _media_descriptor(item)
+    if relative in other_tenant_references[kind]:
+        return (
+            "conflict",
+            None,
+            "Restore media target is referenced by another organization",
+        )
+    if relative not in allowed_references[kind]:
+        return (
+            "conflict",
+            None,
+            "Restore media target is not referenced by the resulting organization data",
+        )
+    root = _storage_root(kind)
+    root_sha256 = _root_fingerprint(root)
+    try:
+        _root, target = _storage_target(kind, relative)
+    except DataRestoreConflict as exc:
+        return "conflict", None, str(exc)
+    if target.exists() and not target.is_file():
+        return "conflict", None, "Restore media target is not a regular file"
+    before_size: int | None = None
+    before_sha256: str | None = None
+    if target.is_file():
+        before_size, before_sha256 = _file_size_sha256(target)
+    after_size = item["size_bytes"]
+    after_sha256 = item["sha256"]
+    if before_sha256 == after_sha256 and before_size == after_size:
+        action = "unchanged"
+    elif before_sha256 is None:
+        action = "create"
+    else:
+        action = "overwrite"
+    return (
+        action,
+        {
+            "action": action,
+            "kind": kind,
+            "relative_path": relative,
+            "archive_path": item["path"],
+            "root_sha256": root_sha256,
+            "before_size_bytes": before_size,
+            "before_sha256": before_sha256,
+            "after_size_bytes": after_size,
+            "after_sha256": after_sha256,
+        },
+        None,
+    )
+
+
 def _table_registry() -> dict[str, Any]:
     models = (Organization, *TENANT_MODELS)
     return {model.__table__.name: model for model in dict.fromkeys(models)}
+
+
+def _database_media_references(
+    db: Session,
+    organization_id: int,
+    *,
+    other_tenants: bool,
+) -> dict[str, set[str]]:
+    references = {"public": set(), "private": set()}
+    for model in dict.fromkeys((Organization, *TENANT_MODELS)):
+        table = model.__table__
+        if model is Organization:
+            criterion = (
+                table.c.id != organization_id
+                if other_tenants
+                else table.c.id == organization_id
+            )
+        elif "organization_id" in table.c:
+            criterion = (
+                table.c.organization_id != organization_id
+                if other_tenants
+                else table.c.organization_id == organization_id
+            )
+        else:
+            continue
+        for row in db.execute(select(table).where(criterion)).mappings():
+            for reference in _find_public_file_references(dict(row)):
+                references["public"].add(reference.removeprefix("/uploads/"))
+            private_reference = row.get("media_storage_key")
+            if isinstance(private_reference, str) and private_reference:
+                references["private"].add(private_reference)
+    return references
+
+
+def _planned_media_references(plan: list[dict[str, Any]]) -> dict[str, set[str]]:
+    references = {"public": set(), "private": set()}
+    for item in plan:
+        after = item.get("after")
+        if not isinstance(after, dict):
+            continue
+        for reference in _find_public_file_references(after):
+            references["public"].add(reference.removeprefix("/uploads/"))
+        private_reference = after.get("media_storage_key")
+        if isinstance(private_reference, str) and private_reference:
+            references["private"].add(private_reference)
+    return references
 
 
 def _validate_archive_entries(archive: zipfile.ZipFile) -> dict[str, zipfile.ZipInfo]:
@@ -549,8 +764,13 @@ def analyze_restore_archive(
         plan: list[dict[str, Any]] = []
         messages: list[str] = []
         table_summary: dict[str, dict[str, int]] = {}
+        file_plan: list[dict[str, Any]] = []
         record_count = 0
         create_count = 0
+        file_create_count = 0
+        file_overwrite_count = 0
+        file_unchanged_count = 0
+        file_conflict_count = 0
         update_count = 0
         unchanged_count = 0
         conflict_count = 0
@@ -639,6 +859,20 @@ def analyze_restore_archive(
                     messages.append(error)
             plan = filtered_plan
 
+        allowed_media_references = _database_media_references(
+            db,
+            organization.id,
+            other_tenants=False,
+        )
+        planned_media_references = _planned_media_references(plan)
+        for kind, references in planned_media_references.items():
+            allowed_media_references[kind].update(references)
+        other_tenant_media_references = _database_media_references(
+            db,
+            organization.id,
+            other_tenants=True,
+        )
+        media_targets_seen: set[tuple[str, str]] = set()
         for item in files:
             digest = sha256()
             size = 0
@@ -648,6 +882,30 @@ def analyze_restore_archive(
                     size += len(chunk)
             if size != item["size_bytes"] or digest.hexdigest() != item["sha256"]:
                 raise DataRestoreInvalid(f"{item['path']} does not match its manifest")
+            outcome, file_change, message = _plan_file_restore(
+                item,
+                allowed_media_references,
+                other_tenant_media_references,
+            )
+            if file_change:
+                media_key = (file_change["kind"], file_change["relative_path"])
+                if media_key in media_targets_seen:
+                    raise DataRestoreInvalid(
+                        "Restore manifest maps multiple entries to one media target"
+                    )
+                media_targets_seen.add(media_key)
+                file_plan.append(file_change)
+            if outcome == "create":
+                file_create_count += 1
+            elif outcome == "overwrite":
+                file_overwrite_count += 1
+            elif outcome == "unchanged":
+                file_unchanged_count += 1
+            else:
+                file_conflict_count += 1
+                conflict_count += 1
+                if message and len(messages) < 100:
+                    messages.append(message)
 
         if record_count != manifest.get("record_count"):
             raise DataRestoreInvalid("Restore manifest total record count is invalid")
@@ -664,10 +922,12 @@ def analyze_restore_archive(
             messages.append(
                 "Authentication, billing, audit, transaction, custody, and other protected records are validation-only."
             )
-        if files:
+        if file_create_count or file_overwrite_count:
             messages.append(
-                "Media entries were checksum-verified; this restore stage does not write files to storage."
+                "Media entries passed checksum and storage-boundary checks and will be staged before atomic writeback."
             )
+        elif files:
+            messages.append("All archived media already matches live storage.")
         if create_count:
             messages.append(
                 "Missing eligible rows passed global id, unique-key, tenant, and foreign-key checks and can be rehydrated."
@@ -679,7 +939,12 @@ def analyze_restore_archive(
                 item["id"],
             )
         )
-        plan_json = _canonical(plan)
+        plan_payload = {
+            "version": 2,
+            "database": plan,
+            "files": file_plan,
+        }
+        plan_json = _canonical(plan_payload)
         plan_bytes = plan_json.encode("utf-8")
         if len(plan_bytes) > settings.max_data_restore_rollback_bytes:
             raise DataRestoreInvalid("Restore rollback snapshot exceeds the configured limit")
@@ -691,6 +956,10 @@ def analyze_restore_archive(
             record_count=record_count,
             file_count=len(files),
             create_count=create_count,
+            file_create_count=file_create_count,
+            file_overwrite_count=file_overwrite_count,
+            file_unchanged_count=file_unchanged_count,
+            file_conflict_count=file_conflict_count,
             update_count=update_count,
             unchanged_count=unchanged_count,
             conflict_count=conflict_count,
@@ -698,6 +967,7 @@ def analyze_restore_archive(
             table_summary=table_summary,
             validation_messages=messages,
             plan=plan,
+            file_plan=file_plan,
             plan_json=plan_json,
             plan_sha256=sha256(plan_bytes).hexdigest(),
         )
@@ -710,7 +980,278 @@ def _assert_current_values(row: Any, values: dict[str, Any], label: str) -> None
             raise DataRestoreConflict(f"{label} changed after restore review")
 
 
-def apply_restore_plan(db: Session, analysis: RestoreAnalysis, organization_id: int) -> tuple[str, str]:
+def _validate_file_plan_item(item: dict[str, Any]) -> tuple[Path, Path]:
+    required_strings = {
+        "action",
+        "kind",
+        "relative_path",
+        "archive_path",
+        "root_sha256",
+        "after_sha256",
+    }
+    if not isinstance(item, dict) or any(
+        not isinstance(item.get(name), str) for name in required_strings
+    ):
+        raise DataRestoreConflict("Stored restore media plan is invalid")
+    if item["action"] not in {"create", "overwrite", "unchanged"}:
+        raise DataRestoreConflict("Stored restore media action is invalid")
+    if item["kind"] not in {"public", "private"}:
+        raise DataRestoreConflict("Stored restore media target is invalid")
+    if not _safe_archive_path(item["archive_path"]):
+        raise DataRestoreConflict("Stored restore media archive path is invalid")
+    if (
+        not isinstance(item.get("after_size_bytes"), int)
+        or item["after_size_bytes"] < 0
+        or len(item["after_sha256"]) != 64
+    ):
+        raise DataRestoreConflict("Stored restore media checksum is invalid")
+    if item["action"] == "overwrite":
+        if (
+            not isinstance(item.get("before_size_bytes"), int)
+            or item["before_size_bytes"] < 0
+            or not isinstance(item.get("before_sha256"), str)
+            or len(item["before_sha256"]) != 64
+        ):
+            raise DataRestoreConflict("Stored restore media overwrite evidence is invalid")
+    elif item.get("before_size_bytes") is not None or item.get("before_sha256") is not None:
+        if item["action"] == "create":
+            raise DataRestoreConflict("Stored restore media create evidence is invalid")
+    return _storage_target(
+        item["kind"],
+        item["relative_path"],
+        expected_root_sha256=item["root_sha256"],
+    )
+
+
+def _assert_file_state(item: dict[str, Any], *, applied: bool) -> tuple[Path, Path]:
+    root, target = _validate_file_plan_item(item)
+    exists = target.exists() or target.is_symlink()
+    if not applied and item["action"] == "create":
+        if exists:
+            raise DataRestoreConflict("A restore media target appeared after approval")
+        return root, target
+    if not exists or not target.is_file() or target.is_symlink():
+        raise DataRestoreConflict("A restore media target is missing or unsafe")
+    size, digest = _file_size_sha256(target)
+    size_field = "after_size_bytes" if applied else "before_size_bytes"
+    hash_field = "after_sha256" if applied else "before_sha256"
+    if item["action"] == "unchanged":
+        size_field = "after_size_bytes"
+        hash_field = "after_sha256"
+    if size != item.get(size_field) or digest != item.get(hash_field):
+        raise DataRestoreConflict("Restore media changed after review")
+    return root, target
+
+
+def _rollback_storage_root() -> Path:
+    root = Path(settings.data_restore_rollback_files_root).resolve()
+    for media_root in (_storage_root("public"), _storage_root("private")):
+        if root == media_root or media_root in root.parents:
+            raise DataRestoreConflict(
+                "Restore rollback storage must be outside public and private media roots"
+            )
+    return root
+
+
+def _evidence_file(operation_root: Path, area: str, item: dict[str, Any]) -> Path:
+    target = operation_root.joinpath(
+        area,
+        item["kind"],
+        *_safe_relative_storage_path(item["relative_path"]).parts,
+    )
+    resolved = target.resolve(strict=False)
+    if operation_root not in resolved.parents:
+        raise DataRestoreConflict("Restore media evidence path is invalid")
+    return target
+
+
+def _write_checked_stream(
+    source: BinaryIO,
+    target: Path,
+    expected_size: int,
+    expected_sha256: str,
+) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    digest = sha256()
+    size = 0
+    try:
+        with target.open("xb") as output:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+                size += len(chunk)
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+        if size != expected_size or digest.hexdigest() != expected_sha256:
+            raise DataRestoreInvalid("Restore media content changed during staging")
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+
+
+def _copy_checked_file(
+    source: Path,
+    target: Path,
+    expected_size: int,
+    expected_sha256: str,
+) -> None:
+    with source.open("rb") as input_file:
+        _write_checked_stream(input_file, target, expected_size, expected_sha256)
+
+
+def _file_evidence_sha256(
+    key: str,
+    file_plan: list[dict[str, Any]],
+    size_bytes: int,
+) -> str:
+    payload = {
+        "key": key,
+        "files": [item for item in file_plan if item["action"] != "unchanged"],
+        "size_bytes": size_bytes,
+    }
+    return sha256(_canonical(payload).encode("utf-8")).hexdigest()
+
+
+def prepare_restore_files(
+    analysis: RestoreAnalysis,
+    archive_stream: BinaryIO,
+    organization_id: int,
+    restore_id: int,
+) -> PreparedRestoreFiles:
+    mutations = [
+        item for item in analysis.file_plan if item["action"] != "unchanged"
+    ]
+    if not mutations:
+        return PreparedRestoreFiles(key=None, operation_root=None, file_plan=[])
+    expected_size = sum(
+        item["after_size_bytes"]
+        + (item["before_size_bytes"] or 0)
+        for item in mutations
+    )
+    if expected_size > settings.max_data_restore_file_rollback_bytes:
+        raise DataRestoreInvalid(
+            "Restore media rollback evidence exceeds the configured limit"
+        )
+    rollback_root = _rollback_storage_root()
+    key = f"organization-{organization_id}/restore-{restore_id}"
+    operation_root = rollback_root.joinpath(*PurePosixPath(key).parts)
+    if operation_root.exists() or operation_root.is_symlink():
+        raise DataRestoreConflict("Restore media rollback evidence already exists")
+    operation_root.parent.mkdir(parents=True, exist_ok=True)
+    operation_root.mkdir()
+    try:
+        archive_stream.seek(0)
+        with zipfile.ZipFile(archive_stream) as archive:
+            for item in mutations:
+                _root, live_target = _assert_file_state(item, applied=False)
+                after_target = _evidence_file(operation_root, "after", item)
+                with archive.open(item["archive_path"]) as source:
+                    _write_checked_stream(
+                        source,
+                        after_target,
+                        item["after_size_bytes"],
+                        item["after_sha256"],
+                    )
+                if item["action"] == "overwrite":
+                    before_target = _evidence_file(operation_root, "before", item)
+                    _copy_checked_file(
+                        live_target,
+                        before_target,
+                        item["before_size_bytes"],
+                        item["before_sha256"],
+                    )
+        evidence_sha256 = _file_evidence_sha256(key, mutations, expected_size)
+        return PreparedRestoreFiles(
+            key=key,
+            operation_root=operation_root,
+            file_plan=mutations,
+            rollback_size_bytes=expected_size,
+            rollback_sha256=evidence_sha256,
+        )
+    except Exception:
+        shutil.rmtree(operation_root, ignore_errors=True)
+        raise
+
+
+def _atomic_copy(source: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.parent / f".{target.name}.opf-{uuid.uuid4().hex}.tmp"
+    try:
+        with source.open("rb") as input_file, temporary.open("xb") as output:
+            shutil.copyfileobj(input_file, output, length=1024 * 1024)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _prune_empty_parents(path: Path, root: Path) -> None:
+    current = path
+    while current != root and root in current.parents:
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def _restore_before_file(prepared: PreparedRestoreFiles, item: dict[str, Any]) -> None:
+    root, target = _storage_target(
+        item["kind"],
+        item["relative_path"],
+        expected_root_sha256=item["root_sha256"],
+    )
+    if item["action"] == "create":
+        target.unlink(missing_ok=True)
+        _prune_empty_parents(target.parent, root)
+    else:
+        before = _evidence_file(prepared.operation_root, "before", item)
+        _atomic_copy(before, target)
+
+
+def promote_restore_files(prepared: PreparedRestoreFiles) -> None:
+    if not prepared.operation_root:
+        return
+    prepared.promoted_items = []
+    try:
+        for item in prepared.file_plan:
+            _root, target = _assert_file_state(item, applied=False)
+            after = _evidence_file(prepared.operation_root, "after", item)
+            if _file_size_sha256(after) != (
+                item["after_size_bytes"],
+                item["after_sha256"],
+            ):
+                raise DataRestoreConflict("Staged restore media evidence is corrupt")
+            _atomic_copy(after, target)
+            prepared.promoted_items.append(item)
+        prepared.promoted = True
+    except Exception as exc:
+        if isinstance(exc, (DataRestoreConflict, DataRestoreInvalid)):
+            raise
+        raise DataRestoreConflict("Restore media promotion failed") from exc
+
+
+def compensate_restore_file_apply(prepared: PreparedRestoreFiles | None) -> None:
+    if not prepared or not prepared.promoted_items:
+        return
+    for item in reversed(prepared.promoted_items):
+        _restore_before_file(prepared, item)
+    prepared.promoted = False
+    prepared.promoted_items = []
+
+
+def discard_restore_file_evidence(prepared: PreparedRestoreFiles | None) -> None:
+    if prepared and prepared.operation_root:
+        shutil.rmtree(prepared.operation_root, ignore_errors=True)
+
+
+def apply_restore_plan(
+    db: Session,
+    analysis: RestoreAnalysis,
+    organization_id: int,
+    prepared_files: PreparedRestoreFiles | None = None,
+) -> tuple[str, str]:
     if analysis.conflict_count:
         raise DataRestoreConflict("Restore plan contains unresolved conflicts")
     registry = _table_registry()
@@ -752,17 +1293,49 @@ def apply_restore_plan(db: Session, analysis: RestoreAnalysis, organization_id: 
         for name, value in item["after"].items():
             setattr(row, name, _deserialize(columns[name], value))
     db.flush()
-    rollback_json = analysis.plan_json
+    file_evidence = None
+    if prepared_files and prepared_files.key:
+        file_evidence = {
+            "key": prepared_files.key,
+            "sha256": prepared_files.rollback_sha256,
+            "size_bytes": prepared_files.rollback_size_bytes,
+        }
+    rollback_json = _canonical(
+        {
+            "version": 2,
+            "database": analysis.plan,
+            "files": analysis.file_plan,
+            "file_evidence": file_evidence,
+        }
+    )
     return rollback_json, sha256(rollback_json.encode("utf-8")).hexdigest()
 
 
-def rollback_restore_plan(db: Session, rollback_json: str, organization_id: int) -> int:
+def _rollback_components(
+    rollback_json: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any] | None]:
     try:
-        plan = json.loads(rollback_json)
+        payload = json.loads(rollback_json)
     except json.JSONDecodeError as exc:
         raise DataRestoreConflict("Stored rollback snapshot is invalid") from exc
-    if not isinstance(plan, list):
+    if isinstance(payload, list):
+        return payload, [], None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != 2
+        or not isinstance(payload.get("database"), list)
+        or not isinstance(payload.get("files"), list)
+        or (
+            payload.get("file_evidence") is not None
+            and not isinstance(payload.get("file_evidence"), dict)
+        )
+    ):
         raise DataRestoreConflict("Stored rollback snapshot is invalid")
+    return payload["database"], payload["files"], payload.get("file_evidence")
+
+
+def rollback_restore_plan(db: Session, rollback_json: str, organization_id: int) -> int:
+    plan, _file_plan, _file_evidence = _rollback_components(rollback_json)
     registry = _table_registry()
     validated: list[tuple[dict[str, Any], Any, Any]] = []
     for item in plan:
@@ -811,3 +1384,106 @@ def rollback_restore_plan(db: Session, rollback_json: str, organization_id: int)
         db.delete(row)
         db.flush()
     return len(plan)
+
+
+def prepare_restore_file_rollback(
+    rollback_json: str,
+    organization_id: int,
+    restore_id: int,
+    expected_sha256: str | None,
+    expected_size_bytes: int,
+) -> PreparedRestoreFiles:
+    _database_plan, file_plan, evidence = _rollback_components(rollback_json)
+    mutations = [item for item in file_plan if item.get("action") != "unchanged"]
+    if not mutations:
+        if evidence is not None or expected_sha256 is not None or expected_size_bytes != 0:
+            raise DataRestoreConflict("Stored restore media rollback evidence is invalid")
+        return PreparedRestoreFiles(key=None, operation_root=None, file_plan=[])
+    expected_key = f"organization-{organization_id}/restore-{restore_id}"
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("key") != expected_key
+        or evidence.get("sha256") != expected_sha256
+        or evidence.get("size_bytes") != expected_size_bytes
+    ):
+        raise DataRestoreConflict("Stored restore media rollback evidence is invalid")
+    if (
+        not isinstance(expected_sha256, str)
+        or len(expected_sha256) != 64
+        or expected_size_bytes < 0
+        or _file_evidence_sha256(expected_key, mutations, expected_size_bytes)
+        != expected_sha256
+    ):
+        raise DataRestoreConflict("Restore media rollback evidence integrity check failed")
+    rollback_root = _rollback_storage_root()
+    operation_root = rollback_root.joinpath(*PurePosixPath(expected_key).parts)
+    if (
+        not operation_root.is_dir()
+        or operation_root.is_symlink()
+        or rollback_root not in operation_root.resolve().parents
+    ):
+        raise DataRestoreConflict("Restore media rollback files are unavailable")
+    targets_seen: set[tuple[str, str]] = set()
+    for item in mutations:
+        _root, _target = _assert_file_state(item, applied=True)
+        key = (item["kind"], item["relative_path"])
+        if key in targets_seen:
+            raise DataRestoreConflict("Stored restore media plan has duplicate targets")
+        targets_seen.add(key)
+        after = _evidence_file(operation_root, "after", item)
+        if not after.is_file() or _file_size_sha256(after) != (
+            item["after_size_bytes"],
+            item["after_sha256"],
+        ):
+            raise DataRestoreConflict("Stored restored-media evidence is corrupt")
+        if item["action"] == "overwrite":
+            before = _evidence_file(operation_root, "before", item)
+            if not before.is_file() or _file_size_sha256(before) != (
+                item["before_size_bytes"],
+                item["before_sha256"],
+            ):
+                raise DataRestoreConflict("Stored original-media evidence is corrupt")
+    return PreparedRestoreFiles(
+        key=expected_key,
+        operation_root=operation_root,
+        file_plan=mutations,
+        rollback_size_bytes=expected_size_bytes,
+        rollback_sha256=expected_sha256,
+        promoted=True,
+        promoted_items=list(mutations),
+    )
+
+
+def _reapply_after_file(prepared: PreparedRestoreFiles, item: dict[str, Any]) -> None:
+    _root, target = _storage_target(
+        item["kind"],
+        item["relative_path"],
+        expected_root_sha256=item["root_sha256"],
+    )
+    after = _evidence_file(prepared.operation_root, "after", item)
+    _atomic_copy(after, target)
+
+
+def rollback_restore_files(prepared: PreparedRestoreFiles) -> None:
+    if not prepared.operation_root:
+        return
+    prepared.rolled_back_items = []
+    try:
+        for item in reversed(prepared.file_plan):
+            _assert_file_state(item, applied=True)
+            _restore_before_file(prepared, item)
+            prepared.rolled_back_items.append(item)
+        prepared.rolled_back = True
+    except Exception as exc:
+        if isinstance(exc, (DataRestoreConflict, DataRestoreInvalid)):
+            raise
+        raise DataRestoreConflict("Restore media rollback failed") from exc
+
+
+def compensate_restore_file_rollback(prepared: PreparedRestoreFiles | None) -> None:
+    if not prepared or not prepared.rolled_back_items:
+        return
+    for item in reversed(prepared.rolled_back_items):
+        _reapply_after_file(prepared, item)
+    prepared.rolled_back = False
+    prepared.rolled_back_items = []

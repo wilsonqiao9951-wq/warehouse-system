@@ -31,7 +31,14 @@ from app.services.data_restores import (
     DataRestoreInvalid,
     analyze_restore_archive,
     apply_restore_plan,
+    compensate_restore_file_apply,
+    compensate_restore_file_rollback,
     copy_restore_upload,
+    discard_restore_file_evidence,
+    prepare_restore_file_rollback,
+    prepare_restore_files,
+    promote_restore_files,
+    rollback_restore_files,
     rollback_restore_plan,
 )
 
@@ -69,6 +76,14 @@ def _json_list(value: str) -> list[str]:
     return [str(item) for item in parsed] if isinstance(parsed, list) else []
 
 
+def _restore_table_summary(value: str) -> dict:
+    summary = _json_object(value)
+    for counts in summary.values():
+        if isinstance(counts, dict):
+            counts.setdefault("creates", 0)
+    return summary
+
+
 def _read_restore(row: OrganizationDataRestore) -> OrganizationDataRestoreRead:
     return OrganizationDataRestoreRead(
         id=row.id,
@@ -89,14 +104,20 @@ def _read_restore(row: OrganizationDataRestore) -> OrganizationDataRestoreRead:
         record_count=row.record_count,
         file_count=row.file_count,
         create_count=row.create_count,
+        file_create_count=row.file_create_count,
+        file_overwrite_count=row.file_overwrite_count,
+        file_unchanged_count=row.file_unchanged_count,
+        file_conflict_count=row.file_conflict_count,
         update_count=row.update_count,
         unchanged_count=row.unchanged_count,
         conflict_count=row.conflict_count,
         protected_count=row.protected_count,
-        table_summary=_json_object(row.table_summary_json),
+        table_summary=_restore_table_summary(row.table_summary_json),
         validation_messages=_json_list(row.validation_messages_json),
         approval_note=row.approval_note,
         rollback_size_bytes=row.rollback_size_bytes,
+        file_rollback_sha256=row.file_rollback_sha256,
+        file_rollback_size_bytes=row.file_rollback_size_bytes,
         version=row.version,
         approved_at=row.approved_at,
         rejected_at=row.rejected_at,
@@ -218,6 +239,10 @@ def create_restore_rehearsal(
         record_count=analysis.record_count,
         file_count=analysis.file_count,
         create_count=analysis.create_count,
+        file_create_count=analysis.file_create_count,
+        file_overwrite_count=analysis.file_overwrite_count,
+        file_unchanged_count=analysis.file_unchanged_count,
+        file_conflict_count=analysis.file_conflict_count,
         update_count=analysis.update_count,
         unchanged_count=analysis.unchanged_count,
         conflict_count=analysis.conflict_count,
@@ -242,6 +267,10 @@ def create_restore_rehearsal(
             "record_count": row.record_count,
             "file_count": row.file_count,
             "create_count": row.create_count,
+            "file_create_count": row.file_create_count,
+            "file_overwrite_count": row.file_overwrite_count,
+            "file_unchanged_count": row.file_unchanged_count,
+            "file_conflict_count": row.file_conflict_count,
             "update_count": row.update_count,
             "unchanged_count": row.unchanged_count,
             "conflict_count": row.conflict_count,
@@ -274,7 +303,12 @@ def decide_restore_rehearsal(
     if payload.decision == "approve":
         if row.conflict_count:
             raise HTTPException(status_code=409, detail="Resolve all rehearsal conflicts before approval")
-        if row.create_count == 0 and row.update_count == 0:
+        if (
+            row.create_count == 0
+            and row.update_count == 0
+            and row.file_create_count == 0
+            and row.file_overwrite_count == 0
+        ):
             raise HTTPException(status_code=409, detail="Restore rehearsal has no eligible changes")
         row.status = "approved"
         row.approved_by = actor.user_id
@@ -315,51 +349,87 @@ def apply_approved_restore(
     organization = db.get(Organization, actor.organization_id)
     if not organization:
         raise HTTPException(status_code=404, detail="Organization not found")
+    upload = None
+    prepared_files = None
     try:
         upload = copy_restore_upload(file.file)
-        try:
-            if upload.sha256 != row.archive_sha256:
-                raise DataRestoreConflict("The uploaded archive is not the approved archive")
-            analysis = analyze_restore_archive(db, organization, upload)
-        finally:
-            upload.stream.close()
+        if upload.sha256 != row.archive_sha256:
+            raise DataRestoreConflict("The uploaded archive is not the approved archive")
+        analysis = analyze_restore_archive(db, organization, upload)
         if analysis.plan_sha256 != row.plan_sha256:
             raise DataRestoreConflict("Live data changed after approval; run a new rehearsal")
-        rollback_json, rollback_sha256 = apply_restore_plan(
-            db, analysis, organization.id
+        prepared_files = prepare_restore_files(
+            analysis,
+            upload.stream,
+            organization.id,
+            row.id,
         )
+        rollback_json, rollback_sha256 = apply_restore_plan(
+            db,
+            analysis,
+            organization.id,
+            prepared_files,
+        )
+        promote_restore_files(prepared_files)
+
+        row.status = "applied"
+        row.applied_by = actor.user_id
+        row.applied_at = datetime.utcnow()
+        row.rollback_payload_json = rollback_json
+        row.rollback_sha256 = rollback_sha256
+        row.rollback_size_bytes = len(rollback_json.encode("utf-8"))
+        row.file_rollback_sha256 = prepared_files.rollback_sha256
+        row.file_rollback_size_bytes = prepared_files.rollback_size_bytes
+        row.version += 1
+        _audit(
+            db,
+            actor,
+            row,
+            "organization_data_restore_applied",
+            {
+                "create_count": row.create_count,
+                "update_count": row.update_count,
+                "file_create_count": row.file_create_count,
+                "file_overwrite_count": row.file_overwrite_count,
+                "rollback_sha256": row.rollback_sha256,
+                "rollback_size_bytes": row.rollback_size_bytes,
+                "file_rollback_sha256": row.file_rollback_sha256,
+                "file_rollback_size_bytes": row.file_rollback_size_bytes,
+            },
+        )
+        db.commit()
     except (DataRestoreInvalid, zipfile.BadZipFile) as exc:
+        db.rollback()
+        compensate_restore_file_apply(prepared_files)
+        discard_restore_file_evidence(prepared_files)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DataRestoreConflict as exc:
         db.rollback()
+        compensate_restore_file_apply(prepared_files)
+        discard_restore_file_evidence(prepared_files)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except IntegrityError as exc:
         db.rollback()
+        compensate_restore_file_apply(prepared_files)
+        discard_restore_file_evidence(prepared_files)
         raise HTTPException(
             status_code=409,
             detail="Restore changes violate a live database constraint; run a new rehearsal",
         ) from exc
+    except OSError as exc:
+        db.rollback()
+        compensate_restore_file_apply(prepared_files)
+        discard_restore_file_evidence(prepared_files)
+        raise HTTPException(status_code=409, detail="Restore media writeback failed") from exc
+    except Exception:
+        db.rollback()
+        compensate_restore_file_apply(prepared_files)
+        discard_restore_file_evidence(prepared_files)
+        raise
+    finally:
+        if upload is not None:
+            upload.stream.close()
 
-    row.status = "applied"
-    row.applied_by = actor.user_id
-    row.applied_at = datetime.utcnow()
-    row.rollback_payload_json = rollback_json
-    row.rollback_sha256 = rollback_sha256
-    row.rollback_size_bytes = len(rollback_json.encode("utf-8"))
-    row.version += 1
-    _audit(
-        db,
-        actor,
-        row,
-        "organization_data_restore_applied",
-        {
-            "create_count": row.create_count,
-            "update_count": row.update_count,
-            "rollback_sha256": row.rollback_sha256,
-            "rollback_size_bytes": row.rollback_size_bytes,
-        },
-    )
-    db.commit()
     db.refresh(row)
     return _read_restore(row)
 
@@ -387,30 +457,55 @@ def rollback_applied_restore(
         or sha256(rollback_bytes).hexdigest() != row.rollback_sha256
     ):
         raise HTTPException(status_code=409, detail="Rollback evidence integrity check failed")
+    prepared_files = None
     try:
+        prepared_files = prepare_restore_file_rollback(
+            row.rollback_payload_json,
+            row.organization_id,
+            row.id,
+            row.file_rollback_sha256,
+            row.file_rollback_size_bytes,
+        )
         restored_rows = rollback_restore_plan(
             db, row.rollback_payload_json, row.organization_id
         )
-    except DataRestoreConflict as exc:
+        rollback_restore_files(prepared_files)
+        row.status = "rolled_back"
+        row.rolled_back_by = actor.user_id
+        row.rolled_back_at = datetime.utcnow()
+        row.version += 1
+        _audit(
+            db,
+            actor,
+            row,
+            "organization_data_restore_rolled_back",
+            {
+                "restored_rows": restored_rows,
+                "restored_files": len(prepared_files.file_plan),
+                "rollback_sha256": row.rollback_sha256,
+                "file_rollback_sha256": row.file_rollback_sha256,
+            },
+        )
+        db.commit()
+    except (DataRestoreConflict, DataRestoreInvalid) as exc:
         db.rollback()
+        compensate_restore_file_rollback(prepared_files)
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except IntegrityError as exc:
         db.rollback()
+        compensate_restore_file_rollback(prepared_files)
         raise HTTPException(
             status_code=409,
             detail="Rollback changes violate a live database constraint",
         ) from exc
-    row.status = "rolled_back"
-    row.rolled_back_by = actor.user_id
-    row.rolled_back_at = datetime.utcnow()
-    row.version += 1
-    _audit(
-        db,
-        actor,
-        row,
-        "organization_data_restore_rolled_back",
-        {"restored_rows": restored_rows, "rollback_sha256": row.rollback_sha256},
-    )
-    db.commit()
+    except OSError as exc:
+        db.rollback()
+        compensate_restore_file_rollback(prepared_files)
+        raise HTTPException(status_code=409, detail="Restore media rollback failed") from exc
+    except Exception:
+        db.rollback()
+        compensate_restore_file_rollback(prepared_files)
+        raise
+    discard_restore_file_evidence(prepared_files)
     db.refresh(row)
     return _read_restore(row)
