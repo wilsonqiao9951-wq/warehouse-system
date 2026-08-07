@@ -986,3 +986,39 @@ Verification:
   static routes.
 - Python dependency consistency and full/production npm audits passed with 0
   known vulnerabilities.
+
+## 2026-08-07 - Phase 9 legacy database adoption and schema ownership
+
+Status: implemented, locally adopted, and verified.
+
+Delivered:
+
+- Added Alembic revision `20260807_0040` for the four operational tables and
+  eleven compatibility fields that were previously created only by runtime
+  SQLAlchemy or ad hoc startup mutations.
+- Removed application-import schema creation and alteration; production startup
+  now performs a read-only, fail-closed check against the sole Alembic head.
+- Added a read-only SQLite adoption rehearsal that rejects unknown tables or
+  columns, corrupt databases, foreign-key violations, unsafe missing defaults,
+  and already-versioned databases.
+- Added exclusive-lock apply with an immutable pre-adoption backup, isolated
+  full-history candidate migration, deterministic field derivations, per-table
+  counts and value hashes, integrity verification, atomic replacement, failure
+  restoration, and a JSON audit report.
+- Updated the one-command Windows startup to detect a legacy local SQLite file,
+  run the protected adoption automatically, apply normal migrations, and stop
+  before launching services on any failed safety check.
+- Rehearsed and applied the configured local database, retained its backup and
+  report, and confirmed the next startup preparation was idempotent.
+
+Verification:
+
+- Legacy rehearsal, non-empty apply, unknown-data refusal, lock refusal, schema
+  guard, migration backfill, downgrade, and integrity tests: 5 passed.
+- Backend: all 142 tests passed; the live application root returned `200` after
+  the startup schema check.
+- Python compilation and dependency consistency passed.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for
+  all 33 static routes.
+- Full and production npm audits passed with 0 known vulnerabilities.
+- GitHub PR #7 backend and frontend CI jobs passed.

@@ -1,4 +1,4 @@
-from app.core.database import Base, SessionLocal, engine
+from app.core.database import SessionLocal, ensure_schema_ready
 from app.models import (
     InventoryTransaction,
     Organization,
@@ -11,7 +11,7 @@ from app.models import (
     WorkOrderPart,
 )
 
-Base.metadata.create_all(bind=engine)
+ensure_schema_ready()
 
 db = SessionLocal()
 try:

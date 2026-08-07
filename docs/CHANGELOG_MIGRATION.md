@@ -602,3 +602,26 @@ empty `0039 -> 0038 -> 0039`, schema/constraint inspection, and guarded media-
 evidence downgrade passed on SQLite; ESLint and the Next.js production build
 passed for all 33 static routes; Python dependency consistency and
 full/production npm audits reported 0 known vulnerabilities.
+
+## 20260807_0040 - Formal schema ownership and legacy database adoption
+
+- Adds the formerly runtime-created audit, job-status, QC-picture, and returned-
+  equipment tables to the authoritative Alembic history.
+- Formalizes legacy compatibility fields for work orders, parts, and work-order
+  parts, including safe backfills and guarded downgrade behavior.
+- Replaces startup-time `create_all()` and ad hoc `ALTER TABLE` mutation with a
+  read-only fail-closed Alembic head check.
+- Adds read-only legacy rehearsal plus exclusive-lock apply, permanent backup,
+  isolated candidate migration, explicit legacy derivations, row/value hashes,
+  integrity checks, atomic replacement, failure restoration, and a JSON audit
+  report.
+- Updates local startup to detect and safely adopt an unversioned SQLite file
+  before applying normal migrations; unknown data or an active database refuses
+  startup instead of being silently discarded.
+
+Verification: five legacy-adoption/schema-guard/migration tests passed; all 142
+backend tests passed; compile and Python dependency consistency passed; the
+configured local legacy database completed backed-up adoption and a second
+preparation run was idempotent; ESLint and the Next.js production build passed
+for all 33 static routes; full and production npm audits reported 0 known
+vulnerabilities.

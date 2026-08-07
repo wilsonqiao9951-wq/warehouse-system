@@ -40,6 +40,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m scripts.prepare_database
 uvicorn app.main:app --reload
 ```
 
@@ -91,7 +92,7 @@ This opens two terminals:
 - Backend: `http://127.0.0.1:8000`
 - Frontend: `http://localhost:3000`
 
-On a clean `main` branch the script first checks GitHub and applies a fast-forward update. Dirty worktrees and offline starts keep the local version. Alembic migrations run automatically before either service is launched.
+On a clean `main` branch the script first checks GitHub and applies a fast-forward update. Dirty worktrees and offline starts keep the local version. Database preparation runs before either service is launched: versioned databases receive Alembic migrations, while an unversioned legacy SQLite database is backed up, rebuilt, verified, and adopted automatically. Any failed safety check stops startup. See [`docs/LEGACY_DATABASE_ADOPTION.md`](docs/LEGACY_DATABASE_ADOPTION.md).
 
 ## API Migration Notes
 
@@ -168,12 +169,13 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260807_0039` (controlled restore media writeback evidence).
+- Current schema head: `20260807_0040` (formalized operational tables and legacy compatibility fields).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:
-  - `alembic stamp head`
-  - then use `alembic upgrade head` for future migrations
+  - First run a read-only rehearsal: `python -m scripts.adopt_legacy_database --database ./openpartsflow.db`
+  - Stop the backend, then apply: `python -m scripts.adopt_legacy_database --database ./openpartsflow.db --apply`
+  - Never use `alembic stamp head` on an unversioned database; it can hide missing schema without creating it.
 - Create a new migration:
   - `alembic revision -m "your message"`
 
