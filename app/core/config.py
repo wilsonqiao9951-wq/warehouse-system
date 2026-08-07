@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     max_data_restore_archive_bytes: int = 528 * 1024 * 1024
     max_data_restore_uncompressed_bytes: int = 528 * 1024 * 1024
     max_data_restore_rollback_bytes: int = 64 * 1024 * 1024
+    data_restore_rollback_files_root: str = "restore_rollbacks"
+    max_data_restore_file_rollback_bytes: int = 1024 * 1024 * 1024
     # Comma-separated browser origins for CORS (e.g. Cloudflare Tunnel https://xxx.trycloudflare.com)
     cors_extra_origins: str = ""
 

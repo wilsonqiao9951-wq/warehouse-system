@@ -186,7 +186,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260807_0038` before starting the updated application:
+Apply migration `20260807_0039` before starting the updated application:
 
 ```bash
 alembic upgrade head
@@ -199,14 +199,16 @@ bindings, ordered lifecycle events, and durable subscription notices. Revision
 `0036` adds customer data export integrity evidence. Revision `0037` adds
 controlled restore rehearsal, approval, application, and rollback evidence.
 Revision `0038` records safe deleted-row rehydration counts and refuses its
-downgrade while that evidence exists. Other guarded downgrades are refused when
-the corresponding customer evidence exists.
+downgrade while that evidence exists. Revision `0039` records staged media
+create/overwrite/rollback evidence and refuses downgrade while that evidence
+exists. Other guarded downgrades are refused when the corresponding customer
+evidence exists.
 
 ## Next Phase 9 batches
 
 - Provider-specific checkout, invoice, tax, refund, and restricted customer
   billing-recovery portal integration
-- Staged media writeback with atomic promotion and file rollback evidence
+- Disaster-recovery retention policy, evidence cleanup, and interrupted-operation recovery tooling
 - MFA and account recovery for platform and organization administrators
 
 Verified hostname ownership, automatic custom-host login branding, and the
@@ -223,5 +225,5 @@ Tenant-isolated portable backups, secret exclusions, checksum evidence, and the
 controlled restore boundary are documented in
 [`CUSTOMER_DATA_EXPORTS.md`](CUSTOMER_DATA_EXPORTS.md).
 
-Controlled update/rehydration validation, approval, application, and rollback
-are documented in [`CONTROLLED_DATA_RESTORES.md`](CONTROLLED_DATA_RESTORES.md).
+Controlled database/media validation, approval, application, and rollback are
+documented in [`CONTROLLED_DATA_RESTORES.md`](CONTROLLED_DATA_RESTORES.md).

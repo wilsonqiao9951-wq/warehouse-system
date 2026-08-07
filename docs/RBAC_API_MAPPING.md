@@ -304,4 +304,6 @@ Controlled restores never mutate authentication, billing, audit, ledger, or
 custody records. The application boundary updates existing allowlisted
 master/configuration/knowledge rows and can rehydrate deleted allowlisted rows
 only after global-id, unique-key, tenant, and foreign-key checks; conflicts
-block approval.
+block approval. Manifested public/private media is written only through the
+same administrator-approved exact-archive workflow, with configured-root path
+containment, protected before/after evidence, drift checks, and file rollback.

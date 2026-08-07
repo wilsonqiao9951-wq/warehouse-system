@@ -7,6 +7,7 @@ __pycache__/
 frontend/.env.local
 uploads/
 private_uploads/
+restore_rollbacks/
 frontend/node_modules/
 frontend/.next/
 frontend/out/

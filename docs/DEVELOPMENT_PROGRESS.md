@@ -951,3 +951,38 @@ Verification:
   static routes.
 - Python dependency consistency and full/production npm audits passed with 0
   known vulnerabilities.
+
+## 2026-08-07 - Phase 9 controlled restore media writeback
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added restore rehearsal counts for media creates, overwrites, unchanged
+  content, and unsafe/conflicting destinations.
+- Added exact archive-reference mapping to configured public/private roots with
+  traversal, path mismatch, duplicate target, symbolic-link, and regular-file
+  enforcement.
+- Added resulting-tenant reference validation and cross-tenant media-path
+  collision blocking before any file can enter an approved plan.
+- Added protected staging of archive content and overwritten originals with a
+  configurable 1 GiB evidence limit and durable SHA-256/size records.
+- Added same-directory temporary-file promotion, application compensation,
+  live-file drift checks, evidence corruption checks, and file-level rollback.
+- Added rollback compensation that reapplies archive content if its database
+  commit fails, followed by evidence cleanup only after successful completion.
+- Added Alembic revision `20260807_0039`, administrator UI evidence, deployment
+  settings, RBAC boundaries, and operator documentation.
+
+Verification:
+
+- Restore validation, record rehydration, public overwrite, private create,
+  unsafe target, evidence corruption, live drift, rollback, roles, and audit
+  tests: 7 passed; export regressions: 3 passed.
+- Backend: all 137 tests passed.
+- Fresh base-to-`0039`, empty `0039 -> 0038 -> 0039`, schema/constraint
+  inspection, and configured media-evidence downgrade refusal passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js production build passed for all 33
+  static routes.
+- Python dependency consistency and full/production npm audits passed with 0
+  known vulnerabilities.
