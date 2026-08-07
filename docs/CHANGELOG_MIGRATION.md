@@ -783,3 +783,14 @@ vulnerabilities.
 - Added TLS-protected SMTP delivery after the HTTP response; production never stores or returns the raw token and validates relay settings before startup.
 - Added password completion that rotates the Argon2 hash and authentication version so all older bearer sessions are revoked immediately.
 - Added Forgot Password and Reset Password pages, administrator security-event visibility, export redaction, restore compatibility, and migration `0049`.
+
+## 20260807_0050 - Administrator multi-factor authentication
+
+- Added optional administrator/platform-administrator RFC 6238 TOTP enrollment with current-password confirmation and an expiring provisioning window.
+- Added versioned AES-256-GCM authenticated-encryption protection for TOTP secrets, ordered multi-key decryption for key rotation, and fail-closed staging/production key validation.
+- Added short-lived password-proven login challenges that cannot be accepted as Bearer tokens, dual-scope attempt throttling, one-step clock-drift tolerance, and conditional TOTP replay prevention.
+- Added ten one-time recovery codes whose values are displayed once and retained only as digests; conditional consumption rejects concurrent replay.
+- Added password-and-MFA protected recovery-code replacement and MFA disable operations. Enrollment, replacement, and disable revoke all older sessions.
+- Added safe MFA security outcomes, Profile enrollment/recovery controls, login challenge UI, export redaction, controlled-restore compatibility, and migration `0050`.
+
+Verification: all 209 backend tests passed, including encryption tamper and key-rotation coverage; fresh base-to-`0050` and `0050 -> 0049 -> 0050` migration rehearsals passed on SQLite; frontend ESLint, TypeScript, and the Next.js production build passed for all 40 static routes; Python and npm audits reported 0 known vulnerabilities; production API/web images built successfully; Alembic comparison contains no missing `0050` operation.

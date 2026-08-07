@@ -67,10 +67,14 @@ import {
   WorkOrderPart,
   AbnormalUsageRow,
   AuthSecurityEvent,
+  AuthLoginResult,
   AuthToken,
   ImportBatch,
   InvitationCreated,
   InvitationInfo,
+  MfaEnrollment,
+  MfaRecoveryCodes,
+  MfaStatus,
   WorkOrderProfit,
   WorkOrderPartRecommendation,
   WorkOrderVoiceNote,
@@ -998,7 +1002,7 @@ export const api = {
   login: (email: string, password: string) => {
     const device = ensureDeviceCredentials();
     const form = new URLSearchParams({ username: email, password });
-    return request<AuthToken>("/auth/login", {
+    return request<AuthLoginResult>("/auth/login", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -1009,7 +1013,40 @@ export const api = {
       body: form.toString()
     });
   },
+  completeMfaLogin: (challengeToken: string, code: string) => {
+    const device = ensureDeviceCredentials();
+    return request<AuthToken>("/auth/mfa/login/complete", {
+      method: "POST",
+      headers: {
+        "X-Device-Id": device.deviceId,
+        "X-Device-Token": device.deviceToken,
+        "X-Device-Name": device.deviceName
+      },
+      body: JSON.stringify({ challenge_token: challengeToken, code })
+    });
+  },
   getMe: () => request<User>("/auth/me"),
+  getMfaStatus: () => request<MfaStatus>("/auth/mfa/status"),
+  startMfaEnrollment: (accountPassword: string) =>
+    request<MfaEnrollment>("/auth/mfa/enrollment/start", {
+      method: "POST",
+      body: JSON.stringify({ account_password: accountPassword })
+    }),
+  confirmMfaEnrollment: (code: string) =>
+    request<MfaRecoveryCodes>("/auth/mfa/enrollment/confirm", {
+      method: "POST",
+      body: JSON.stringify({ code })
+    }),
+  regenerateMfaRecoveryCodes: (accountPassword: string, code: string) =>
+    request<MfaRecoveryCodes>("/auth/mfa/recovery-codes/regenerate", {
+      method: "POST",
+      body: JSON.stringify({ account_password: accountPassword, code })
+    }),
+  disableMfa: (accountPassword: string, code: string) =>
+    request<void>("/auth/mfa/disable", {
+      method: "POST",
+      body: JSON.stringify({ account_password: accountPassword, code })
+    }),
   revokeAllSessions: (accountPassword: string) =>
     request<void>("/auth/sessions/revoke-all", {
       method: "POST",

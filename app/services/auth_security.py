@@ -21,6 +21,7 @@ COUNTED_PASSWORD_RESET_REQUESTS = (
     "reset_requested",
     "reset_request_ignored",
 )
+COUNTED_MFA_FAILURES = ("mfa_invalid",)
 
 
 def auth_fingerprint(namespace: str, value: str) -> str:
@@ -97,6 +98,34 @@ def password_reset_is_rate_limited(
         )
     ) or 0
     return source_requests >= settings.password_reset_source_requests
+
+
+def mfa_is_rate_limited(
+    db: Session,
+    *,
+    principal_fingerprint: str,
+    source_fingerprint: str,
+    now: datetime,
+) -> bool:
+    since = now - timedelta(minutes=settings.mfa_challenge_expire_minutes)
+    common = (
+        AuthSecurityEvent.event_type == "mfa",
+        AuthSecurityEvent.outcome.in_(COUNTED_MFA_FAILURES),
+        AuthSecurityEvent.occurred_at >= since,
+    )
+    principal_failures = db.scalar(
+        select(func.count(AuthSecurityEvent.id)).where(
+            *common,
+            AuthSecurityEvent.principal_fingerprint == principal_fingerprint,
+        )
+    ) or 0
+    source_failures = db.scalar(
+        select(func.count(AuthSecurityEvent.id)).where(
+            *common,
+            AuthSecurityEvent.source_fingerprint == source_fingerprint,
+        )
+    ) or 0
+    return max(principal_failures, source_failures) >= settings.mfa_max_attempts
 
 
 def record_auth_security_event(

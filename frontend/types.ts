@@ -46,10 +46,36 @@ export interface AuthToken {
   device_id?: string | null;
 }
 
+export interface MfaChallenge {
+  mfa_required: true;
+  challenge_token: string;
+  expires_in: number;
+}
+
+export type AuthLoginResult = AuthToken | MfaChallenge;
+
+export interface MfaStatus {
+  eligible: boolean;
+  available: boolean;
+  enabled: boolean;
+  enabled_at?: string | null;
+  enrollment_pending: boolean;
+}
+
+export interface MfaEnrollment {
+  secret: string;
+  provisioning_uri: string;
+  expires_at: string;
+}
+
+export interface MfaRecoveryCodes {
+  recovery_codes: string[];
+}
+
 export interface AuthSecurityEvent {
   id: number;
   user_id?: number | null;
-  event_type: "login" | "session_revocation" | "password_reset";
+  event_type: "login" | "session_revocation" | "password_reset" | "mfa";
   outcome:
     | "success"
     | "invalid_credentials"
@@ -62,7 +88,14 @@ export interface AuthSecurityEvent {
     | "reset_delivered"
     | "reset_delivery_failed"
     | "reset_completed"
-    | "reset_rejected";
+    | "reset_rejected"
+    | "mfa_challenge_required"
+    | "mfa_success"
+    | "mfa_invalid"
+    | "mfa_recovery_used"
+    | "mfa_enrolled"
+    | "mfa_disabled"
+    | "mfa_recovery_regenerated";
   occurred_at: string;
 }
 

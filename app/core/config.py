@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     password_reset_rate_limit_window_seconds: int = 3600
     password_reset_principal_requests: int = 3
     password_reset_source_requests: int = 20
+    mfa_encryption_keys: str = ""
+    mfa_challenge_expire_minutes: int = 5
+    mfa_enrollment_expire_minutes: int = 10
+    mfa_max_attempts: int = 5
     password_reset_email_enabled: bool = False
     auth_email_from: str = ""
     smtp_host: str = ""

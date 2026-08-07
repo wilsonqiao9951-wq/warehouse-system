@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import FileResponse, StreamingResponse
 from openpyxl import Workbook, load_workbook
@@ -109,6 +109,15 @@ from app.schemas import (
     MachineKnowledgeProfileCreate,
     MachineKnowledgeProfileRead,
     MachineKnowledgeProfileUpdate,
+    MfaChallengeRead,
+    MfaCodeVerify,
+    MfaDisable,
+    MfaEnrollmentRead,
+    MfaEnrollmentStart,
+    MfaLoginComplete,
+    MfaRecoveryCodesRead,
+    MfaRecoveryRegenerate,
+    MfaStatusRead,
     WorkOrderFlowAction,
     InventoryTransactionRead,
     ImportBatchRead,
@@ -188,6 +197,7 @@ from app.services.inventory import (
 from app.services.auth_security import (
     auth_fingerprint,
     login_is_rate_limited,
+    mfa_is_rate_limited,
     login_source_fingerprint,
     password_reset_is_rate_limited,
     record_auth_security_event,
@@ -196,6 +206,21 @@ from app.services.password_reset_delivery import (
     PasswordResetDeliveryError,
     deliver_password_reset_email,
     password_reset_delivery_available,
+)
+from app.services.mfa import (
+    MfaConfigurationError,
+    create_mfa_challenge_token,
+    decode_mfa_challenge_token,
+    decode_recovery_code_hashes,
+    decrypt_totp_secret,
+    encode_recovery_code_hashes,
+    encrypt_totp_secret,
+    generate_recovery_codes,
+    generate_totp_secret,
+    matching_totp_step,
+    mfa_is_available,
+    provisioning_uri,
+    recovery_code_hash,
 )
 from app.services.integration_delivery import enqueue_work_order_event
 from app.services.regions import ensure_default_region
@@ -291,9 +316,61 @@ def _parse_non_negative_number(value, cast, field_name: str):
     return number
 
 
-@router.post("/auth/login", response_model=TokenResponse)
+def _resolve_login_device(
+    db: Session,
+    user: User,
+    *,
+    x_device_id: str | None,
+    x_device_token: str | None,
+    x_device_name: str | None,
+) -> str | None:
+    if not x_device_id and not x_device_token:
+        return None
+    if (
+        not x_device_id
+        or not x_device_token
+        or not (16 <= len(x_device_id) <= 128)
+        or len(x_device_token) < 32
+    ):
+        raise HTTPException(status_code=400, detail="Valid device id and device token are required together")
+    if any(
+        character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        for character in x_device_id
+    ):
+        raise HTTPException(status_code=400, detail="Device id contains invalid characters")
+    token_hash = sha256(x_device_token.encode("utf-8")).hexdigest()
+    device = db.scalar(
+        select(UserDevice).where(
+            UserDevice.organization_id == user.organization_id,
+            UserDevice.device_id == x_device_id,
+        )
+    )
+    if device and device.user_id != user.id:
+        raise HTTPException(status_code=409, detail="This device is bound to another account")
+    if device and (not device.is_active or device.revoked_at is not None):
+        raise HTTPException(status_code=401, detail="This device registration has been revoked")
+    if device and not secrets.compare_digest(device.device_token_hash, token_hash):
+        raise HTTPException(status_code=401, detail="Device authentication failed")
+    if not device:
+        db.add(
+            UserDevice(
+                organization_id=user.organization_id,
+                user_id=user.id,
+                device_id=x_device_id,
+                device_token_hash=token_hash,
+                device_name=(x_device_name or "Registered device")[:255],
+            )
+        )
+    else:
+        device.device_name = (x_device_name or device.device_name or "Registered device")[:255]
+        device.last_seen_at = datetime.utcnow()
+    return x_device_id
+
+
+@router.post("/auth/login", response_model=TokenResponse | MfaChallengeRead)
 def login(
     request: Request,
+    response: Response,
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
     x_device_id: str | None = Header(default=None, alias="X-Device-Id"),
@@ -369,6 +446,21 @@ def login(
         db.commit()
         raise
 
+    if user.mfa_enabled_at is not None:
+        challenge_token, expires_in = create_mfa_challenge_token(user)
+        record_auth_security_event(
+            db,
+            event_type="mfa",
+            outcome="mfa_challenge_required",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        response.status_code = 202
+        return MfaChallengeRead(challenge_token=challenge_token, expires_in=expires_in)
+
     def reject_device(status_code: int, detail: str) -> None:
         record_auth_security_event(
             db,
@@ -382,35 +474,16 @@ def login(
         db.commit()
         raise HTTPException(status_code=status_code, detail=detail)
 
-    device_id = None
-    if x_device_id or x_device_token:
-        if not x_device_id or not x_device_token or not (16 <= len(x_device_id) <= 128) or len(x_device_token) < 32:
-            reject_device(400, "Valid device id and device token are required together")
-        if any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for character in x_device_id):
-            reject_device(400, "Device id contains invalid characters")
-        token_hash = sha256(x_device_token.encode("utf-8")).hexdigest()
-        device = db.scalar(select(UserDevice).where(
-            UserDevice.organization_id == user.organization_id, UserDevice.device_id == x_device_id
-        ))
-        if device and device.user_id != user.id:
-            reject_device(409, "This device is bound to another account")
-        if device and (not device.is_active or device.revoked_at is not None):
-            reject_device(401, "This device registration has been revoked")
-        if device and not secrets.compare_digest(device.device_token_hash, token_hash):
-            reject_device(401, "Device authentication failed")
-        if not device:
-            device = UserDevice(
-                organization_id=user.organization_id,
-                user_id=user.id,
-                device_id=x_device_id,
-                device_token_hash=token_hash,
-                device_name=(x_device_name or "Registered device")[:255],
-            )
-            db.add(device)
-        else:
-            device.device_name = (x_device_name or device.device_name or "Registered device")[:255]
-            device.last_seen_at = datetime.utcnow()
-        device_id = x_device_id
+    try:
+        device_id = _resolve_login_device(
+            db,
+            user,
+            x_device_id=x_device_id,
+            x_device_token=x_device_token,
+            x_device_name=x_device_name,
+        )
+    except HTTPException as exc:
+        reject_device(exc.status_code, str(exc.detail))
     record_auth_security_event(
         db,
         event_type="login",
@@ -428,6 +501,415 @@ def login(
         device_id=device_id,
     )
     return TokenResponse(access_token=token, expires_in=expires_in, user=user, device_id=device_id)
+
+
+def _mfa_principal_fingerprint(user: User) -> str:
+    return auth_fingerprint("login-principal", user.email or f"user:{user.id}")
+
+
+def _require_mfa_user(db: Session, actor: Actor) -> User:
+    if actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Authenticated user required")
+    user = db.get(User, actor.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found")
+    if user.role != UserRole.ADMIN and not user.is_platform_admin:
+        raise HTTPException(status_code=403, detail="MFA enrollment is available to administrators")
+    return user
+
+
+def _record_mfa_event(
+    db: Session,
+    request: Request,
+    user: User,
+    outcome: str,
+    *,
+    occurred_at: datetime | None = None,
+) -> None:
+    record_auth_security_event(
+        db,
+        event_type="mfa",
+        outcome=outcome,
+        principal_fingerprint=_mfa_principal_fingerprint(user),
+        source_fingerprint=login_source_fingerprint(request),
+        user=user,
+        occurred_at=occurred_at or datetime.utcnow(),
+    )
+
+
+def _enforce_mfa_attempt_limit(db: Session, request: Request, user: User, now: datetime) -> None:
+    principal_fingerprint = _mfa_principal_fingerprint(user)
+    source_fingerprint = login_source_fingerprint(request)
+    if not mfa_is_rate_limited(
+        db,
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        now=now,
+    ):
+        return
+    record_auth_security_event(
+        db,
+        event_type="mfa",
+        outcome="rate_limited",
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        user=user,
+        occurred_at=now,
+    )
+    db.commit()
+    raise HTTPException(
+        status_code=429,
+        detail="Too many MFA attempts; try again later",
+        headers={"Retry-After": str(settings.mfa_challenge_expire_minutes * 60)},
+    )
+
+
+def _consume_mfa_code(db: Session, user: User, code: str, now: datetime) -> str | None:
+    if user.mfa_enabled_at is None or not user.mfa_secret_encrypted:
+        return None
+    try:
+        secret = decrypt_totp_secret(user.mfa_secret_encrypted)
+    except MfaConfigurationError as exc:
+        raise HTTPException(status_code=503, detail="MFA verification is unavailable") from exc
+    matched_step = matching_totp_step(secret, code, now=now)
+    if matched_step is not None:
+        result = db.execute(
+            update(User)
+            .where(
+                User.id == user.id,
+                User.mfa_enabled_at.is_not(None),
+                or_(User.mfa_last_used_step.is_(None), User.mfa_last_used_step < matched_step),
+            )
+            .values(mfa_last_used_step=matched_step)
+            .execution_options(synchronize_session=False)
+        )
+        if result.rowcount == 1:
+            db.expire(user)
+            return "totp"
+
+    submitted_hash = recovery_code_hash(code)
+    stored_json = user.mfa_recovery_codes_json
+    hashes = decode_recovery_code_hashes(stored_json)
+    matched_index = next(
+        (index for index, value in enumerate(hashes) if secrets.compare_digest(value, submitted_hash)),
+        None,
+    )
+    if matched_index is None:
+        return None
+    remaining = hashes[:matched_index] + hashes[matched_index + 1 :]
+    replacement = json.dumps(remaining, separators=(",", ":"))
+    result = db.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            User.mfa_enabled_at.is_not(None),
+            User.mfa_recovery_codes_json == stored_json,
+        )
+        .values(mfa_recovery_codes_json=replacement)
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount == 1:
+        db.expire(user)
+        return "recovery"
+    return None
+
+
+@router.post("/auth/mfa/login/complete", response_model=TokenResponse)
+def complete_mfa_login(
+    payload: MfaLoginComplete,
+    request: Request,
+    db: Session = Depends(get_db),
+    x_device_id: str | None = Header(default=None, alias="X-Device-Id"),
+    x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
+    x_device_name: str | None = Header(default=None, alias="X-Device-Name"),
+):
+    now = datetime.utcnow()
+    source_fingerprint = login_source_fingerprint(request)
+    challenge_fingerprint = auth_fingerprint("mfa-challenge", payload.challenge_token)
+    if mfa_is_rate_limited(
+        db,
+        principal_fingerprint=challenge_fingerprint,
+        source_fingerprint=source_fingerprint,
+        now=now,
+    ):
+        record_auth_security_event(
+            db,
+            event_type="mfa",
+            outcome="rate_limited",
+            principal_fingerprint=challenge_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=None,
+            occurred_at=now,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=429,
+            detail="Too many MFA attempts; start a new sign-in later",
+            headers={"Retry-After": str(settings.mfa_challenge_expire_minutes * 60)},
+        )
+    try:
+        user_id, organization_id, credential_version = decode_mfa_challenge_token(payload.challenge_token)
+    except ValueError as exc:
+        record_auth_security_event(
+            db,
+            event_type="mfa",
+            outcome="mfa_invalid",
+            principal_fingerprint=challenge_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=None,
+            occurred_at=now,
+        )
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid or expired MFA challenge") from exc
+
+    user = db.get(User, user_id)
+    principal_fingerprint = (
+        _mfa_principal_fingerprint(user)
+        if user
+        else auth_fingerprint("mfa-user", str(user_id))
+    )
+    invalid_challenge = (
+        not user
+        or not user.is_active
+        or user.organization_id != organization_id
+        or user.auth_version != credential_version
+        or user.mfa_enabled_at is None
+    )
+    if invalid_challenge:
+        record_auth_security_event(
+            db,
+            event_type="mfa",
+            outcome="mfa_invalid",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid or expired MFA challenge")
+    if mfa_is_rate_limited(
+        db,
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        now=now,
+    ):
+        record_auth_security_event(
+            db,
+            event_type="mfa",
+            outcome="rate_limited",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=429,
+            detail="Too many MFA attempts; start a new sign-in later",
+            headers={"Retry-After": str(settings.mfa_challenge_expire_minutes * 60)},
+        )
+    organization = db.get(Organization, user.organization_id)
+    require_subscription_access(organization, platform_admin=user.is_platform_admin)
+    method = _consume_mfa_code(db, user, payload.code, now)
+    if method is None:
+        _record_mfa_event(db, request, user, "mfa_invalid", occurred_at=now)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid or already used MFA code")
+    try:
+        device_id = _resolve_login_device(
+            db,
+            user,
+            x_device_id=x_device_id,
+            x_device_token=x_device_token,
+            x_device_name=x_device_name,
+        )
+    except HTTPException as exc:
+        record_auth_security_event(
+            db,
+            event_type="login",
+            outcome="device_rejected",
+            principal_fingerprint=principal_fingerprint,
+            source_fingerprint=source_fingerprint,
+            user=user,
+            occurred_at=now,
+        )
+        db.commit()
+        raise exc
+    _record_mfa_event(
+        db,
+        request,
+        user,
+        "mfa_recovery_used" if method == "recovery" else "mfa_success",
+        occurred_at=now,
+    )
+    record_auth_security_event(
+        db,
+        event_type="login",
+        outcome="success",
+        principal_fingerprint=principal_fingerprint,
+        source_fingerprint=source_fingerprint,
+        user=user,
+        occurred_at=now,
+    )
+    db.commit()
+    token, expires_in = create_access_token(
+        user.id,
+        user.organization_id,
+        auth_version=user.auth_version,
+        device_id=device_id,
+    )
+    return TokenResponse(access_token=token, expires_in=expires_in, user=user, device_id=device_id)
+
+
+@router.get("/auth/mfa/status", response_model=MfaStatusRead)
+def mfa_status(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
+    if actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Authenticated user required")
+    user = db.get(User, actor.user_id)
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    now = datetime.utcnow()
+    eligible = user.role == UserRole.ADMIN or user.is_platform_admin
+    return MfaStatusRead(
+        eligible=eligible,
+        available=mfa_is_available(),
+        enabled=user.mfa_enabled_at is not None,
+        enabled_at=user.mfa_enabled_at,
+        enrollment_pending=(
+            user.mfa_enabled_at is None
+            and user.mfa_secret_encrypted is not None
+            and user.mfa_enrollment_expires_at is not None
+            and user.mfa_enrollment_expires_at > now
+        ),
+    )
+
+
+@router.post("/auth/mfa/enrollment/start", response_model=MfaEnrollmentRead)
+def start_mfa_enrollment(
+    payload: MfaEnrollmentStart,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    user = _require_mfa_user(db, actor)
+    _enforce_mfa_attempt_limit(db, request, user, datetime.utcnow())
+    if not mfa_is_available():
+        raise HTTPException(status_code=503, detail="MFA secret protection is not configured")
+    if user.mfa_enabled_at is not None:
+        raise HTTPException(status_code=409, detail="MFA is already enabled")
+    if not verify_password(payload.account_password, user.password_hash):
+        _record_mfa_event(db, request, user, "mfa_invalid")
+        db.commit()
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    secret = generate_totp_secret()
+    expires_at = datetime.utcnow() + timedelta(minutes=settings.mfa_enrollment_expire_minutes)
+    user.mfa_secret_encrypted = encrypt_totp_secret(secret)
+    user.mfa_recovery_codes_json = None
+    user.mfa_enrollment_expires_at = expires_at
+    user.mfa_last_used_step = None
+    db.commit()
+    return MfaEnrollmentRead(
+        secret=secret,
+        provisioning_uri=provisioning_uri(secret=secret, email=user.email or user.name),
+        expires_at=expires_at,
+    )
+
+
+@router.post("/auth/mfa/enrollment/confirm", response_model=MfaRecoveryCodesRead)
+def confirm_mfa_enrollment(
+    payload: MfaCodeVerify,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    user = _require_mfa_user(db, actor)
+    now = datetime.utcnow()
+    _enforce_mfa_attempt_limit(db, request, user, now)
+    if (
+        user.mfa_enabled_at is not None
+        or not user.mfa_secret_encrypted
+        or not user.mfa_enrollment_expires_at
+        or user.mfa_enrollment_expires_at <= now
+    ):
+        if user.mfa_enabled_at is None:
+            user.mfa_secret_encrypted = None
+            user.mfa_enrollment_expires_at = None
+            db.commit()
+        raise HTTPException(status_code=410, detail="MFA enrollment has expired; start again")
+    try:
+        secret = decrypt_totp_secret(user.mfa_secret_encrypted)
+    except MfaConfigurationError as exc:
+        raise HTTPException(status_code=503, detail="MFA verification is unavailable") from exc
+    matched_step = matching_totp_step(secret, payload.code, now=now)
+    if matched_step is None:
+        _record_mfa_event(db, request, user, "mfa_invalid", occurred_at=now)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid authenticator code")
+    recovery_codes = generate_recovery_codes()
+    user.mfa_recovery_codes_json = encode_recovery_code_hashes(recovery_codes)
+    user.mfa_enabled_at = now
+    user.mfa_enrollment_expires_at = None
+    user.mfa_last_used_step = matched_step
+    user.auth_version += 1
+    _record_mfa_event(db, request, user, "mfa_enrolled", occurred_at=now)
+    db.commit()
+    return MfaRecoveryCodesRead(recovery_codes=recovery_codes)
+
+
+@router.post("/auth/mfa/recovery-codes/regenerate", response_model=MfaRecoveryCodesRead)
+def regenerate_mfa_recovery_codes(
+    payload: MfaRecoveryRegenerate,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    user = _require_mfa_user(db, actor)
+    now = datetime.utcnow()
+    _enforce_mfa_attempt_limit(db, request, user, now)
+    if not verify_password(payload.account_password, user.password_hash):
+        _record_mfa_event(db, request, user, "mfa_invalid", occurred_at=now)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    method = _consume_mfa_code(db, user, payload.code, now)
+    if method is None:
+        _record_mfa_event(db, request, user, "mfa_invalid", occurred_at=now)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid or already used MFA code")
+    recovery_codes = generate_recovery_codes()
+    user.mfa_recovery_codes_json = encode_recovery_code_hashes(recovery_codes)
+    user.auth_version += 1
+    _record_mfa_event(db, request, user, "mfa_recovery_regenerated", occurred_at=now)
+    db.commit()
+    return MfaRecoveryCodesRead(recovery_codes=recovery_codes)
+
+
+@router.post("/auth/mfa/disable", status_code=204)
+def disable_mfa(
+    payload: MfaDisable,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    user = _require_mfa_user(db, actor)
+    now = datetime.utcnow()
+    _enforce_mfa_attempt_limit(db, request, user, now)
+    if not verify_password(payload.account_password, user.password_hash):
+        _record_mfa_event(db, request, user, "mfa_invalid", occurred_at=now)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    if _consume_mfa_code(db, user, payload.code, now) is None:
+        _record_mfa_event(db, request, user, "mfa_invalid", occurred_at=now)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Invalid or already used MFA code")
+    user.mfa_secret_encrypted = None
+    user.mfa_recovery_codes_json = None
+    user.mfa_enabled_at = None
+    user.mfa_enrollment_expires_at = None
+    user.mfa_last_used_step = None
+    user.auth_version += 1
+    _record_mfa_event(db, request, user, "mfa_disabled", occurred_at=now)
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.get("/auth/me", response_model=UserRead)

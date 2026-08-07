@@ -124,6 +124,10 @@ def validate_deployment_settings(config: Settings = settings) -> None:
         if config.smtp_password and _is_placeholder(config.smtp_password):
             errors.append("SMTP_PASSWORD must not be a placeholder")
 
+    from app.services.mfa import mfa_configuration_errors
+
+    errors.extend(mfa_configuration_errors(config, required=True))
+
     try:
         database = make_url(config.database_url)
         if not database.drivername.startswith("postgresql"):

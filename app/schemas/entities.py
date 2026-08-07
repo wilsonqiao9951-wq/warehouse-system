@@ -82,7 +82,7 @@ class SessionRevoke(BaseModel):
 class AuthSecurityEventRead(BaseModel):
     id: int
     user_id: int | None
-    event_type: Literal["login", "session_revocation", "password_reset"]
+    event_type: Literal["login", "session_revocation", "password_reset", "mfa"]
     outcome: Literal[
         "success",
         "invalid_credentials",
@@ -96,6 +96,13 @@ class AuthSecurityEventRead(BaseModel):
         "reset_delivery_failed",
         "reset_completed",
         "reset_rejected",
+        "mfa_challenge_required",
+        "mfa_success",
+        "mfa_invalid",
+        "mfa_recovery_used",
+        "mfa_enrolled",
+        "mfa_disabled",
+        "mfa_recovery_regenerated",
     ]
     occurred_at: datetime
 
@@ -156,6 +163,53 @@ class TokenResponse(BaseModel):
     expires_in: int
     user: UserRead
     device_id: str | None = None
+
+
+class MfaChallengeRead(BaseModel):
+    mfa_required: Literal[True] = True
+    challenge_token: str
+    expires_in: int
+
+
+class MfaLoginComplete(BaseModel):
+    challenge_token: str = Field(min_length=20, max_length=2000)
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MfaStatusRead(BaseModel):
+    eligible: bool
+    available: bool
+    enabled: bool
+    enabled_at: datetime | None = None
+    enrollment_pending: bool
+
+
+class MfaEnrollmentStart(BaseModel):
+    account_password: str = Field(min_length=10, max_length=128)
+
+
+class MfaEnrollmentRead(BaseModel):
+    secret: str
+    provisioning_uri: str
+    expires_at: datetime
+
+
+class MfaCodeVerify(BaseModel):
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MfaDisable(BaseModel):
+    account_password: str = Field(min_length=10, max_length=128)
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MfaRecoveryRegenerate(BaseModel):
+    account_password: str = Field(min_length=10, max_length=128)
+    code: str = Field(min_length=6, max_length=32)
+
+
+class MfaRecoveryCodesRead(BaseModel):
+    recovery_codes: list[str]
 
 
 class OrganizationCreate(BaseModel):
