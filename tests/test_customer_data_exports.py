@@ -127,12 +127,27 @@ def test_customer_data_export_is_tenant_scoped_redacted_and_checksummed(
         assert manifest["organization"]["id"] == 1
         assert manifest["file_count"] == 3
         assert manifest["missing_file_count"] == 1
-        assert manifest["security"]["redacted_columns"]["users"] == ["password_hash"]
+        assert manifest["security"]["redacted_columns"]["users"] == [
+            "mfa_enrollment_expires_at",
+            "mfa_last_used_step",
+            "mfa_recovery_codes_json",
+            "mfa_secret_encrypted",
+            "password_hash",
+        ]
         assert {row["part_number"] for row in parts} == {"VISIBLE-100", "MISSING-200"}
         assert organizations == [
             next(row for row in organizations if row["id"] == 1)
         ]
-        assert all("password_hash" not in row for row in users)
+        assert all(
+            not {
+                "password_hash",
+                "mfa_secret_encrypted",
+                "mfa_recovery_codes_json",
+                "mfa_last_used_step",
+                "mfa_enrollment_expires_at",
+            }.intersection(row)
+            for row in users
+        )
         assert "files/public/part-images/filter.png" in archive.namelist()
         assert archive.read("files/public/part-images/filter.png") == b"verified-field-evidence"
         assert archive.read("files/public/form-photos/inspection.png") == b"configured-form-evidence"

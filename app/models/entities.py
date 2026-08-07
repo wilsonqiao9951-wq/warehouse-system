@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Enum as SqlEnum, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, Enum as SqlEnum, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -646,6 +646,14 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("auth_version >= 0", name="ck_users_auth_version_non_negative"),
+        CheckConstraint(
+            "mfa_enabled_at IS NULL OR (mfa_secret_encrypted IS NOT NULL AND mfa_recovery_codes_json IS NOT NULL)",
+            name="ck_users_mfa_enabled_complete",
+        ),
+        CheckConstraint(
+            "mfa_last_used_step IS NULL OR mfa_last_used_step >= 0",
+            name="ck_users_mfa_last_used_step_non_negative",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -658,6 +666,11 @@ class User(Base):
     auth_version: Mapped[int] = mapped_column(
         Integer, default=0, server_default=text("0"), nullable=False
     )
+    mfa_secret_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    mfa_recovery_codes_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mfa_enabled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    mfa_enrollment_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    mfa_last_used_step: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -670,14 +683,17 @@ class AuthSecurityEvent(Base):
     __tablename__ = "auth_security_events"
     __table_args__ = (
         CheckConstraint(
-            "event_type IN ('login', 'session_revocation', 'password_reset')",
+            "event_type IN ('login', 'session_revocation', 'password_reset', 'mfa')",
             name="ck_auth_security_events_type",
         ),
         CheckConstraint(
             "outcome IN ('success', 'invalid_credentials', 'rate_limited', "
             "'subscription_denied', 'device_rejected', 'sessions_revoked', "
             "'reset_requested', 'reset_request_ignored', 'reset_delivered', "
-            "'reset_delivery_failed', 'reset_completed', 'reset_rejected')",
+            "'reset_delivery_failed', 'reset_completed', 'reset_rejected', "
+            "'mfa_challenge_required', 'mfa_success', 'mfa_invalid', "
+            "'mfa_recovery_used', 'mfa_enrolled', 'mfa_disabled', "
+            "'mfa_recovery_regenerated')",
             name="ck_auth_security_events_outcome",
         ),
         CheckConstraint(

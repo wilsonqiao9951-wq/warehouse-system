@@ -19,6 +19,10 @@ PASSWORD_RESET_EXPIRE_MINUTES=30
 PASSWORD_RESET_RATE_LIMIT_WINDOW_SECONDS=3600
 PASSWORD_RESET_PRINCIPAL_REQUESTS=3
 PASSWORD_RESET_SOURCE_REQUESTS=20
+MFA_ENCRYPTION_KEYS=<one or more comma-separated base64 AES-256 keys, newest first>
+MFA_CHALLENGE_EXPIRE_MINUTES=5
+MFA_ENROLLMENT_EXPIRE_MINUTES=10
+MFA_MAX_ATTEMPTS=5
 PASSWORD_RESET_EMAIL_ENABLED=true
 AUTH_EMAIL_FROM=OpenPartsFlow <security@example.com>
 SMTP_HOST=smtp.example.com
@@ -65,6 +69,29 @@ Production and staging expose reset requests only when the SMTP relay, sender, T
 Each eligible request invalidates earlier unused tokens and creates 32 random bytes. Only the keyed token hash is stored. Tokens expire after 30 minutes by default, are consumed through a conditional database update, and cannot be replayed. Completing a reset replaces the Argon2 password hash, increments the account authentication version, invalidates every older bearer session, and records safe security evidence.
 
 SMTP delivery runs after the HTTP response so account existence cannot be inferred from relay latency. The raw token exists only in the reset URL passed to the mail task and is never written to the database, logs, API response, or customer export in production. Delivery status retains only `pending`, `sent`, or a safe failure code; a user can request another link after a relay failure. Development/test mode may expose a clearly labeled local reset URL when email delivery is disabled.
+
+## Administrator multi-factor authentication
+
+Organization and platform administrators can opt into RFC 6238 TOTP from the Profile workspace. Engineer, warehouse, manager, and assistant accounts cannot enroll through the administrator MFA endpoints. Enrollment requires the current account password, returns the provisioning secret only during the short enrollment window, and is not active until a valid authenticator code is confirmed.
+
+```text
+GET  /api/auth/mfa/status
+POST /api/auth/mfa/enrollment/start
+POST /api/auth/mfa/enrollment/confirm
+POST /api/auth/mfa/login/complete
+POST /api/auth/mfa/recovery-codes/regenerate
+POST /api/auth/mfa/disable
+```
+
+TOTP uses a 30-second period, six digits, HMAC-SHA1 interoperability, and at most one time step of clock drift. The server records the last accepted step and conditionally advances it, so the same authenticator code cannot be replayed. Password verification succeeds before the API returns a five-minute MFA challenge; that challenge omits the access-token authentication-version claim and cannot be used as a Bearer session. Invalid codes are rate limited by both keyed account and direct-peer fingerprints.
+
+The per-user TOTP secret is encrypted at rest with versioned AES-256-GCM authenticated encryption and bound associated data. `MFA_ENCRYPTION_KEYS` is mandatory in staging and production. Put the newest key first; encryption uses it while decryption tries every configured key so operators can rotate secrets without an outage. Losing every configured key makes enrolled secrets unrecoverable. Generate a key with:
+
+```text
+python -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+```
+
+Ten high-entropy one-time recovery codes are displayed only after enrollment or explicit regeneration. Only SHA-256 digests are stored, and consumption is conditional so concurrent reuse is rejected. Enabling or disabling MFA and replacing recovery codes increments the account authentication version, immediately revoking older browser and phone sessions. TOTP secrets, recovery digests, accepted steps, passwords, challenges, and recovery values are excluded from customer exports and safe authentication-event projections.
 
 ## Account onboarding
 
@@ -125,6 +152,5 @@ The application is fail-closed in every runnable environment: RBAC is enabled an
 
 ## Remaining commercial hardening
 
-- Optional MFA for administrators
 - Prefer HttpOnly secure cookies for browser deployments that do not require standalone Bearer-token clients
 - Invitation acceptance exists; invitation-email ownership proof remains to reuse the verified reset mail transport

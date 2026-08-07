@@ -23,7 +23,13 @@ from app.models import MachineKnowledgeEntry, Organization
 
 FORMAT_VERSION = "opf-portable-v1"
 SENSITIVE_COLUMNS: dict[str, set[str]] = {
-    "users": {"password_hash"},
+    "users": {
+        "password_hash",
+        "mfa_secret_encrypted",
+        "mfa_recovery_codes_json",
+        "mfa_last_used_step",
+        "mfa_enrollment_expires_at",
+    },
     "user_devices": {"device_token_hash"},
     "user_invitations": {"token_hash"},
     "auth_security_events": {"principal_fingerprint", "source_fingerprint"},

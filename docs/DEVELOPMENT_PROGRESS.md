@@ -1402,3 +1402,26 @@ Verification:
 - All 200 backend tests passed.
 - Fresh base-to-`0049` plus `0049 -> 0048 -> 0049` migration rehearsal passed on SQLite.
 - Frontend ESLint and TypeScript passed; the Next.js 16.2.12 production build generated all 40 static routes.
+
+## 2026-08-07 - Phase 9 administrator MFA
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added administrator/platform-administrator TOTP enrollment with password confirmation, expiring setup, confirmation before activation, and standards-compatible provisioning data.
+- Encrypted TOTP secrets with a dedicated AES-256-GCM key ring and bound associated data, required valid key configuration in staging/production, and documented ordered key rotation.
+- Added short-lived MFA login challenges that cannot authenticate as Bearer tokens, direct-peer/account rate limiting, conditional used-step advancement, and replay rejection.
+- Added ten display-once recovery codes stored only as SHA-256 digests, atomic one-time consumption, password-and-factor regeneration, and safe disable.
+- Revoked older sessions after enrollment, recovery-code regeneration, and disable; retained only safe tenant-scoped MFA outcomes.
+- Added the mobile-ready login verification step and Profile MFA workspace, migration `0050`, export redaction, and restore/current-head compatibility.
+
+Verification:
+
+- Administrator enrollment, role denial, encrypted storage, export redaction, challenge isolation, invalid code, TOTP success/replay, recovery use, disable, session revocation, rate limiting, key rotation, ciphertext tamper rejection, and RFC vector tests passed.
+- Fresh base-to-`0050` plus `0050 -> 0049 -> 0050` migration rehearsal passed on SQLite.
+- Frontend ESLint, TypeScript, and the Next.js production build passed for all 40 static routes.
+- All 209 backend tests passed, including authenticated-encryption tamper/key-rotation coverage and the complete authentication, tenant, backup/restore, inventory custody, billing, AI, and work-order authorization regression suites.
+- Alembic model comparison reports only the previously documented drift and no missing `0050` column or constraint operation.
+- Python requirement/full-environment and both npm audits reported 0 known vulnerabilities; production configuration, Compose contract/configuration, and API/web image builds passed.
+- Backed up the local `0049` database as `openpartsflow.pre-0050-20260807-142601.db` (SHA-256 `7973597B3643A68B2B8B41948BCBD44AC47AC17EEE8B3B707C9E241E4898EBF2`) before upgrading the configured database to `0050` head.

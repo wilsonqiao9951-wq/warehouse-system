@@ -189,6 +189,7 @@ DATABASE_URL=sqlite:///./openpartsflow.db
 RBAC_ENFORCE=true
 LEGACY_HEADER_AUTH=false
 JWT_SECRET_KEY=<at least 32 random characters>
+MFA_ENCRYPTION_KEYS=<base64 AES-256 key; required in staging/production>
 MAX_IMAGE_UPLOAD_BYTES=10485760
 MAX_KNOWLEDGE_MEDIA_UPLOAD_BYTES=52428800
 OPERATIONS_REQUEST_WINDOW_SECONDS=300
@@ -204,7 +205,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260807_0046` (Stripe billing operations and webhook evidence).
+- Current schema head: `20260807_0050` (administrator multi-factor authentication).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:
