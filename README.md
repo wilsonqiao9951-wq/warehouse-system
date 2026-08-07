@@ -24,6 +24,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Tenant-scoped enterprise audit search, activity summaries, and password-confirmed hash-evidenced CSV export
 - Minimal live/ready probes plus platform-only request, worker, integration, billing, and backup operations monitoring
 - Role-compatible enterprise user access policies with explicit allow/deny/inherit overrides and complete audit evidence
+- Tenant-scoped enterprise operations analytics with reconciled KPIs, quality coverage, regional stock, and audited CSV export
 - Tenant-isolated portable ZIP backups with secret redaction, media manifests, and durable SHA-256 evidence
 - Controlled restore rehearsal, safe record/media recovery, exact-plan application, and drift-protected rollback
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
@@ -64,6 +65,7 @@ The project now includes a Next.js admin dashboard at `frontend/` with:
 - Warehouse replenishment queue with server-authorized picking, shipping, and completion actions
 - Engineer My Van deliveries with registered-phone and password-verified receipt
 - Employee page (roles and performance overview)
+- Enterprise analytics page with UTC period, engineer, and job-type filters
 
 Run frontend:
 
@@ -113,6 +115,7 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 - `GET /api/audit-logs/search` and `/summary` require effective `audit.read`; password-confirmed `POST /api/audit-logs/export` requires `audit.export` and returns a formula-safe, SHA-256-recorded CSV. See [`docs/AUDIT_LOGS.md`](docs/AUDIT_LOGS.md).
 - `GET /health/live` and `/health/ready` provide minimal orchestration probes; platform administrators use `GET /api/platform/operations/summary` and `/platform/operations` for live SLA-operability evidence. See [`docs/OPERATIONS_MONITORING.md`](docs/OPERATIONS_MONITORING.md).
 - `GET /api/permissions/me` resolves role defaults and administrator-issued user overrides; the administrator matrix is documented in [`docs/ENTERPRISE_ACCESS_POLICIES.md`](docs/ENTERPRISE_ACCESS_POLICIES.md).
+- `GET /api/analytics/operations` returns reconciled work-order, service-quality, contribution, and regional-inventory metrics; password-confirmed `POST /api/analytics/operations/export` creates a formula-safe, digest-evidenced CSV. See [`docs/ENTERPRISE_ANALYTICS.md`](docs/ENTERPRISE_ANALYTICS.md).
 - `POST /api/work-order-parts` is still available for backward compatibility but marked deprecated.
 - `GET /api/inventory/replenishment-requests` returns the role-scoped replenishment queue and server-calculated action capabilities.
 - `POST /api/inventory/replenishment-requests` creates a manual vehicle request with a required business reason and client-generated idempotency key.
@@ -167,6 +170,7 @@ MAX_IMAGE_UPLOAD_BYTES=10485760
 MAX_KNOWLEDGE_MEDIA_UPLOAD_BYTES=52428800
 OPERATIONS_REQUEST_WINDOW_SECONDS=300
 OPERATIONS_BACKUP_WARNING_DAYS=7
+MAX_ANALYTICS_EXPORT_ROWS=100000
 ```
 
 PostgreSQL example:
@@ -177,7 +181,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260807_0043` (multi-region inventory ownership).
+- Current schema head: `20260807_0044` (enterprise analytics query indexes).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

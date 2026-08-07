@@ -118,6 +118,22 @@ The `audit.export` permission defaults to administrators and controls `POST /api
 - Administrators can correct unlocked records with their own audit attribution; managers cannot impersonate the field owner.
 - Releasing a claim invalidates the prior user's device and queued claim generation.
 
+## Enterprise operations analytics
+
+| Operation | Engineer | Manager | Organization admin | Warehouse |
+| --- | ---: | ---: | ---: | ---: |
+| View operations analytics | Deny by default | Allow | Allow | Deny by default |
+| Export completed-work-order detail | Deny by default | Deny by default | Allow with current password | Deny by default |
+
+`reports.read` and `reports.export` are independently resolved through the
+enterprise permission matrix. An administrator can delegate either capability
+to a non-administrator, but an explicit deny takes precedence over role
+defaults. All dashboard and export queries retain the tenant filter. Export
+requires Bearer authentication and account-password reauthentication, rejects
+oversized results, returns digest and row-count evidence, and records an audit
+event. Metric grain and caveats are documented in
+[`ENTERPRISE_ANALYTICS.md`](ENTERPRISE_ANALYTICS.md).
+
 ## Commercial reporting access model
 
 | Operation | Engineer | Manager | Organization admin | Platform admin |

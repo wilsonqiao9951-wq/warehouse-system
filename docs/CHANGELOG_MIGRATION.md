@@ -676,3 +676,24 @@ audit, and vehicle-protection tests passed; all 154 backend tests passed; fresh
 base-to-`0043` and `0043 -> 0042 -> 0043` migration rehearsals passed on SQLite;
 ESLint, TypeScript, and the Next.js production build passed for all 36 static
 routes.
+
+## 20260807_0044 - Enterprise operations analytics indexes
+
+- Adds tenant/created, tenant/completed, tenant/completer/completed, and
+  tenant/job-type/completed work-order indexes for bounded operating reviews.
+- Adds tenant/work-order part and tenant/time inventory-transaction indexes for
+  contribution, regional consumption, and source-freshness queries.
+- Adds tenant-scoped KPI, prior-period, trend, engineer, job-type, regional
+  inventory, data-quality, and source-freshness reporting.
+- Adds effective `reports.export`, password-confirmed formula-safe CSV export,
+  configured row limits, SHA-256/row-count response evidence, and durable export
+  audit evidence.
+- Adds the chart-led `/analytics` workspace with shared UTC date, engineer, and
+  job-type filters.
+
+Verification: four analytics reconciliation, filter, tenant, permission,
+reauthentication, export-safety, digest, audit, and size-limit tests passed; all
+158 backend tests passed; fresh base-to-`0044` and `0044 -> 0043 -> 0044`
+migration rehearsals passed on SQLite; ESLint, TypeScript, and the Next.js
+production build passed for all 37 static routes; dependency checks and both npm
+audits passed with 0 known vulnerabilities.
