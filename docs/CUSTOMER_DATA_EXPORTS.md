@@ -68,6 +68,11 @@ The same archive SHA-256 is returned in the
 Customers should calculate SHA-256 from the downloaded ZIP and compare it with
 this durable evidence.
 
+The ZIP itself is not retained by OpenPartsFlow. Integrity metadata becomes
+eligible for governed cleanup only after the organization's export-evidence
+retention period and only when no retained restore references it. Customer data
+and the audit event are not deleted. See [`DATA_RETENTION.md`](DATA_RETENTION.md).
+
 ## Limits and restore boundary
 
 `MAX_DATA_EXPORT_BYTES` limits the combined uncompressed database and local-file

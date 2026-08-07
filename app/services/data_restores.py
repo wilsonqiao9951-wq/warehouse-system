@@ -236,6 +236,25 @@ RESTORE_SCHEMA_COMPATIBILITY = {
         "20260807_0050",
         "20260807_0051",
     },
+    "20260807_0052": {
+        "20260806_0036",
+        "20260806_0037",
+        "20260807_0038",
+        "20260807_0039",
+        "20260807_0040",
+        "20260807_0041",
+        "20260807_0042",
+        "20260807_0043",
+        "20260807_0044",
+        "20260807_0045",
+        "20260807_0046",
+        "20260807_0047",
+        "20260807_0048",
+        "20260807_0049",
+        "20260807_0050",
+        "20260807_0051",
+        "20260807_0052",
+    },
 }
 
 RESTORE_OPTIONAL_COLUMNS = {
@@ -294,6 +313,15 @@ class PreparedRestoreFiles:
     rolled_back: bool = False
     promoted_items: list[dict[str, Any]] | None = None
     rolled_back_items: list[dict[str, Any]] | None = None
+
+
+@dataclass
+class StagedRetentionCleanup:
+    organization_id: int
+    rollback_root: Path
+    quarantine_root: Path
+    moved_restore_ids: list[int]
+    missing_restore_ids: list[int]
 
 
 def copy_restore_upload(source: BinaryIO) -> RestoreUpload:
@@ -1401,6 +1429,149 @@ def compensate_restore_file_apply(prepared: PreparedRestoreFiles | None) -> None
 def discard_restore_file_evidence(prepared: PreparedRestoreFiles | None) -> None:
     if prepared and prepared.operation_root:
         shutil.rmtree(prepared.operation_root, ignore_errors=True)
+
+
+def _retention_quarantine_root(
+    rollback_root: Path,
+    organization_id: int,
+) -> Path:
+    return rollback_root / ".retention-cleanup" / f"organization-{organization_id}"
+
+
+def list_staged_retention_cleanup_ids(organization_id: int) -> list[int]:
+    rollback_root = _rollback_storage_root()
+    quarantine_root = _retention_quarantine_root(rollback_root, organization_id)
+    if not quarantine_root.exists():
+        return []
+    if quarantine_root.is_symlink() or not quarantine_root.is_dir():
+        raise DataRestoreConflict("Restore retention quarantine is unsafe")
+    ids: list[int] = []
+    for child in quarantine_root.iterdir():
+        prefix, separator, suffix = child.name.partition("-")
+        if (
+            prefix != "restore"
+            or separator != "-"
+            or not suffix.isdigit()
+            or child.is_symlink()
+            or not child.is_dir()
+        ):
+            raise DataRestoreConflict("Restore retention quarantine contains an unsafe entry")
+        ids.append(int(suffix))
+    return sorted(ids)
+
+
+def reconcile_staged_retention_cleanup(
+    organization_id: int,
+    active_restore_ids: set[int],
+) -> int:
+    rollback_root = _rollback_storage_root()
+    quarantine_root = _retention_quarantine_root(rollback_root, organization_id)
+    recovered = 0
+    for restore_id in list_staged_retention_cleanup_ids(organization_id):
+        staged = quarantine_root / f"restore-{restore_id}"
+        if restore_id in active_restore_ids:
+            original = (
+                rollback_root
+                / f"organization-{organization_id}"
+                / f"restore-{restore_id}"
+            )
+            if original.exists() or original.is_symlink():
+                raise DataRestoreConflict(
+                    "Restore retention cleanup has conflicting active evidence"
+                )
+            original.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(staged, original)
+        else:
+            shutil.rmtree(staged)
+        recovered += 1
+    _prune_empty_parents(quarantine_root, rollback_root)
+    return recovered
+
+
+def stage_restore_file_evidence_cleanup(
+    organization_id: int,
+    restore_ids: list[int],
+) -> StagedRetentionCleanup:
+    rollback_root = _rollback_storage_root()
+    quarantine_root = _retention_quarantine_root(rollback_root, organization_id)
+    moved: list[int] = []
+    missing: list[int] = []
+    try:
+        for restore_id in sorted(set(restore_ids)):
+            original = (
+                rollback_root
+                / f"organization-{organization_id}"
+                / f"restore-{restore_id}"
+            )
+            if not original.exists():
+                if original.is_symlink():
+                    raise DataRestoreConflict("Restore rollback evidence path is unsafe")
+                missing.append(restore_id)
+                continue
+            if (
+                original.is_symlink()
+                or not original.is_dir()
+                or rollback_root not in original.resolve().parents
+            ):
+                raise DataRestoreConflict("Restore rollback evidence path is unsafe")
+            staged = quarantine_root / f"restore-{restore_id}"
+            if staged.exists() or staged.is_symlink():
+                raise DataRestoreConflict(
+                    "Restore retention cleanup already has staged evidence"
+                )
+            quarantine_root.mkdir(parents=True, exist_ok=True)
+            os.replace(original, staged)
+            moved.append(restore_id)
+    except Exception:
+        prepared = StagedRetentionCleanup(
+            organization_id=organization_id,
+            rollback_root=rollback_root,
+            quarantine_root=quarantine_root,
+            moved_restore_ids=moved,
+            missing_restore_ids=missing,
+        )
+        rollback_staged_retention_cleanup(prepared)
+        raise
+    return StagedRetentionCleanup(
+        organization_id=organization_id,
+        rollback_root=rollback_root,
+        quarantine_root=quarantine_root,
+        moved_restore_ids=moved,
+        missing_restore_ids=missing,
+    )
+
+
+def rollback_staged_retention_cleanup(
+    prepared: StagedRetentionCleanup | None,
+) -> None:
+    if not prepared:
+        return
+    for restore_id in reversed(prepared.moved_restore_ids):
+        staged = prepared.quarantine_root / f"restore-{restore_id}"
+        if not staged.exists():
+            continue
+        original = (
+            prepared.rollback_root
+            / f"organization-{prepared.organization_id}"
+            / f"restore-{restore_id}"
+        )
+        original.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(staged, original)
+    _prune_empty_parents(prepared.quarantine_root, prepared.rollback_root)
+
+
+def finalize_staged_retention_cleanup(
+    prepared: StagedRetentionCleanup | None,
+) -> None:
+    if not prepared:
+        return
+    for restore_id in prepared.moved_restore_ids:
+        staged = prepared.quarantine_root / f"restore-{restore_id}"
+        if staged.exists():
+            if staged.is_symlink() or not staged.is_dir():
+                raise DataRestoreConflict("Restore retention quarantine is unsafe")
+            shutil.rmtree(staged)
+    _prune_empty_parents(prepared.quarantine_root, prepared.rollback_root)
 
 
 def apply_restore_plan(

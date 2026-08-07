@@ -192,7 +192,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260807_0051` before starting the updated application:
+Apply migration `20260807_0052` before starting the updated application:
 
 ```bash
 alembic upgrade head
@@ -209,15 +209,19 @@ downgrade while that evidence exists. Revision `0039` records staged media
 create/overwrite/rollback evidence and refuses downgrade while that evidence
 exists. Other guarded downgrades are refused when the corresponding customer
 evidence exists.
+Revision `0052` adds versioned disaster-recovery retention settings, fixed
+rollback expiry, purge attribution, and guarded cleanup indexes.
 
 ## Next Phase 9 batches
 
-- Disaster-recovery retention policy and governed evidence cleanup
 - PostgreSQL row-level security deployment defense in depth
 
 Provider-specific Stripe checkout, invoices, taxes, refunds, and restricted
 billing recovery; administrator MFA and account recovery; verified invitation
 delivery; and interrupted outbound-delivery recovery are implemented.
+Governed disaster-recovery evidence retention and interrupted file-cleanup
+reconciliation are also implemented and documented in
+[`DATA_RETENTION.md`](DATA_RETENTION.md).
 
 Verified hostname ownership, automatic custom-host login branding, and the
 provider-independent customer sender identity foundation are documented in

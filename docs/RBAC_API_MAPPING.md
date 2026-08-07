@@ -373,6 +373,9 @@ return custody only.
 | Approve/reject restore plan | Deny | Deny | Allow, password + matching version | Home tenant only |
 | Apply exact approved archive | Deny | Deny | Allow, password + archive/plan/version match | Home tenant only |
 | Roll back applied fields | Deny | Deny | Allow, password + integrity/drift/version checks | Home tenant only |
+| Preview disaster-recovery retention candidates | Deny | Deny | Allow | Home tenant only |
+| Change retention policy | Deny | Deny | Allow, password + reason + matching settings version | Home tenant only |
+| Clean eligible recovery evidence | Deny | Deny | Allow, password + reason + matching settings version | Home tenant only |
 
 Exports use the same tenant model registry as application reads. Authentication
 hashes, API key hashes, invitation tokens, device secrets, and DNS verification
@@ -386,3 +389,5 @@ only after global-id, unique-key, tenant, and foreign-key checks; conflicts
 block approval. Manifested public/private media is written only through the
 same administrator-approved exact-archive workflow, with configured-root path
 containment, protected before/after evidence, drift checks, and file rollback.
+Retention cleanup never selects active approvals, unexpired rollback windows,
+customer business records, or audit logs.

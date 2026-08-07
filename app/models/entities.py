@@ -49,6 +49,12 @@ class Organization(Base):
             "AND (api_monthly_limit IS NULL OR api_monthly_limit >= 0)",
             name="ck_organizations_limits_positive",
         ),
+        CheckConstraint(
+            "data_export_evidence_retention_days BETWEEN 30 AND 3650 "
+            "AND data_restore_rehearsal_retention_days BETWEEN 7 AND 3650 "
+            "AND data_restore_rollback_retention_days BETWEEN 7 AND 3650",
+            name="ck_organizations_data_retention_days",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -66,6 +72,15 @@ class Organization(Base):
     max_vehicle_warehouses: Mapped[int | None] = mapped_column(Integer, default=50, nullable=True)
     ai_monthly_limit: Mapped[int | None] = mapped_column(Integer, default=2000, nullable=True)
     api_monthly_limit: Mapped[int | None] = mapped_column(Integer, default=10000, nullable=True)
+    data_export_evidence_retention_days: Mapped[int] = mapped_column(
+        Integer, default=365, nullable=False
+    )
+    data_restore_rehearsal_retention_days: Mapped[int] = mapped_column(
+        Integer, default=90, nullable=False
+    )
+    data_restore_rollback_retention_days: Mapped[int] = mapped_column(
+        Integer, default=30, nullable=False
+    )
     settings_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -257,6 +272,13 @@ class OrganizationDataRestore(Base):
     rollback_size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     file_rollback_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
     file_rollback_size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rollback_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rollback_evidence_purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    rollback_evidence_purged_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
     version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -273,6 +295,9 @@ class OrganizationDataRestore(Base):
     rejecter = relationship("User", foreign_keys=[rejected_by])
     applier = relationship("User", foreign_keys=[applied_by])
     rollback_actor = relationship("User", foreign_keys=[rolled_back_by])
+    rollback_evidence_purge_actor = relationship(
+        "User", foreign_keys=[rollback_evidence_purged_by]
+    )
     matched_export = relationship("OrganizationDataExport")
 
 
