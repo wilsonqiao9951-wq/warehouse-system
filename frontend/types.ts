@@ -994,6 +994,54 @@ export type PartRecognitionStatus =
   | "trusted"
   | "rejected";
 
+export type PartRecognitionAnalysisStatus =
+  | "not_requested"
+  | "pending"
+  | "succeeded"
+  | "failed";
+
+export interface PartRecognitionAnalysis {
+  id: number;
+  observation_id: number;
+  requested_by?: number | null;
+  client_request_id: string;
+  attempt_number: number;
+  provider: "openai";
+  model: string;
+  prompt_version: string;
+  status: Exclude<PartRecognitionAnalysisStatus, "not_requested">;
+  image_sha256: string;
+  request_sha256: string;
+  output_sha256?: string | null;
+  external_request_id?: string | null;
+  failure_code?: string | null;
+  result_json?: {
+    visible_label_text?: string;
+    manufacturer?: string;
+    machine_model?: string;
+    visual_description?: string;
+    part_hints?: Array<{
+      catalog_part_id?: number | null;
+      part_number?: string;
+      name?: string;
+      confidence?: number;
+      reason?: string;
+    }>;
+  } | null;
+  candidate_count: number;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PartRecognitionConfiguration {
+  available: boolean;
+  provider: "openai";
+  model: string;
+  image_detail: "low" | "high" | "original" | "auto";
+  automatic_analysis: boolean;
+}
+
 export interface PartRecognitionCandidate {
   id: number;
   organization_id: number;
@@ -1032,6 +1080,10 @@ export interface PartRecognitionObservation {
   label_text?: string | null;
   image_url: string;
   notes?: string | null;
+  analysis_status: PartRecognitionAnalysisStatus;
+  analysis_version: number;
+  latest_analysis?: PartRecognitionAnalysis | null;
+  can_analyze: boolean;
   created_by?: number | null;
   created_at: string;
   updated_at: string;

@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ManagerShell from "@/components/manager-shell";
-import { api, getApiPublicOrigin } from "@/lib/api";
+import { api } from "@/lib/api";
 import { getCurrentRole } from "@/lib/role";
 import {
   PartRecognitionCandidate,
+  PartRecognitionConfiguration,
   PartRecognitionObservation,
   PartRecognitionStatus,
 } from "@/types";
@@ -19,9 +20,40 @@ const statusLabels: Record<PartRecognitionStatus, string> = {
   rejected: "Rejected",
 };
 
-function imageUrl(path: string): string {
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${getApiPublicOrigin()}${path.startsWith("/") ? path : `/${path}`}`;
+function ProtectedObservationPhoto({ observationId }: { observationId: number }) {
+  const [url, setUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = "";
+    api.loadPartRecognitionImage(observationId)
+      .then((loadedUrl) => {
+        objectUrl = loadedUrl;
+        if (active) setUrl(loadedUrl);
+        else URL.revokeObjectURL(loadedUrl);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [observationId]);
+
+  if (failed) return <div className="empty-state">Protected photo unavailable.</div>;
+  if (!url) return <div className="empty-state">Loading protected photo…</div>;
+  return (
+    <a href={url} target="_blank" rel="noreferrer">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt={`Part recognition observation ${observationId}`}
+        style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 12 }}
+      />
+    </a>
+  );
 }
 
 export default function PartObservationPage() {
@@ -31,6 +63,7 @@ export default function PartObservationPage() {
   const [notes, setNotes] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [observations, setObservations] = useState<PartRecognitionObservation[]>([]);
+  const [visionConfig, setVisionConfig] = useState<PartRecognitionConfiguration | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -39,9 +72,13 @@ export default function PartObservationPage() {
 
   useEffect(() => {
     setRole(getCurrentRole());
-    api.listPartRecognitionCandidates()
-      .then((rows) => {
+    Promise.all([
+      api.listPartRecognitionCandidates(),
+      api.getPartRecognitionConfiguration(),
+    ])
+      .then(([rows, config]) => {
         setObservations(rows);
+        setVisionConfig(config);
         setError("");
       })
       .catch((loadError: Error) => {
@@ -67,10 +104,6 @@ export default function PartObservationPage() {
       setError("Work-order ID must be a positive number.");
       return;
     }
-    if (!machineModel.trim() && !labelText.trim() && !parsedWorkOrderId) {
-      setError("Add a machine model, visible label text, or work-order ID.");
-      return;
-    }
     try {
       setBusy(true);
       setError("");
@@ -83,14 +116,56 @@ export default function PartObservationPage() {
         notes: notes.trim() || undefined,
       });
       setObservations((previous) => [created, ...previous.filter((row) => row.id !== created.id)]);
-      setMessage(
-        created.candidates.length
-          ? `${created.candidates.length} candidates generated. A person must confirm the correct part.`
-          : "Photo saved, but no safe candidate was found. Add clearer label text or machine context.",
-      );
       setFile(null);
+      if (visionConfig?.available && visionConfig.automatic_analysis) {
+        try {
+          const analyzed = await api.analyzePartRecognitionObservation(created);
+          setObservations((previous) => [
+            analyzed,
+            ...previous.filter((row) => row.id !== analyzed.id),
+          ]);
+          setMessage(
+            analyzed.candidates.length
+              ? `${analyzed.candidates.length} AI candidates generated. A person must confirm the correct part.`
+              : "AI analysis completed but found no safe catalog match. Retake a clearer label photo or add context.",
+          );
+        } catch (analysisError) {
+          const refreshed = await api.listPartRecognitionCandidates();
+          setObservations(refreshed);
+          setError(
+            `Photo saved. ${analysisError instanceof Error ? analysisError.message : "AI analysis failed; retry from the queue."}`,
+          );
+        }
+      } else {
+        setMessage(
+          created.candidates.length
+            ? `${created.candidates.length} context candidates generated. A person must confirm the correct part.`
+            : "Photo saved. AI photo analysis is not enabled on this server.",
+        );
+      }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Unable to create candidates.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runAnalysis = async (observation: PartRecognitionObservation) => {
+    try {
+      setBusy(true);
+      setError("");
+      setMessage("");
+      const analyzed = await api.analyzePartRecognitionObservation(observation);
+      setObservations((previous) => previous.map((row) => row.id === analyzed.id ? analyzed : row));
+      setMessage(
+        analyzed.candidates.length
+          ? `${analyzed.candidates.length} controlled candidates are ready for human review.`
+          : "AI analysis completed without a safe catalog match.",
+      );
+    } catch (analysisError) {
+      const refreshed = await api.listPartRecognitionCandidates();
+      setObservations(refreshed);
+      setError(analysisError instanceof Error ? analysisError.message : "AI analysis failed.");
     } finally {
       setBusy(false);
     }
@@ -129,7 +204,7 @@ export default function PartObservationPage() {
   return (
     <ManagerShell
       title="Controlled part recognition"
-      subtitle="Photos create candidates only. Inventory and trusted knowledge stay unchanged until the required people and actual work-order usage verify the result."
+      subtitle="AI reads the photo and proposes existing catalog parts only. Inventory and trusted knowledge stay unchanged until people and actual work-order usage verify the result."
       metrics={[
         { label: "Needs review", value: totals.review },
         { label: "Trusted", value: totals.trusted },
@@ -139,8 +214,9 @@ export default function PartObservationPage() {
       <section className="card">
         <h3 style={{ marginTop: 0 }}>Take a part photo</h3>
         <p className="muted">
-          This first vision foundation ranks visible label text, machine knowledge, and completed-job
-          history. Image-model and OCR providers can add signals later without bypassing human review.
+          {visionConfig?.available
+            ? `${visionConfig.model} reads label details at ${visionConfig.image_detail} fidelity, then combines them with machine knowledge and completed-job history.`
+            : "The server will save the photo and use supplied context. An administrator can enable private server-side AI photo analysis."}
         </p>
         <div className="two-col">
           <label>
@@ -181,13 +257,13 @@ export default function PartObservationPage() {
           Photo
           <input
             type="file"
-            accept="image/jpeg,image/png,image/gif,image/webp,image/heic"
+            accept="image/jpeg,image/png,image/gif,image/webp"
             capture="environment"
             onChange={(event) => setFile(event.target.files?.[0] || null)}
           />
         </label>
         <button type="button" onClick={() => void submit()} disabled={busy} style={{ marginTop: 12 }}>
-          {busy ? "Working…" : "Generate controlled candidates"}
+          {busy ? "Working…" : visionConfig?.available ? "Save photo and analyze" : "Save photo"}
         </button>
         {message && <p className="notice notice-success">{message}</p>}
         {error && <p className="notice notice-error">{error}</p>}
@@ -216,14 +292,7 @@ export default function PartObservationPage() {
           {observations.map((observation) => (
             <article className="job-card" key={observation.id}>
               <div className="two-col" style={{ alignItems: "start" }}>
-                <a href={imageUrl(observation.image_url)} target="_blank" rel="noreferrer">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={imageUrl(observation.image_url)}
-                    alt={`Part recognition observation ${observation.id}`}
-                    style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 12 }}
-                  />
-                </a>
+                <ProtectedObservationPhoto observationId={observation.id} />
                 <div>
                   <b>Observation #{observation.id}</b>
                   <p className="muted" style={{ margin: "6px 0" }}>
@@ -232,6 +301,31 @@ export default function PartObservationPage() {
                   </p>
                   {observation.label_text && <p style={{ margin: "6px 0" }}>Label: {observation.label_text}</p>}
                   {observation.notes && <p className="muted">{observation.notes}</p>}
+                  <p className="muted" style={{ margin: "6px 0" }}>
+                    AI: {observation.analysis_status.replace("_", " ")}
+                    {observation.latest_analysis
+                      ? ` · attempt ${observation.latest_analysis.attempt_number} · ${observation.latest_analysis.model}`
+                      : ""}
+                  </p>
+                  {observation.latest_analysis?.result_json?.visible_label_text && (
+                    <p style={{ margin: "6px 0" }}>
+                      AI label: {observation.latest_analysis.result_json.visible_label_text}
+                    </p>
+                  )}
+                  {observation.latest_analysis?.failure_code && (
+                    <p className="danger" style={{ margin: "6px 0" }}>
+                      Safe error code: {observation.latest_analysis.failure_code}
+                    </p>
+                  )}
+                  {observation.can_analyze && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void runAnalysis(observation)}
+                    >
+                      {observation.analysis_status === "failed" ? "Retry AI analysis" : "Analyze photo with AI"}
+                    </button>
+                  )}
                 </div>
               </div>
               <div style={{ display: "grid", gap: 8, marginTop: 12 }}>

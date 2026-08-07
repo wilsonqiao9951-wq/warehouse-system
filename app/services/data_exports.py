@@ -113,6 +113,19 @@ def _find_public_file_references(value: Any) -> set[str]:
     return matches
 
 
+def _find_private_file_references(value: Any) -> set[str]:
+    matches: set[str] = set()
+    if isinstance(value, str) and value.startswith("private:"):
+        matches.add(value.removeprefix("private:"))
+    elif isinstance(value, dict):
+        for nested in value.values():
+            matches.update(_find_private_file_references(nested))
+    elif isinstance(value, list):
+        for nested in value:
+            matches.update(_find_private_file_references(nested))
+    return matches
+
+
 def _safe_file(root: Path, relative: str) -> Path | None:
     root = root.resolve()
     target = (root / relative).resolve()
@@ -188,6 +201,7 @@ def build_organization_data_export(
                     for row in rows:
                         payload = _row_payload(row)
                         public_references.update(_find_public_file_references(payload))
+                        private_references.update(_find_private_file_references(payload))
                         if isinstance(row, MachineKnowledgeEntry) and row.media_storage_key:
                             private_references.add(row.media_storage_key)
                         line = (

@@ -1180,6 +1180,29 @@ class PartRecognitionCandidateRead(BaseModel):
     updated_at: datetime
 
 
+class PartRecognitionAnalysisRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    observation_id: int
+    requested_by: int | None = None
+    client_request_id: str
+    attempt_number: int = Field(gt=0)
+    provider: Literal["openai"]
+    model: str
+    prompt_version: str
+    status: Literal["pending", "succeeded", "failed"]
+    image_sha256: str
+    request_sha256: str
+    output_sha256: str | None = None
+    external_request_id: str | None = None
+    failure_code: str | None = None
+    result_json: dict | None = None
+    candidate_count: int = Field(ge=0)
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
 class PartRecognitionObservationRead(BaseModel):
     id: int
     organization_id: int
@@ -1188,10 +1211,31 @@ class PartRecognitionObservationRead(BaseModel):
     label_text: str | None = None
     image_url: str
     notes: str | None = None
+    analysis_status: Literal["not_requested", "pending", "succeeded", "failed"]
+    analysis_version: int = Field(ge=0)
+    latest_analysis: PartRecognitionAnalysisRead | None = None
+    can_analyze: bool = False
     created_by: int | None = None
     created_at: datetime
     updated_at: datetime
     candidates: list[PartRecognitionCandidateRead] = Field(default_factory=list)
+
+
+class PartRecognitionAnalyzeRequest(BaseModel):
+    client_request_id: str = Field(
+        min_length=8,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$",
+    )
+    expected_analysis_version: int = Field(ge=0)
+
+
+class PartRecognitionConfigurationRead(BaseModel):
+    available: bool
+    provider: Literal["openai"] = "openai"
+    model: str
+    image_detail: Literal["low", "high", "original", "auto"]
+    automatic_analysis: bool = True
 
 
 class PartRecognitionCandidateAction(BaseModel):
