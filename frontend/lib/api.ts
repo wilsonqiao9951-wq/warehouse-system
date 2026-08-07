@@ -60,6 +60,7 @@ import {
   EnterpriseAnalytics,
   ProfitSnapshotBackfill,
   ProfitSnapshotDashboard,
+  PerformanceDashboard,
   EnterpriseAgentIntent,
   EnterpriseAgentOptions,
   EnterpriseAgentResponse,
@@ -1923,6 +1924,15 @@ export const api = {
     method: "POST",
     body: JSON.stringify(payload)
   }),
+  getPerformanceScorecards: (filters: {
+    from_date: string;
+    to_date: string;
+    engineer_id?: number;
+  }) => {
+    const params = new URLSearchParams({ from_date: filters.from_date, to_date: filters.to_date });
+    if (filters.engineer_id) params.set("engineer_id", String(filters.engineer_id));
+    return request<PerformanceDashboard>(`/performance/scorecards?${params.toString()}`);
+  },
   downloadEnterpriseAnalytics: (filters: {
     from_date: string;
     to_date: string;

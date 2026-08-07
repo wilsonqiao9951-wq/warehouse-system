@@ -184,6 +184,65 @@ class ProfitSnapshotBackfillRead(BaseModel):
     next_after_work_order_id: int | None = None
 
 
+class PerformanceScorecardRead(BaseModel):
+    engineer_id: int | None = None
+    engineer_name: str
+    is_active: bool
+    cohort_received: int = Field(ge=0)
+    cohort_completed: int = Field(ge=0)
+    completion_rate: float | None = Field(default=None, ge=0, le=1)
+    completed_in_period: int = Field(ge=0)
+    throughput_per_30_days: float = Field(ge=0)
+    first_time_fix_labeled: int = Field(ge=0)
+    first_time_fix_rate: float | None = Field(default=None, ge=0, le=1)
+    first_time_fix_coverage: float = Field(ge=0, le=1)
+    rework_rate: float = Field(ge=0, le=1)
+    repair_duration_labeled: int = Field(ge=0)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    repair_duration_coverage: float = Field(ge=0, le=1)
+    parts_usage_work_orders: int = Field(ge=0)
+    parts_usage_coverage: float = Field(ge=0, le=1)
+    parts_quantity: int = Field(ge=0)
+    parts_quantity_per_completed: float = Field(ge=0)
+    parts_cost: float | None = None
+    parts_cost_per_completed: float | None = None
+    parts_cost_to_revenue_rate: float | None = Field(default=None, ge=0)
+    revenue: float | None = None
+    labor_cost: float | None = None
+    contribution: float | None = None
+
+
+class PerformanceTeamSummaryRead(BaseModel):
+    engineer_count: int = Field(ge=0)
+    active_engineers: int = Field(ge=0)
+    cohort_received: int = Field(ge=0)
+    cohort_completed: int = Field(ge=0)
+    completion_rate: float | None = Field(default=None, ge=0, le=1)
+    completed_in_period: int = Field(ge=0)
+    throughput_per_30_days: float = Field(ge=0)
+    first_time_fix_rate: float | None = Field(default=None, ge=0, le=1)
+    first_time_fix_coverage: float = Field(ge=0, le=1)
+    rework_rate: float = Field(ge=0, le=1)
+    average_repair_minutes: float | None = Field(default=None, ge=0)
+    parts_quantity_per_completed: float = Field(ge=0)
+    parts_cost_per_completed: float | None = None
+
+
+class PerformanceDashboardRead(BaseModel):
+    generated_at: datetime
+    viewer_scope: Literal["self", "team"]
+    can_view_team: bool
+    can_view_financials: bool
+    from_date: date
+    to_date: date
+    days: int = Field(ge=1, le=366)
+    selected_engineer_id: int | None = None
+    engineer_options: list[AnalyticsFilterOption] = Field(default_factory=list)
+    definitions: dict[str, str]
+    team: PerformanceTeamSummaryRead
+    scorecards: list[PerformanceScorecardRead]
+
+
 class AnalyticsExportRequest(BaseModel):
     from_date: date
     to_date: date

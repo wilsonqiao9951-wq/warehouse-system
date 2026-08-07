@@ -47,6 +47,8 @@ Status legend:
 - `Implemented` Immutable daily completed-work-order profit snapshots with explicit historical coverage
 - `Implemented` Profit ranking by service region, accountable engineer, and machine type
 - `Implemented` Employee performance baseline (open/completed workload)
+- `Implemented` Multi-metric employee scorecards with transparent throughput, cohort completion, quality coverage, duration, and parts efficiency
+- `Implemented` Role-specific manager team and engineer self dashboards with financial redaction
 - `Implemented` Low stock signal in stock balance
 - `Implemented` Abnormal parts usage detection and manager-visible severity/reason report
 - `Unknown` Existing AppSheet KPI formulas and dashboard definitions
@@ -290,8 +292,8 @@ After Phase 1 sign-off, release improvements in controlled increments:
 - `Implemented` Profit ranking by region, engineer, and machine type with missing-coverage disclosure
 
 4. Employee performance
-- Multi-metric scorecard (throughput, completion, parts efficiency)
-- Role-specific dashboards (manager vs engineer)
+- `Implemented` Multi-metric scorecard (throughput, created-cohort completion, quality coverage, duration, and parts efficiency)
+- `Implemented` Role-specific dashboards (manager team vs engineer self, with financial and identity redaction)
 
 5. Low stock alert
 - Rule engine with threshold overrides per warehouse/part
