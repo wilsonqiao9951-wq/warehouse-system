@@ -22,6 +22,7 @@ from app.api.analytics import router as analytics_router
 from app.api.enterprise_agent import router as enterprise_agent_router
 from app.core.config import settings
 from app.core.database import SessionLocal, ensure_schema_ready, get_db
+from app.core.deployment import cors_allowed_origins, validate_deployment_settings
 from app.core.logging import setup_logging
 from app.core.middleware import ErrorHandlingMiddleware
 from app.core.operations import operations_monitor
@@ -45,6 +46,7 @@ async def lifespan(app_instance: FastAPI):
         billing_interval_seconds=settings.billing_reconciliation_poll_seconds,
     )
     if not testing:
+        validate_deployment_settings()
         ensure_schema_ready()
         from app.services.legacy_database_adoption import current_schema_head
 
@@ -111,18 +113,9 @@ async def lifespan(app_instance: FastAPI):
 
 app = FastAPI(title="OpenPartsFlow", version="0.1.0", lifespan=lifespan)
 app.add_middleware(ErrorHandlingMiddleware)
-_cors_extra = [o.strip() for o in (settings.cors_extra_origins or "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3002",
-        *_cors_extra,
-    ],
+    allow_origins=cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -141,7 +134,7 @@ app.include_router(analytics_router, prefix="/api")
 app.include_router(enterprise_agent_router, prefix="/api")
 app.include_router(operations_router)
 app.include_router(pages_router)
-uploads_dir = Path("uploads")
+uploads_dir = Path(settings.data_export_public_files_root)
 uploads_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")
 

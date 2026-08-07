@@ -6,6 +6,7 @@ __pycache__/
 .*.adoption-*.tmp
 .DS_Store
 .env
+.env.production
 frontend/.env.local
 uploads/
 private_uploads/

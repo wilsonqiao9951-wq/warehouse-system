@@ -7,6 +7,12 @@
 frontend/.next
 frontend/out
 .env
+.env.production
 *.db
 uploads
+private_uploads
+restore_rollbacks
 .pytest_cache
+.test-tmp
+tests
+docs

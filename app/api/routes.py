@@ -1253,7 +1253,7 @@ async def upload_work_order_part_photo(
     if not ext:
         raise HTTPException(status_code=400, detail="Unsupported or invalid image file")
 
-    target_dir = Path("uploads/work-order-parts")
+    target_dir = Path(settings.data_export_public_files_root) / "work-order-parts"
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4().hex}{ext}"
     target_path = target_dir / filename
@@ -1303,7 +1303,7 @@ async def create_work_order_voice_note(
     if not audio_type:
         raise HTTPException(status_code=400, detail="Unsupported or invalid audio file")
     extension, mime_type = audio_type
-    target_dir = Path("uploads/work-order-voice-notes")
+    target_dir = Path(settings.data_export_public_files_root) / "work-order-voice-notes"
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4().hex}{extension}"
     (target_dir / filename).write_bytes(data)
@@ -2188,7 +2188,7 @@ async def upload_machine_knowledge_media(
 
     filename = f"{uuid4().hex}{extension}"
     storage_key = f"machine-knowledge/{actor.organization_id}/{filename}"
-    storage_root = Path("private_uploads")
+    storage_root = Path(settings.data_export_private_files_root)
     target_path = storage_root / storage_key
     target_path.parent.mkdir(parents=True, exist_ok=True)
     target_path.write_bytes(data)
@@ -2255,7 +2255,7 @@ def get_machine_knowledge_media(
         not curator and (not profile.is_active or entry.status != "published")
     ):
         raise HTTPException(status_code=404, detail="Knowledge media not found")
-    storage_root = Path("private_uploads").resolve()
+    storage_root = Path(settings.data_export_private_files_root).resolve()
     target_path = (storage_root / entry.media_storage_key).resolve()
     if storage_root not in target_path.parents or not target_path.is_file():
         raise HTTPException(status_code=404, detail="Knowledge media not found")
@@ -2483,7 +2483,7 @@ async def record_part_observation(
         ext = _image_extension(data)
         if not ext:
             raise HTTPException(status_code=400, detail="Unsupported or invalid image file")
-        target_dir = Path("uploads/part-observations")
+        target_dir = Path(settings.data_export_public_files_root) / "part-observations"
         target_dir.mkdir(parents=True, exist_ok=True)
         filename = f"{uuid4().hex}{ext}"
         (target_dir / filename).write_bytes(data)
@@ -2672,7 +2672,7 @@ async def create_part_recognition_candidates(
     if not extension:
         raise HTTPException(status_code=400, detail="Unsupported or invalid image file")
     consume_monthly_usage(db, actor.organization_id, ai_requests=1)
-    target_dir = Path("uploads/part-recognition")
+    target_dir = Path(settings.data_export_public_files_root) / "part-recognition"
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4().hex}{extension}"
     (target_dir / filename).write_bytes(data)

@@ -6,6 +6,60 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-07 - Phase 9 private deployment readiness
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added a production-only Compose topology for PostgreSQL, a one-shot Alembic
+  migration gate, API, and static PWA reverse proxy with only one published
+  ingress port.
+- Separated migration from API startup so concurrent or restarted API instances
+  cannot race schema changes.
+- Added non-root API and web images with read-only root filesystems, dropped
+  capabilities, no-new-privileges, health gates, immutable release metadata,
+  explicit writable data volumes, and runtime-only Python dependencies.
+- Added persistent and distinct PostgreSQL, public evidence, protected evidence,
+  and restore rollback volumes; application upload paths now honor the configured
+  storage roots.
+- Added same-origin `/api`, `/uploads`, and `/health` proxying, bounded upload
+  size/timeouts, PWA cache controls, and baseline browser security headers.
+- Added fail-closed staging/production validation for database driver, secrets,
+  debug mode, JWT algorithm, HTTPS origins, CORS wildcards, and storage paths.
+- Removed localhost CORS origins from staging/production while retaining them for
+  development.
+- Added a redacted validation CLI, production environment template, deployment,
+  upgrade, health, backup, rollback, and incident-isolation runbook.
+
+Verification:
+
+- Production Compose configuration parses successfully with the supplied
+  environment template.
+- Production safety validation and topology/security contracts passed 15
+  targeted backend tests.
+- Both production images built successfully; the frontend image generated all
+  38 static routes from a clean `npm ci --include=dev` dependency install.
+- A complete disposable production stack migrated a new PostgreSQL 16 database
+  from base through `20260807_0045`; the one-shot migrator exited zero and API,
+  database, and web services became healthy.
+- Container probes reported database/schema/worker readiness; the proxy returned
+  401 for unauthenticated business APIs, excluded localhost production CORS,
+  allowed the configured HTTPS origin, and returned baseline security headers.
+- Runtime inspection confirmed API UID/GID `10001:10001`, web UID/GID `101:101`,
+  read-only root filesystems, all capabilities dropped, denied code writes, and
+  successful writes only to the intended evidence volumes or `/tmp`.
+- Corrected fresh-PostgreSQL boolean literals in historical organization and
+  regional migrations while preserving SQLite compatibility.
+- Backend: all 176 tests passed, including deployment configuration/contract,
+  complete migration history, tenant isolation, RBAC, ownership, custody,
+  integrations, billing, analytics, Agent, backup, and restore coverage.
+- Fresh SQLite base-to-`0045` plus `0045 -> 0044 -> 0045` rehearsal passed.
+- Python compilation and dependency consistency passed; frontend ESLint and the
+  production npm audit passed with 0 known vulnerabilities.
+- CI now validates fail-closed production settings, migrates a real PostgreSQL
+  service to the exact head, parses Compose, and builds both production images.
+
 ## 2026-07-11 — Phase 1 field completion foundation
 
 Status: implemented and locally verified.

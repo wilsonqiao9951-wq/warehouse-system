@@ -51,7 +51,7 @@ def upgrade() -> None:
         bind.execute(
             sa.text(
                 "INSERT INTO organizations (id, name, slug, is_active) "
-                "VALUES (1, 'Default Organization', 'default', 1)"
+                "VALUES (1, 'Default Organization', 'default', TRUE)"
             )
         )
 
