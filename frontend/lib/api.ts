@@ -68,6 +68,9 @@ import {
   InventoryLedgerFilters,
   InventoryLedgerOptions,
   InventoryLedgerPage,
+  InventoryReconciliationPage,
+  InventoryReconciliationSeverity,
+  InventoryReconciliationSource,
   User,
   Warehouse,
   WorkOrder,
@@ -1960,6 +1963,7 @@ export const api = {
     body: JSON.stringify(payload)
   }),
   listReplenishmentRequests: () => request<ReplenishmentRequest[]>("/inventory/replenishment-requests"),
+  getReplenishmentRequest: (id: number) => request<ReplenishmentRequest>(`/inventory/replenishment-requests/${id}`),
   actOnReplenishmentRequest: (
     id: number,
     payload: {
@@ -1998,6 +2002,7 @@ export const api = {
     body: JSON.stringify(payload)
   }),
   listVehicleReturnRequests: () => request<VehicleReturnRequest[]>("/inventory/vehicle-returns"),
+  getVehicleReturnRequest: (id: number) => request<VehicleReturnRequest>(`/inventory/vehicle-returns/${id}`),
   actOnVehicleReturnRequest: (
     id: number,
     payload: {
@@ -2011,6 +2016,7 @@ export const api = {
     body: JSON.stringify(payload)
   }),
   listInventoryCounts: () => request<InventoryCount[]>("/inventory/counts"),
+  getInventoryCount: (id: number) => request<InventoryCount>(`/inventory/counts/${id}`),
   createInventoryCount: (payload: {
     client_request_id: string; warehouse_id: number; location_id?: number; title: string; notes?: string;
   }) => request<InventoryCount>("/inventory/counts", { method: "POST", body: JSON.stringify(payload) }),
@@ -2034,6 +2040,17 @@ export const api = {
     return request<InventoryLedgerPage>(`/inventory/ledger?${query.toString()}`);
   },
   getInventoryLedgerOptions: () => request<InventoryLedgerOptions>("/inventory/ledger/options"),
+  getInventoryReconciliationExceptions: (filters: {
+    source?: InventoryReconciliationSource;
+    severity?: InventoryReconciliationSeverity;
+    limit?: number;
+  } = {}) => {
+    const query = new URLSearchParams();
+    if (filters.source) query.set("source", filters.source);
+    if (filters.severity) query.set("severity", filters.severity);
+    query.set("limit", String(filters.limit || 100));
+    return request<InventoryReconciliationPage>(`/inventory/reconciliation-exceptions?${query.toString()}`);
+  },
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),

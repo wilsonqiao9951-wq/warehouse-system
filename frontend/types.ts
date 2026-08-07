@@ -1179,6 +1179,54 @@ export interface InventoryLedgerFilters {
   to_at?: string;
 }
 
+export type InventoryReconciliationSource =
+  | "replenishment"
+  | "vehicle_return"
+  | "inventory_count";
+
+export type InventoryReconciliationSeverity = "critical" | "warning";
+
+export interface InventoryReconciliationException {
+  id: string;
+  source: InventoryReconciliationSource;
+  kind:
+    | "legacy_reconciliation"
+    | "custody_ledger_mismatch"
+    | "count_pending_variance"
+    | "count_ledger_mismatch";
+  severity: InventoryReconciliationSeverity;
+  entity_type: "replenishment_request" | "vehicle_return_request" | "inventory_count";
+  entity_id: number;
+  line_id?: number | null;
+  status: string;
+  title: string;
+  detail: string;
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  warehouse_label?: string | null;
+  quantity?: number | null;
+  variance_quantity?: number | null;
+  shipment_transaction_id?: number | null;
+  receipt_transaction_id?: number | null;
+  adjustment_transaction_id?: number | null;
+  action_route: string;
+  action_label: string;
+  updated_at: string;
+}
+
+export interface InventoryReconciliationPage {
+  items: InventoryReconciliationException[];
+  total: number;
+  critical: number;
+  warning: number;
+  replenishment: number;
+  vehicle_return: number;
+  inventory_count: number;
+  truncated: boolean;
+  candidate_scan_limit: number;
+}
+
 export interface LocationStockBalance {
   part_id: number;
   part_number: string;

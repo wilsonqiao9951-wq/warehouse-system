@@ -2433,6 +2433,12 @@ class ReplenishmentRequest(Base):
         ),
         Index("ix_replenishment_org_status", "organization_id", "status"),
         Index("ix_replenishment_org_target_status", "organization_id", "target_user_id", "status"),
+        Index(
+            "ix_replenishment_org_reconcile_updated",
+            "organization_id",
+            "requires_reconciliation",
+            "updated_at",
+        ),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)

@@ -276,7 +276,7 @@ After Phase 1 sign-off, release improvements in controlled increments:
 1. Inventory transaction ledger
 - `Implemented` Dedicated ledger UI with filters (part, warehouse, date, type, user, work order)
 - `Implemented` Workflow reconciliation references and work-order drill-down
-- Remaining improvement: dedicated discrepancy exception queue across count and custody workflows
+- `Implemented` Dedicated discrepancy exception queue across count and custody workflows with severity/source filters and direct record drill-down
 
 2. Van inventory
 - Van transfer workflows and rebalance recommendations

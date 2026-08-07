@@ -115,6 +115,15 @@ users already referenced by the caller's tenant ledger. Responses are marked
 authorized inventory count, replenishment, return, or other custody workflow.
 See [`INVENTORY_LEDGER.md`](INVENTORY_LEDGER.md).
 
+`GET /api/inventory/reconciliation-exceptions` has the same warehouse,
+manager, and administrator read scope and denies engineers and assistants. Its
+candidate queries, entity joins, and movement lookups all include explicit
+organization conditions. Direct drill-down reads preserve the same tenant and
+role boundary; engineers can read only their own targeted replenishment or
+vehicle return and cannot access the reconciliation queue. The queue never
+changes stock or resolves an exception. See
+[`INVENTORY_RECONCILIATION.md`](INVENTORY_RECONCILIATION.md).
+
 ## Platform operations monitoring
 
 `GET /health/live` and `GET /health/ready` are intentionally unauthenticated so load balancers and orchestrators can probe the process. They expose only uptime plus high-level database, schema, and worker state; they never expose tenant counts, URLs, errors, credentials, or configuration values.

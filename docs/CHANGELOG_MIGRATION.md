@@ -1,5 +1,18 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260807_0059 - Inventory reconciliation queue index
+
+- Added a tenant-leading replenishment reconciliation/updated-time index for
+  bounded exception-queue scans.
+- Added read-only cross-workflow reconciliation for historical replenishment,
+  custody movement mismatches, pending physical-count variances, and count
+  adjustment integrity.
+- Added direct, tenant-scoped reads for queue drill-down into replenishments,
+  vehicle returns, and inventory counts.
+- Extends controlled tenant restore compatibility through revision `0059`.
+- Downgrade removes only the new query index and does not modify custody or
+  ledger evidence.
+
 ## 20260807_0058 - Inventory ledger query indexes
 
 - Added tenant-leading indexes for transaction type, part, source warehouse,

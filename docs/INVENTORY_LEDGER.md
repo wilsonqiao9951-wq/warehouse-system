@@ -44,6 +44,8 @@ PostgreSQL row-level security.
 The workbench cannot change inventory. A discrepancy must be corrected through
 the inventory-count approval flow or the applicable replenishment/return
 custody workflow, preserving authentication, version checks, and audit evidence.
+The cross-workflow exception queue is documented in
+[`INVENTORY_RECONCILIATION.md`](INVENTORY_RECONCILIATION.md).
 
 ## Migration
 
