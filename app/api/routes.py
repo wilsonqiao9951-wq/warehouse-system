@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.config import settings
+from app.core.operations import operations_monitor
 from app.core.rbac import (
     Actor,
     get_current_actor,
@@ -6366,8 +6367,15 @@ def pilot_checklist(db: Session = Depends(get_db), actor: Actor = Depends(get_cu
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
     low_stock = low_stock_alerts(db=db, actor=actor)
     abnormal = abnormal_usage_report(db=db, actor=actor)
+    runtime = operations_monitor.snapshot(
+        window_seconds=settings.operations_request_window_seconds
+    )
+    degraded = any(
+        worker["enabled"] and worker["status"] in {"error", "stale"}
+        for worker in runtime["workers"]
+    )
     return {
-        "system_health": "ok",
+        "system_health": "degraded" if degraded else "ok",
         "total_users": db.scalar(select(func.count(User.id))) or 0,
         "total_work_orders": db.scalar(select(func.count(WorkOrder.id))) or 0,
         "total_parts": db.scalar(select(func.count(Part.id))) or 0,

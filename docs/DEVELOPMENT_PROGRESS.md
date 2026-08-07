@@ -1057,3 +1057,37 @@ Verification:
 - Python compilation passed.
 - Frontend: ESLint, TypeScript, and the Next.js 16.2.12 production build passed
   for all 34 static routes.
+
+## 2026-08-07 - Phase 9 operations monitoring and SLA readiness
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Replaced the pilot checklist's hard-coded health value with runtime worker
+  state.
+- Added minimal unauthenticated `/health/live` and database/schema-backed
+  `/health/ready` probes with no-store responses and no sensitive details.
+- Added a bounded, thread-safe five-minute request window for 5xx rate,
+  average latency, and p95 latency while excluding probe traffic.
+- Added integration-delivery and billing-reconciliation worker start, success,
+  result-count, error-class, recovery, and staleness evidence; delivery-loop
+  exceptions no longer silently terminate the worker task.
+- Added a platform-admin-only cross-customer operational summary for outbound
+  queues, critical billing notices, backup policy gaps, restore conflicts,
+  database latency, schema state, request thresholds, and worker alerts.
+- Added a 30-second-refreshing Platform Operations page and platform-only
+  navigation while fixing the nested platform-route active state.
+- Documented probe semantics, threshold configuration, privacy boundaries,
+  external time-series retention requirements, and deployment checks.
+
+Verification:
+
+- Monitor state, request metrics, worker error/stale/recovery, health-probe,
+  schema failure, cross-tenant aggregate, sensitive-detail exclusion, and
+  platform-role tests passed.
+- Existing platform onboarding, external delivery, and billing lifecycle
+  regressions passed.
+- Backend: all 147 tests passed.
+- Frontend ESLint and TypeScript passed; Next.js production build passed for
+  all 35 static routes.

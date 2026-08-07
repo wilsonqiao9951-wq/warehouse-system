@@ -6,6 +6,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.operations import operations_monitor
+
 logger = logging.getLogger("openpartsflow.middleware")
 
 
@@ -26,6 +28,8 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                 duration_ms,
             )
             response.headers["X-Request-ID"] = request_id
+            if not request.url.path.startswith("/health/"):
+                operations_monitor.record_request(response.status_code, duration_ms)
             return response
         except Exception as exc:  # noqa: BLE001
             duration_ms = (time.perf_counter() - start) * 1000
@@ -45,4 +49,6 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                 },
             )
             response.headers["X-Request-ID"] = request_id
+            if not request.url.path.startswith("/health/"):
+                operations_monitor.record_request(500, duration_ms)
             return response

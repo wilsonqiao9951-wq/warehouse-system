@@ -5,7 +5,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { api, clearOfflineSession } from "@/lib/api";
 
-const links = [
+type NavLink = {
+  href: string;
+  label: string;
+  roles: string[];
+  platformOnly?: boolean;
+  exact?: boolean;
+};
+
+const links: NavLink[] = [
   { href: "/", label: "Dashboard", roles: ["manager", "admin"] },
   { href: "/work-orders", label: "Work Orders", roles: ["manager", "admin"] },
   { href: "/calendar", label: "Calendar", roles: ["manager", "admin"] },
@@ -26,7 +34,8 @@ const links = [
   { href: "/form-actions", label: "Form Actions", roles: ["warehouse", "manager", "admin"] },
   { href: "/sync-conflicts", label: "Sync Conflicts", roles: ["admin"] },
   { href: "/integrations", label: "Integrations", roles: ["manager", "admin"] },
-  { href: "/platform", label: "Customers", roles: ["admin"] },
+  { href: "/platform", label: "Customers", roles: ["admin"], platformOnly: true, exact: true },
+  { href: "/platform/operations", label: "Operations", roles: ["admin"], platformOnly: true },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },
   { href: "/parts-import", label: "Parts Import", roles: ["warehouse", "manager", "admin"] },
   { href: "/inventory-import", label: "Opening Stock", roles: ["warehouse", "manager", "admin"] },
@@ -99,7 +108,7 @@ export default function Nav() {
   const visibleLinks = useMemo(() => {
     if (!authenticated) return [];
     const items = links.filter(
-      (link) => link.roles.includes(role) && (link.href !== "/platform" || isPlatformAdmin)
+      (link) => link.roles.includes(role) && (!link.platformOnly || isPlatformAdmin)
     );
     if (role === "engineer") {
       return sortEngineerLinks(items);
@@ -135,6 +144,8 @@ export default function Nav() {
           const active =
             link.href === "/"
               ? pathname === "/" || pathname === ""
+              : link.exact
+              ? pathname === link.href
               : pathname === link.href || pathname.startsWith(`${link.href}/`);
           return (
             <Link

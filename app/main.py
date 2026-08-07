@@ -15,10 +15,12 @@ from app.api.billing import router as billing_router
 from app.api.data_exports import router as data_exports_router
 from app.api.data_restores import router as data_restores_router
 from app.api.audit_logs import router as audit_logs_router
+from app.api.operations import router as operations_router
 from app.core.config import settings
 from app.core.database import SessionLocal, ensure_schema_ready, get_db
 from app.core.logging import setup_logging
 from app.core.middleware import ErrorHandlingMiddleware
+from app.core.operations import operations_monitor
 from app.models import *  # noqa: F401,F403
 from app.schemas import RootInfo
 from app.services.integration_delivery import process_due_deliveries
@@ -31,29 +33,57 @@ logger = logging.getLogger(__name__)
 async def lifespan(app_instance: FastAPI):
     delivery_task = None
     billing_task = None
-    if get_db not in app_instance.dependency_overrides:
+    testing = get_db in app_instance.dependency_overrides
+    operations_monitor.reset(
+        delivery_enabled=settings.integration_delivery_enabled and not testing,
+        delivery_interval_seconds=settings.integration_delivery_poll_seconds,
+        billing_enabled=settings.billing_reconciliation_enabled and not testing,
+        billing_interval_seconds=settings.billing_reconciliation_poll_seconds,
+    )
+    if not testing:
         ensure_schema_ready()
+        from app.services.legacy_database_adoption import current_schema_head
+
+        app_instance.state.schema_revision = current_schema_head()
+    else:
+        app_instance.state.schema_revision = "test"
+    app_instance.state.schema_ready = True
     # Tests replace the database dependency with an isolated session. Skipping
     # the production worker prevents it from touching the developer database.
     if (
         settings.integration_delivery_enabled
-        and get_db not in app_instance.dependency_overrides
+        and not testing
     ):
         async def delivery_loop() -> None:
             while True:
                 await asyncio.sleep(max(5, settings.integration_delivery_poll_seconds))
-                await asyncio.to_thread(process_due_deliveries, SessionLocal)
+                operations_monitor.worker_started("integration_delivery")
+                try:
+                    processed = await asyncio.to_thread(process_due_deliveries, SessionLocal)
+                    operations_monitor.worker_succeeded(
+                        "integration_delivery",
+                        result_count=processed,
+                    )
+                except Exception as exc:
+                    operations_monitor.worker_failed("integration_delivery", exc)
+                    logger.exception("Integration delivery worker failed")
 
         delivery_task = asyncio.create_task(delivery_loop())
     if (
         settings.billing_reconciliation_enabled
-        and get_db not in app_instance.dependency_overrides
+        and not testing
     ):
         async def billing_loop() -> None:
             while True:
+                operations_monitor.worker_started("billing_reconciliation")
                 try:
-                    await asyncio.to_thread(reconcile_billing_lifecycle, SessionLocal)
-                except Exception:
+                    stats = await asyncio.to_thread(reconcile_billing_lifecycle, SessionLocal)
+                    operations_monitor.worker_succeeded(
+                        "billing_reconciliation",
+                        result_count=stats.organizations_checked,
+                    )
+                except Exception as exc:
+                    operations_monitor.worker_failed("billing_reconciliation", exc)
                     logger.exception("Billing lifecycle reconciliation failed")
                 await asyncio.sleep(max(60, settings.billing_reconciliation_poll_seconds))
 
@@ -101,6 +131,7 @@ app.include_router(data_restores_router, prefix="/api")
 app.include_router(audit_logs_router, prefix="/api")
 app.include_router(integrations_router, prefix="/api")
 app.include_router(work_order_forms_router, prefix="/api")
+app.include_router(operations_router)
 app.include_router(pages_router)
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(parents=True, exist_ok=True)

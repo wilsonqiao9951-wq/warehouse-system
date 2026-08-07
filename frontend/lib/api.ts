@@ -2,6 +2,7 @@ import {
   AuditLogFilters,
   AuditLogPage,
   AuditLogSummary,
+  PlatformOperationsSummary,
   BillingLifecycleEvent,
   BillingProvider,
   EngineerDashboard,
@@ -1050,6 +1051,8 @@ export const api = {
     if (filters.user_id) query.set("user_id", String(filters.user_id));
     return request<AuditLogSummary>(`/audit-logs/summary?${query.toString()}`);
   },
+  getPlatformOperationsSummary: () =>
+    request<PlatformOperationsSummary>("/platform/operations/summary"),
   downloadAuditLogs: (filters: AuditLogFilters, accountPassword: string) =>
     downloadAuthenticatedFile(
       "/audit-logs/export",

@@ -22,6 +22,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Provider-neutral signed subscription events, ordered idempotent billing evidence, and durable lifecycle notices
 - Tenant and platform commercial usage reports with password-confirmed, audited CSV export
 - Tenant-scoped enterprise audit search, activity summaries, and password-confirmed hash-evidenced CSV export
+- Minimal live/ready probes plus platform-only request, worker, integration, billing, and backup operations monitoring
 - Tenant-isolated portable ZIP backups with secret redaction, media manifests, and durable SHA-256 evidence
 - Controlled restore rehearsal, safe record/media recovery, exact-plan application, and drift-protected rollback
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
@@ -109,6 +110,7 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 - `POST /api/organization/data-exports` creates a password-confirmed tenant backup ZIP with JSONL records, referenced local evidence files, secret redaction, and a checksum manifest; see [`docs/CUSTOMER_DATA_EXPORTS.md`](docs/CUSTOMER_DATA_EXPORTS.md).
 - `POST /api/organization/data-restores/rehearsals` validates a backup and records a dry-run before separate approval, exact-archive application, and rollback; see [`docs/CONTROLLED_DATA_RESTORES.md`](docs/CONTROLLED_DATA_RESTORES.md).
 - `GET /api/audit-logs/search` and `/summary` provide manager/admin tenant-scoped evidence review; administrators can use password-confirmed `POST /api/audit-logs/export` for a formula-safe, SHA-256-recorded CSV. See [`docs/AUDIT_LOGS.md`](docs/AUDIT_LOGS.md).
+- `GET /health/live` and `/health/ready` provide minimal orchestration probes; platform administrators use `GET /api/platform/operations/summary` and `/platform/operations` for live SLA-operability evidence. See [`docs/OPERATIONS_MONITORING.md`](docs/OPERATIONS_MONITORING.md).
 - `POST /api/work-order-parts` is still available for backward compatibility but marked deprecated.
 - `GET /api/inventory/replenishment-requests` returns the role-scoped replenishment queue and server-calculated action capabilities.
 - `POST /api/inventory/replenishment-requests` creates a manual vehicle request with a required business reason and client-generated idempotency key.
@@ -161,6 +163,8 @@ LEGACY_HEADER_AUTH=false
 JWT_SECRET_KEY=<at least 32 random characters>
 MAX_IMAGE_UPLOAD_BYTES=10485760
 MAX_KNOWLEDGE_MEDIA_UPLOAD_BYTES=52428800
+OPERATIONS_REQUEST_WINDOW_SECONDS=300
+OPERATIONS_BACKUP_WARNING_DAYS=7
 ```
 
 PostgreSQL example:
