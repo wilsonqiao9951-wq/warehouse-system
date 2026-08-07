@@ -79,6 +79,6 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m scripts.validate_production_config
       - run: alembic upgrade head
-      - run: python -c "from sqlalchemy import create_engine, text; from app.core.config import settings; from app.core.database import current_schema_head; assert create_engine(settings.database_url).connect().scalar(text('SELECT version_num FROM alembic_version')) == current_schema_head()"
+      - run: python -c "from sqlalchemy import create_engine, text; from app.core.config import settings; from app.services.legacy_database_adoption import current_schema_head; assert create_engine(settings.database_url).connect().scalar(text('SELECT version_num FROM alembic_version')) == current_schema_head()"
       - run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
       - run: docker compose --env-file .env.production.example -f docker-compose.production.yml build api web
