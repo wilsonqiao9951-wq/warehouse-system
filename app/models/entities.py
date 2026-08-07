@@ -2148,6 +2148,13 @@ class InventoryTransaction(Base):
             "created_at",
         ),
         Index(
+            "ix_inventory_tx_org_from_wh_type_created",
+            "organization_id",
+            "from_warehouse_id",
+            "transaction_type",
+            "created_at",
+        ),
+        Index(
             "ix_inventory_tx_org_to_wh_created",
             "organization_id",
             "to_warehouse_id",
@@ -2434,6 +2441,12 @@ class ReplenishmentRequest(Base):
         Index("ix_replenishment_org_status", "organization_id", "status"),
         Index("ix_replenishment_org_target_status", "organization_id", "target_user_id", "status"),
         Index(
+            "ix_replenishment_org_destination_status",
+            "organization_id",
+            "destination_warehouse_id",
+            "status",
+        ),
+        Index(
             "ix_replenishment_org_reconcile_updated",
             "organization_id",
             "requires_reconciliation",
@@ -2493,6 +2506,12 @@ class VehicleReturnRequest(Base):
         ),
         Index("ix_vehicle_return_org_status", "organization_id", "status"),
         Index("ix_vehicle_return_org_engineer_status", "organization_id", "engineer_id", "status"),
+        Index(
+            "ix_vehicle_return_org_source_status",
+            "organization_id",
+            "source_warehouse_id",
+            "status",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)

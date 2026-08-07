@@ -22,6 +22,7 @@ const links: NavLink[] = [
   { href: "/inventory", label: "Inventory", roles: ["warehouse", "manager", "admin"] },
   { href: "/inventory-ledger", label: "Inventory Ledger", roles: ["warehouse", "manager", "admin"] },
   { href: "/inventory-reconciliation", label: "Inventory Reconciliation", roles: ["warehouse", "manager", "admin"] },
+  { href: "/van-inventory-planning", label: "Van Planning", roles: ["warehouse", "manager", "admin"] },
   { href: "/regions", label: "Regions", roles: ["warehouse", "manager", "admin"] },
   { href: "/inventory-scan", label: "Scan & Check", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/warehouse-tasks", label: "Warehouse Tasks", roles: ["warehouse", "manager", "admin"] },

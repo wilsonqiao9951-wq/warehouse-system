@@ -137,6 +137,24 @@ export default function WarehouseTasksPage() {
     };
   }, [refresh]);
 
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const partId = Number(query.get("part_id"));
+    const destinationWarehouseId = Number(query.get("destination_warehouse_id"));
+    if (!Number.isInteger(partId) || partId < 1 || !Number.isInteger(destinationWarehouseId) || destinationWarehouseId < 1) {
+      return;
+    }
+    const sourceWarehouseId = Number(query.get("source_warehouse_id"));
+    const quantity = Math.max(1, Number(query.get("quantity")) || 1);
+    setManualRequest({
+      partId,
+      destinationWarehouseId,
+      sourceWarehouseId: Number.isInteger(sourceWarehouseId) && sourceWarehouseId > 0 ? sourceWarehouseId : "",
+      quantity,
+      reason: (query.get("reason") || "Van inventory planning recommendation").slice(0, 500)
+    });
+  }, []);
+
   const metrics = useMemo(() => ({
     queue: requests.filter((item) => item.status === "requested" || item.status === "picking").length,
     waiting: requests.filter((item) => item.status === "shipped").length,
@@ -373,7 +391,7 @@ export default function WarehouseTasksPage() {
       {error && <div className="notice notice-error">{error}</div>}
       {message && <div className="notice notice-success">{message}</div>}
 
-      <section className="card">
+      <section className="card" id="new-replenishment">
         <div className="section-heading-row">
           <div>
             <h3 style={{ margin: 0 }}>New vehicle replenishment</h3>

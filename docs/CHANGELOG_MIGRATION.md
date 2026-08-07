@@ -1,5 +1,18 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260807_0060 - Van inventory planning indexes
+
+- Added tenant-leading source-vehicle/type/time ledger indexing for bounded
+  engineer consumption analysis.
+- Added destination/status replenishment and source/status return indexes for
+  pending-custody projection.
+- Added the read-only vehicle planning API and management workbench with
+  forecast, threshold, pending movement, source availability, and explanation
+  evidence.
+- Extends controlled tenant restore compatibility through revision `0060`.
+- Downgrade removes only the three query indexes and does not modify inventory
+  or custody records.
+
 ## 20260807_0059 - Inventory reconciliation queue index
 
 - Added a tenant-leading replenishment reconciliation/updated-time index for

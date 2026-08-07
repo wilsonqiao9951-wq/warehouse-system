@@ -1227,6 +1227,75 @@ export interface InventoryReconciliationPage {
   candidate_scan_limit: number;
 }
 
+export type VanPlanningAction = "replenish" | "return" | "balanced";
+
+export interface VanConsumptionDay {
+  date: string;
+  quantity: number;
+}
+
+export interface VanEngineerConsumption {
+  engineer_id: number;
+  engineer_name: string;
+  warehouse_id: number;
+  warehouse_code: string;
+  warehouse_name: string;
+  region_id?: number | null;
+  consumed_quantity: number;
+  work_order_count: number;
+  average_daily_usage: number;
+  trend: VanConsumptionDay[];
+}
+
+export interface VanRebalanceRecommendation {
+  engineer_id: number;
+  engineer_name: string;
+  warehouse_id: number;
+  warehouse_code: string;
+  warehouse_name: string;
+  region_id?: number | null;
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  current_quantity: number;
+  threshold_quantity: number;
+  consumed_quantity: number;
+  average_daily_usage: number;
+  forecast_quantity: number;
+  target_quantity: number;
+  pending_inbound_quantity: number;
+  pending_outbound_quantity: number;
+  projected_quantity: number;
+  recommended_action: VanPlanningAction;
+  recommended_quantity: number;
+  suggested_warehouse_id?: number | null;
+  suggested_warehouse_code?: string | null;
+  suggested_warehouse_name?: string | null;
+  suggested_warehouse_available_quantity?: number | null;
+  source_can_fulfill: boolean;
+  reason: string;
+}
+
+export interface VanPlanning {
+  generated_at: string;
+  lookback_days: number;
+  coverage_days: number;
+  summary: {
+    vehicle_count: number;
+    engineer_count: number;
+    consumed_quantity: number;
+    work_order_count: number;
+    replenish_count: number;
+    return_count: number;
+    balanced_count: number;
+    recommended_replenish_quantity: number;
+    recommended_return_quantity: number;
+  };
+  engineers: VanEngineerConsumption[];
+  recommendations: VanRebalanceRecommendation[];
+  truncated: boolean;
+}
+
 export interface LocationStockBalance {
   part_id: number;
   part_number: string;

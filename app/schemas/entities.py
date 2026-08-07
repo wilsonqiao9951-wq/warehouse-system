@@ -2216,6 +2216,78 @@ class StockBalance(BaseModel):
     is_low_stock: bool
 
 
+VanPlanningAction = Literal["replenish", "return", "balanced"]
+
+
+class VanConsumptionDayRead(BaseModel):
+    date: date
+    quantity: int = Field(ge=0)
+
+
+class VanEngineerConsumptionRead(BaseModel):
+    engineer_id: int
+    engineer_name: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name: str
+    region_id: int | None = None
+    consumed_quantity: int = Field(ge=0)
+    work_order_count: int = Field(ge=0)
+    average_daily_usage: float = Field(ge=0)
+    trend: list[VanConsumptionDayRead]
+
+
+class VanRebalanceRecommendationRead(BaseModel):
+    engineer_id: int
+    engineer_name: str
+    warehouse_id: int
+    warehouse_code: str
+    warehouse_name: str
+    region_id: int | None = None
+    part_id: int
+    part_number: str
+    part_name: str
+    current_quantity: int
+    threshold_quantity: int = Field(ge=0)
+    consumed_quantity: int = Field(ge=0)
+    average_daily_usage: float = Field(ge=0)
+    forecast_quantity: int = Field(ge=0)
+    target_quantity: int = Field(ge=0)
+    pending_inbound_quantity: int = Field(ge=0)
+    pending_outbound_quantity: int = Field(ge=0)
+    projected_quantity: int
+    recommended_action: VanPlanningAction
+    recommended_quantity: int = Field(ge=0)
+    suggested_warehouse_id: int | None = None
+    suggested_warehouse_code: str | None = None
+    suggested_warehouse_name: str | None = None
+    suggested_warehouse_available_quantity: int | None = Field(default=None, ge=0)
+    source_can_fulfill: bool = False
+    reason: str
+
+
+class VanPlanningSummaryRead(BaseModel):
+    vehicle_count: int = Field(ge=0)
+    engineer_count: int = Field(ge=0)
+    consumed_quantity: int = Field(ge=0)
+    work_order_count: int = Field(ge=0)
+    replenish_count: int = Field(ge=0)
+    return_count: int = Field(ge=0)
+    balanced_count: int = Field(ge=0)
+    recommended_replenish_quantity: int = Field(ge=0)
+    recommended_return_quantity: int = Field(ge=0)
+
+
+class VanPlanningRead(BaseModel):
+    generated_at: datetime
+    lookback_days: int = Field(ge=1, le=366)
+    coverage_days: int = Field(ge=1, le=90)
+    summary: VanPlanningSummaryRead
+    engineers: list[VanEngineerConsumptionRead]
+    recommendations: list[VanRebalanceRecommendationRead]
+    truncated: bool = False
+
+
 class WorkOrderProfit(BaseModel):
     work_order_id: int
     ticket_number: str

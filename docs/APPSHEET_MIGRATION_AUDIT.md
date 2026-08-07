@@ -279,8 +279,9 @@ After Phase 1 sign-off, release improvements in controlled increments:
 - `Implemented` Dedicated discrepancy exception queue across count and custody workflows with severity/source filters and direct record drill-down
 
 2. Van inventory
-- Van transfer workflows and rebalance recommendations
-- Engineer-level consumption trends
+- `Implemented` Authenticated warehouse-to-vehicle replenishment and vehicle-to-warehouse return custody; direct generic vehicle transfers remain blocked
+- `Implemented` Forecast- and threshold-based rebalance recommendations that account for pending custody and source availability
+- `Implemented` Engineer-level work-order consumption totals, job counts, daily averages, and daily trends
 
 3. Work order profit calculation
 - Persisted daily profit snapshots
