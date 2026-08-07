@@ -169,6 +169,92 @@ class OrganizationDataExport(Base):
     requester = relationship("User")
 
 
+class OrganizationDataRestore(Base):
+    __tablename__ = "organization_data_restores"
+    __table_args__ = (
+        CheckConstraint(
+            "format_version = 'opf-portable-v1'",
+            name="ck_organization_data_restore_format",
+        ),
+        CheckConstraint(
+            "status IN ('validated', 'approved', 'rejected', 'applied', 'rolled_back')",
+            name="ck_organization_data_restore_status",
+        ),
+        CheckConstraint(
+            "archive_size_bytes >= 0 AND record_count >= 0 AND file_count >= 0 "
+            "AND update_count >= 0 AND unchanged_count >= 0 "
+            "AND conflict_count >= 0 AND protected_count >= 0 "
+            "AND rollback_size_bytes >= 0 AND version >= 0",
+            name="ck_organization_data_restore_counts_non_negative",
+        ),
+        CheckConstraint(
+            "length(archive_sha256) = 64 AND length(plan_sha256) = 64 "
+            "AND (rollback_sha256 IS NULL OR length(rollback_sha256) = 64)",
+            name="ck_organization_data_restore_hashes",
+        ),
+        Index(
+            "ix_organization_data_restore_org_created",
+            "organization_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requested_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    rejected_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    applied_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    rolled_back_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    matched_export_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organization_data_exports.id"), nullable=True
+    )
+    format_version: Mapped[str] = mapped_column(
+        String(32), default="opf-portable-v1", nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(24), default="validated", nullable=False)
+    archive_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    archive_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    plan_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_schema_revision: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_exported_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    record_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    update_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    unchanged_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    conflict_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    protected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    table_summary_json: Mapped[str] = mapped_column(Text, nullable=False)
+    validation_messages_json: Mapped[str] = mapped_column(Text, nullable=False)
+    approval_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    rollback_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rollback_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rollback_size_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rolled_back_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    organization = relationship("Organization")
+    requester = relationship("User", foreign_keys=[requested_by])
+    approver = relationship("User", foreign_keys=[approved_by])
+    rejecter = relationship("User", foreign_keys=[rejected_by])
+    applier = relationship("User", foreign_keys=[applied_by])
+    rollback_actor = relationship("User", foreign_keys=[rolled_back_by])
+    matched_export = relationship("OrganizationDataExport")
+
+
 class OrganizationDomain(Base):
     __tablename__ = "organization_domains"
     __table_args__ = (

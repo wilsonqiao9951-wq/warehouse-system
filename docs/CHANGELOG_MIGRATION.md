@@ -533,3 +533,28 @@ all 130 backend tests passed; configured-evidence downgrade refusal passed;
 ESLint, TypeScript, and the Next.js 16.2.12
 production build passed for all 33 static routes; Python dependency consistency
 and full/production npm audits reported 0 known vulnerabilities.
+
+## 20260806_0037 - Controlled customer data restores
+
+- Adds tenant-owned restore rehearsal evidence with archive/plan SHA-256,
+  source metadata, table summaries, conflicts, protected rows, state actors,
+  optimistic version, and rollback integrity fields.
+- Adds bounded ZIP validation for organization/schema identity, safe paths,
+  entry inventory, secret/cross-tenant exclusions, table/file checksums, and
+  compressed/uncompressed/rollback limits.
+- Adds an administrator-only `validated -> approved -> applied -> rolled_back`
+  workflow plus terminal rejection, current-password reauthentication, exact
+  archive resubmission, live-plan drift detection, and audit evidence.
+- Applies only existing allowlisted master/configuration/knowledge rows and
+  protects authentication, billing, audit, work-order custody, inventory
+  ledgers, synchronization, and other control-plane data.
+- Stores a checksum-protected before/after field snapshot so rollback refuses
+  to overwrite changes made after application.
+- Refuses downgrade while any restore evidence exists.
+
+Verification: five restore workflow/security tests and three export regression
+tests passed; all 135 backend tests passed; fresh base-to-`0037`, empty
+`0037 -> 0036 -> 0037`, schema/index/constraint inspection, and guarded
+configured-evidence downgrade passed on SQLite; ESLint and the Next.js 16.2.12
+production build passed for all 33 static routes; Python dependency consistency
+and full/production npm audits reported 0 known vulnerabilities.

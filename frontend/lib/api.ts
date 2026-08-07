@@ -18,6 +18,7 @@ import {
   OrganizationBillingOverview,
   OrganizationCommercialReport,
   OrganizationDataExport,
+  OrganizationDataRestore,
   OrganizationBranding,
   OrganizationSettings,
   OrganizationDomain,
@@ -1032,6 +1033,58 @@ export const api = {
       { include_files: includeFiles, account_password: accountPassword },
       "openpartsflow-backup.zip"
     ),
+  listOrganizationDataRestores: () =>
+    request<OrganizationDataRestore[]>("/organization/data-restores"),
+  createOrganizationDataRestoreRehearsal: (file: File, accountPassword: string) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("account_password", accountPassword);
+    return request<OrganizationDataRestore>("/organization/data-restores/rehearsals", {
+      method: "POST",
+      body: form
+    });
+  },
+  decideOrganizationDataRestore: (
+    restoreId: number,
+    expectedVersion: number,
+    decision: "approve" | "reject",
+    note: string,
+    accountPassword: string
+  ) => request<OrganizationDataRestore>(`/organization/data-restores/${restoreId}/decision`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_version: expectedVersion,
+      decision,
+      note,
+      account_password: accountPassword
+    })
+  }),
+  applyOrganizationDataRestore: (
+    restoreId: number,
+    expectedVersion: number,
+    file: File,
+    accountPassword: string
+  ) => {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("expected_version", String(expectedVersion));
+    form.append("account_password", accountPassword);
+    return request<OrganizationDataRestore>(`/organization/data-restores/${restoreId}/apply`, {
+      method: "POST",
+      body: form
+    });
+  },
+  rollbackOrganizationDataRestore: (
+    restoreId: number,
+    expectedVersion: number,
+    accountPassword: string
+  ) => request<OrganizationDataRestore>(`/organization/data-restores/${restoreId}/rollback`, {
+    method: "POST",
+    body: JSON.stringify({
+      expected_version: expectedVersion,
+      account_password: accountPassword
+    })
+  }),
   acknowledgeSubscriptionNotice: (noticeId: number, expectedVersion: number) =>
     request<SubscriptionNotice>(`/organization/billing/notices/${noticeId}/acknowledge`, {
       method: "POST",
