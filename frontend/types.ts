@@ -217,6 +217,14 @@ export interface PlatformOperationsSummary {
   alerts: OperationsAlert[];
 }
 
+export interface OperationsStaleDeliveryRecoveryResult {
+  recovered_count: number;
+  organization_count: number;
+  recovered_delivery_ids: number[];
+  stale_before: string;
+  queued_at: string;
+}
+
 export type PlanCode = "starter" | "professional" | "enterprise";
 export type SubscriptionStatus =
   | "trialing"

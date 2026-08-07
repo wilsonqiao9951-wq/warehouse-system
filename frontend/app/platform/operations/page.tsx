@@ -24,6 +24,10 @@ export default function PlatformOperationsPage() {
   const [data, setData] = useState<PlatformOperationsSummary | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [recoveryReason, setRecoveryReason] = useState("");
+  const [accountPassword, setAccountPassword] = useState("");
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryNotice, setRecoveryNotice] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -42,6 +46,34 @@ export default function PlatformOperationsPage() {
     const timer = window.setInterval(() => void load(), 30_000);
     return () => window.clearInterval(timer);
   }, [load]);
+
+  const recoverStaleDeliveries = async () => {
+    if (recoveryReason.trim().length < 3 || !accountPassword) {
+      setError("Enter an operational reason and your current account password.");
+      return;
+    }
+    try {
+      setRecovering(true);
+      setError("");
+      setRecoveryNotice("");
+      const result = await api.recoverStaleIntegrationDeliveries({
+        account_password: accountPassword,
+        reason: recoveryReason.trim(),
+        max_items: 100
+      });
+      setRecoveryNotice(
+        result.recovered_count > 0
+          ? `${result.recovered_count} interrupted deliveries across ${result.organization_count} organizations were safely queued for retry.`
+          : "No delivery still met the stale-processing cutoff. No queue state was changed."
+      );
+      setAccountPassword("");
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to recover stale deliveries.");
+    } finally {
+      setRecovering(false);
+    }
+  };
 
   return (
     <ManagerShell
@@ -135,6 +167,39 @@ export default function PlatformOperationsPage() {
                 ))}
               </div>
             )}
+          </section>
+
+          <section className="card">
+            <h3>Interrupted delivery recovery</h3>
+            <p className="muted">
+              Requeue only Webhook attempts that have remained in processing beyond the configured stale cutoff.
+              Downstream systems must continue deduplicating the stable delivery idempotency key.
+            </p>
+            <div className="two-col">
+              <input
+                value={recoveryReason}
+                onChange={(event) => setRecoveryReason(event.target.value)}
+                placeholder="Operational recovery reason"
+                maxLength={500}
+              />
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={accountPassword}
+                onChange={(event) => setAccountPassword(event.target.value)}
+                placeholder="Current account password"
+                maxLength={128}
+              />
+            </div>
+            <button
+              type="button"
+              disabled={recovering || data.integration_queue.stale_processing === 0}
+              onClick={() => void recoverStaleDeliveries()}
+              style={{ marginTop: 12 }}
+            >
+              {recovering ? "Recovering..." : `Requeue stale deliveries (${data.integration_queue.stale_processing})`}
+            </button>
+            {recoveryNotice && <p className="notice" style={{ marginTop: 12 }}>{recoveryNotice}</p>}
           </section>
 
           <section className="card">

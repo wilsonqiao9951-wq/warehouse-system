@@ -3,6 +3,7 @@ import {
   AuditLogPage,
   AuditLogSummary,
   PermissionEffect,
+  OperationsStaleDeliveryRecoveryResult,
   PlatformOperationsSummary,
   BillingLifecycleEvent,
   BillingProvider,
@@ -1218,6 +1219,15 @@ export const api = {
   },
   getPlatformOperationsSummary: () =>
     request<PlatformOperationsSummary>("/platform/operations/summary"),
+  recoverStaleIntegrationDeliveries: (payload: {
+    account_password: string;
+    reason: string;
+    max_items?: number;
+  }) =>
+    request<OperationsStaleDeliveryRecoveryResult>(
+      "/platform/operations/recover-stale-deliveries",
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
   downloadAuditLogs: (filters: AuditLogFilters, accountPassword: string) =>
     downloadAuthenticatedFile(
       "/audit-logs/export",

@@ -168,6 +168,14 @@ API key rotation also rotates the signing key. Update the external receiver befo
 
 Successful HTTP `2xx` responses mark a delivery processed. Network failures and non-`2xx` responses retry after 1 minute, 5 minutes, 30 minutes, 2 hours, and 6 hours. Five failed attempts move the event to `failed`; an administrator can requeue it from the integration workspace. The application worker polls due deliveries every `INTEGRATION_DELIVERY_POLL_SECONDS` while `INTEGRATION_DELIVERY_ENABLED=true`.
 
+If a worker or host stops after claiming a row, the platform operations console
+detects the row after `OPERATIONS_STALE_PROCESSING_MINUTES`. A platform
+administrator can password-confirm a bounded requeue after verifying that the
+old attempt is no longer running. The recovery preserves the attempt count and
+stable idempotency key, excludes inbound rows and fresh attempts, records
+tenant-scoped audit evidence, and never performs delivery inside the recovery
+request. Receivers must therefore retain their normal idempotency protection.
+
 ## Tenant isolation
 
 API key authentication establishes the organization before reading links, logs, or work orders. Integrations, source links, sync logs, work orders, and audit entries all use the existing database tenant filter. The same external row ID may be used independently by different organizations.

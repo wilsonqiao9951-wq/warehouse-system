@@ -1468,3 +1468,23 @@ Verification:
 - Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes.
 - Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.
 - Backed up the local `0050` database as `openpartsflow.pre-0051-20260807-150000.db` (SHA-256 `6CB9399D906BDF61F2B5C3182D1902124C9D30660A596BF503C2B3B35AAE5567`) before upgrading the configured database to `0051` head.
+
+## 2026-08-07 - Phase 9 interrupted outbound delivery recovery
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added a platform-administrator-only recovery endpoint and operations-console control for outbound Webhooks stranded in `processing` after a worker or host interruption.
+- Required current-password confirmation and a normalized operational reason; customer administrators remain denied.
+- Restricted recovery to a bounded batch older than the configured stale cutoff, with row locking and a state recheck to preserve concurrent worker completion.
+- Returned eligible rows to the normal delivery queue without sending inline, resetting attempt counters, or changing their stable business idempotency keys.
+- Added tenant-scoped audit evidence for every affected organization while excluding payloads, response bodies, callback URLs, credentials, and signatures.
+- Added idempotent no-op behavior, cross-tenant/fresh/inbound boundaries, operator guidance, and external-integration documentation.
+
+Verification:
+
+- Targeted operations and external-delivery tests passed (10 tests); all 227 backend tests passed.
+- Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes.
+- Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.
+- No schema change is required; Alembic head remains `20260807_0051`.

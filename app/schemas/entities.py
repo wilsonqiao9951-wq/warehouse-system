@@ -2756,6 +2756,28 @@ class OperationsQueueRead(BaseModel):
     stale_processing: int = Field(ge=0)
 
 
+class OperationsStaleDeliveryRecovery(BaseModel):
+    account_password: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=500)
+    max_items: int = Field(default=100, ge=1, le=500)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("reason must contain at least 3 non-whitespace characters")
+        return normalized
+
+
+class OperationsStaleDeliveryRecoveryRead(BaseModel):
+    recovered_count: int = Field(ge=0)
+    organization_count: int = Field(ge=0)
+    recovered_delivery_ids: list[int] = Field(default_factory=list)
+    stale_before: datetime
+    queued_at: datetime
+
+
 class OperationsDataProtectionRead(BaseModel):
     active_organizations: int = Field(ge=0)
     organizations_without_recent_backup: int = Field(ge=0)
