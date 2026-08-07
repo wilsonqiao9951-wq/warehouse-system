@@ -21,6 +21,10 @@ def test_production_compose_keeps_data_private_and_migrations_one_shot():
     assert services["db"]["networks"] == ["data"]
 
     assert services["migrate"]["command"] == ["alembic", "upgrade", "head"]
+    assert "--proxy-headers" in services["api"]["command"]
+    assert "--forwarded-allow-ips=*" in services["api"]["command"]
+    assert services["api"]["networks"] == ["edge", "data"]
+    assert services["web"]["networks"] == ["edge"]
     assert services["migrate"]["restart"] == "no"
     assert services["api"]["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
     assert services["web"]["depends_on"]["api"]["condition"] == "service_healthy"
@@ -63,6 +67,7 @@ def test_proxy_exposes_only_allowlisted_backend_routes_and_security_headers():
     for route in ("/api/", "/uploads/", "/health/"):
         assert f"location {route}" in nginx
     assert "proxy_pass http://api:8000" in nginx
+    assert "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;" in nginx
     assert 'add_header X-Content-Type-Options "nosniff" always;' in nginx
     assert 'add_header X-Frame-Options "DENY" always;' in nginx
     assert "client_max_body_size 600m;" in nginx

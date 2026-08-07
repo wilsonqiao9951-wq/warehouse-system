@@ -64,6 +64,7 @@ import {
   WorkOrder,
   WorkOrderPart,
   AbnormalUsageRow,
+  AuthSecurityEvent,
   AuthToken,
   ImportBatch,
   InvitationCreated,
@@ -1007,6 +1008,13 @@ export const api = {
     });
   },
   getMe: () => request<User>("/auth/me"),
+  revokeAllSessions: (accountPassword: string) =>
+    request<void>("/auth/sessions/revoke-all", {
+      method: "POST",
+      body: JSON.stringify({ account_password: accountPassword })
+    }),
+  listAuthSecurityEvents: (limit = 50) =>
+    request<AuthSecurityEvent[]>(`/auth/security-events?limit=${limit}`),
   getPublicOrganizationBranding: (slug: string) =>
     request<OrganizationBranding>(
       `/auth/organization-branding/${encodeURIComponent(slug)}`

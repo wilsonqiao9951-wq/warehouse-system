@@ -14,6 +14,7 @@ from app.core.security import decode_access_token
 from app.services.commercial import require_subscription_access
 from app.models import (
     AuditLog,
+    AuthSecurityEvent,
     BillingLifecycleEvent,
     CompletionPolicy,
     Customer,
@@ -108,6 +109,7 @@ TENANT_MODELS = (
     JobStatus,
     ReturnEquipment,
     AuditLog,
+    AuthSecurityEvent,
     InventoryNotification,
     InventoryCountSession,
     InventoryCountLine,
@@ -191,11 +193,12 @@ def get_current_actor(
         )
 
     token_organization_id: int | None = None
+    token_auth_version: int | None = None
     token_device_id: str | None = None
     auth_method = "none"
     if token:
         try:
-            user_id, token_organization_id, token_device_id = decode_access_token(token)
+            user_id, token_organization_id, token_auth_version, token_device_id = decode_access_token(token)
             auth_method = "bearer"
         except ValueError as exc:
             raise HTTPException(
@@ -221,6 +224,12 @@ def get_current_actor(
         raise HTTPException(status_code=401, detail="User not found")
     if token_organization_id is not None and token_organization_id != user.organization_id:
         raise HTTPException(status_code=401, detail="Token organization is invalid")
+    if token_auth_version is not None and token_auth_version != user.auth_version:
+        raise HTTPException(
+            status_code=401,
+            detail="Session has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     organization = db.get(Organization, user.organization_id)
     require_subscription_access(
         organization,

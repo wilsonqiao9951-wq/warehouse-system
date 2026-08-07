@@ -26,6 +26,7 @@ SENSITIVE_COLUMNS: dict[str, set[str]] = {
     "users": {"password_hash"},
     "user_devices": {"device_token_hash"},
     "user_invitations": {"token_hash"},
+    "auth_security_events": {"principal_fingerprint", "source_fingerprint"},
     "external_integrations": {"api_key_hash"},
     "organization_domains": {"verification_token", "verification_value"},
 }

@@ -46,6 +46,20 @@ export interface AuthToken {
   device_id?: string | null;
 }
 
+export interface AuthSecurityEvent {
+  id: number;
+  user_id?: number | null;
+  event_type: "login" | "session_revocation";
+  outcome:
+    | "success"
+    | "invalid_credentials"
+    | "rate_limited"
+    | "subscription_denied"
+    | "device_rejected"
+    | "sessions_revoked";
+  occurred_at: string;
+}
+
 export interface AuditLogEntry {
   id: number;
   organization_id: number;

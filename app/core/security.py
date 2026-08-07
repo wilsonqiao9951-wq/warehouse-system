@@ -21,7 +21,13 @@ def verify_password(password: str, stored_hash: str | None) -> bool:
     return password_hash.verify(password, stored_hash)
 
 
-def create_access_token(user_id: int, organization_id: int, device_id: str | None = None) -> tuple[str, int]:
+def create_access_token(
+    user_id: int,
+    organization_id: int,
+    *,
+    auth_version: int,
+    device_id: str | None = None,
+) -> tuple[str, int]:
     if (
         settings.app_env.lower() in {"production", "staging"}
         and settings.jwt_secret_key == "development-only-change-me-32-bytes-minimum"
@@ -32,6 +38,7 @@ def create_access_token(user_id: int, organization_id: int, device_id: str | Non
     payload = {
         "sub": str(user_id),
         "organization_id": organization_id,
+        "auth_version": auth_version,
         "iat": now,
         "exp": now + timedelta(seconds=expires_in),
     }
@@ -45,7 +52,7 @@ def create_access_token(user_id: int, organization_id: int, device_id: str | Non
     return token, expires_in
 
 
-def decode_access_token(token: str) -> tuple[int, int, str | None]:
+def decode_access_token(token: str) -> tuple[int, int, int, str | None]:
     try:
         # Reject non-canonical base64url segments. Without this check, changing
         # unused padding bits in the final signature character can decode to the
@@ -62,8 +69,16 @@ def decode_access_token(token: str) -> tuple[int, int, str | None]:
             token,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
-            options={"require": ["sub", "organization_id", "exp"]},
+            options={"require": ["sub", "organization_id", "auth_version", "exp"]},
         )
-        return int(payload["sub"]), int(payload["organization_id"]), payload.get("device_id")
+        auth_version = int(payload["auth_version"])
+        if auth_version < 0:
+            raise ValueError("Invalid authentication version")
+        return (
+            int(payload["sub"]),
+            int(payload["organization_id"]),
+            auth_version,
+            payload.get("device_id"),
+        )
     except (InvalidTokenError, KeyError, TypeError, ValueError) as exc:
         raise ValueError("Invalid or expired access token") from exc

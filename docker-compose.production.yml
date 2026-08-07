@@ -81,6 +81,18 @@ services:
       - ${OPENPARTSFLOW_ENV_FILE:-.env.production}
     environment: *api-environment
     restart: unless-stopped
+    command:
+      - python
+      - -m
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --no-access-log
+      - --proxy-headers
+      - --forwarded-allow-ips=*
     depends_on:
       db:
         condition: service_healthy
