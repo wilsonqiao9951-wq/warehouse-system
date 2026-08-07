@@ -23,6 +23,7 @@ from app.api.permissions import router as permissions_router
 from app.api.regions import router as regions_router
 from app.api.analytics import router as analytics_router
 from app.api.enterprise_agent import router as enterprise_agent_router
+from app.api.inventory_ledger import router as inventory_ledger_router
 from app.core.config import settings
 from app.core.database import (
     SessionLocal,
@@ -261,6 +262,7 @@ app.include_router(permissions_router, prefix="/api")
 app.include_router(regions_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(enterprise_agent_router, prefix="/api")
+app.include_router(inventory_ledger_router, prefix="/api")
 app.include_router(operations_router)
 app.include_router(pages_router)
 uploads_dir = Path(settings.data_export_public_files_root)

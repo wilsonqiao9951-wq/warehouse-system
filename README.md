@@ -40,6 +40,8 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Vehicle inventory isolation from generic transactions and opening-stock imports
 - Authenticated vehicle-to-warehouse return custody with reservation and engineer handover
 - Auditable inventory counts with administrator-approved, ledger-linked adjustments
+- Tenant-isolated inventory ledger workbench with part, warehouse, movement,
+  accountable-user, work-order, and date filters plus workflow evidence links
 - Validated warehouse → shelf/bin → part scanning with stale-label and cross-warehouse protection
 - Real-time inventory balance
 - Excel export
@@ -68,6 +70,7 @@ The project now includes a Next.js admin dashboard at `frontend/` with:
 - Work orders management (create job, assign engineer, revenue, status)
 - Parts usage UI (select part, quantity, auto inventory deduction)
 - Inventory views (warehouse stock and van inventory)
+- Inventory ledger workbench with traceable source/destination and reconciliation references
 - Warehouse replenishment queue with server-authorized picking, shipping, and completion actions
 - Engineer My Van deliveries with registered-phone and password-verified receipt
 - Employee page (roles and performance overview)
@@ -156,6 +159,7 @@ are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 - `POST /api/inventory/vehicle-returns/{id}/actions` enforces warehouse approval, engineer password handover, and warehouse receipt.
 - The former generic replenishment status PATCH is deprecated and returns `410`; clients must use the authenticated action endpoint.
 - `POST /api/inventory/transactions` is limited to non-vehicle `INBOUND`, `OUTBOUND`, `TRANSFER`, and `DAMAGE`; vehicle, `RETURN`, and `WORK_ORDER_USED` changes require their authenticated business workflows.
+- `GET /api/inventory/ledger` provides a tenant-scoped, cursor-paginated business ledger for warehouse users, managers, and administrators; `GET /api/inventory/ledger/options` supplies only options referenced by that tenant's ledger. See [`docs/INVENTORY_LEDGER.md`](docs/INVENTORY_LEDGER.md).
 - Full custody contract: [`docs/REPLENISHMENT_CUSTODY_API.md`](docs/REPLENISHMENT_CUSTODY_API.md).
 - Work-order profit response now uses:
   - `revenue`

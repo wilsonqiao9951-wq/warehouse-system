@@ -65,6 +65,9 @@ import {
   ReplenishmentRequest,
   VehicleReturnRequest,
   InventoryCount,
+  InventoryLedgerFilters,
+  InventoryLedgerOptions,
+  InventoryLedgerPage,
   User,
   Warehouse,
   WorkOrder,
@@ -2017,6 +2020,20 @@ export const api = {
   actOnInventoryCount: (id: number, payload: {
     action: "submit" | "approve" | "cancel"; expected_version: number; reason?: string; password?: string;
   }) => request<InventoryCount>(`/inventory/counts/${id}/actions`, { method: "POST", body: JSON.stringify(payload) }),
+  getInventoryLedger: (
+    filters: InventoryLedgerFilters = {},
+    beforeId?: number,
+    limit = 50
+  ) => {
+    const query = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") query.set(key, String(value));
+    });
+    if (beforeId) query.set("before_id", String(beforeId));
+    query.set("limit", String(limit));
+    return request<InventoryLedgerPage>(`/inventory/ledger?${query.toString()}`);
+  },
+  getInventoryLedgerOptions: () => request<InventoryLedgerOptions>("/inventory/ledger/options"),
   createStorageLocation: (payload: Omit<StorageLocation, "id">) =>
     request<StorageLocation>("/storage-locations", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryBalances: () => request<StockBalance[]>("/inventory/balances?limit=500"),

@@ -104,6 +104,17 @@ The `audit.read` effective permission controls search and summaries; it defaults
 
 The `audit.export` permission defaults to administrators and controls `POST /api/audit-logs/export`. A Bearer-authenticated caller must re-enter the current account password. The CSV uses the active filters, hardens spreadsheet-formula cells, returns a SHA-256 digest and row count, and then appends an `audit_log_exported` event containing the digest and filters. The password is discarded after verification and never enters the CSV, response metadata, or audit event. See [`AUDIT_LOGS.md`](AUDIT_LOGS.md).
 
+## Inventory ledger visibility
+
+`GET /api/inventory/ledger` and `GET /api/inventory/ledger/options` allow the
+warehouse, manager, and administrator roles. Engineers and assistants are
+denied. Every transaction, joined label, filter, count, and option query has an
+explicit organization condition; options contain only parts, warehouses, and
+users already referenced by the caller's tenant ledger. Responses are marked
+`no-store`. The page is read-only: stock corrections must pass through an
+authorized inventory count, replenishment, return, or other custody workflow.
+See [`INVENTORY_LEDGER.md`](INVENTORY_LEDGER.md).
+
 ## Platform operations monitoring
 
 `GET /health/live` and `GET /health/ready` are intentionally unauthenticated so load balancers and orchestrators can probe the process. They expose only uptime plus high-level database, schema, and worker state; they never expose tenant counts, URLs, errors, credentials, or configuration values.

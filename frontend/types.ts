@@ -1109,6 +1109,76 @@ export interface InventoryCount {
   updated_at: string;
 }
 
+export type InventoryTransactionType =
+  | "inbound"
+  | "outbound"
+  | "transfer"
+  | "work_order_used"
+  | "return"
+  | "adjustment"
+  | "damage";
+
+export interface InventoryLedgerRow {
+  id: number;
+  transaction_type: InventoryTransactionType;
+  quantity: number;
+  unit_cost: number;
+  total_cost: number;
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  from_warehouse_id?: number | null;
+  from_warehouse_code?: string | null;
+  from_warehouse_name?: string | null;
+  to_warehouse_id?: number | null;
+  to_warehouse_code?: string | null;
+  to_warehouse_name?: string | null;
+  from_location_id?: number | null;
+  from_location_code?: string | null;
+  to_location_id?: number | null;
+  to_location_code?: string | null;
+  work_order_id?: number | null;
+  work_order_ticket_number?: string | null;
+  user_id?: number | null;
+  user_name?: string | null;
+  source: "manual" | "work_order" | "replenishment" | "vehicle_return" | "inventory_count";
+  replenishment_request_id?: number | null;
+  vehicle_return_request_id?: number | null;
+  inventory_count_line_id?: number | null;
+  movement_stage?: string | null;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryLedgerPage {
+  items: InventoryLedgerRow[];
+  total: number;
+  next_before_id?: number | null;
+}
+
+export interface InventoryLedgerOption {
+  id: number;
+  label: string;
+}
+
+export interface InventoryLedgerOptions {
+  parts: InventoryLedgerOption[];
+  warehouses: InventoryLedgerOption[];
+  users: InventoryLedgerOption[];
+  transaction_types: InventoryTransactionType[];
+}
+
+export interface InventoryLedgerFilters {
+  transaction_type?: InventoryTransactionType;
+  part_id?: number;
+  warehouse_id?: number;
+  user_id?: number;
+  work_order_id?: number;
+  from_at?: string;
+  to_at?: string;
+}
+
 export interface LocationStockBalance {
   part_id: number;
   part_number: string;

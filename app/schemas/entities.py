@@ -1919,6 +1919,65 @@ class InventoryTransactionRead(InventoryTransactionCreate):
         from_attributes = True
 
 
+class InventoryLedgerRowRead(BaseModel):
+    id: int
+    transaction_type: TransactionType
+    # Read models must preserve legacy ledger evidence instead of rejecting a
+    # whole page when an older import contains an unusual quantity.
+    quantity: int
+    unit_cost: float = Field(ge=0)
+    total_cost: float = Field(ge=0)
+    part_id: int
+    part_number: str
+    part_name: str
+    from_warehouse_id: int | None = None
+    from_warehouse_code: str | None = None
+    from_warehouse_name: str | None = None
+    to_warehouse_id: int | None = None
+    to_warehouse_code: str | None = None
+    to_warehouse_name: str | None = None
+    from_location_id: int | None = None
+    from_location_code: str | None = None
+    to_location_id: int | None = None
+    to_location_code: str | None = None
+    work_order_id: int | None = None
+    work_order_ticket_number: str | None = None
+    user_id: int | None = None
+    user_name: str | None = None
+    source: Literal[
+        "manual",
+        "replenishment",
+        "vehicle_return",
+        "inventory_count",
+        "work_order",
+    ]
+    replenishment_request_id: int | None = None
+    vehicle_return_request_id: int | None = None
+    inventory_count_line_id: int | None = None
+    movement_stage: str | None = None
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class InventoryLedgerPageRead(BaseModel):
+    items: list[InventoryLedgerRowRead] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    next_before_id: int | None = None
+
+
+class InventoryLedgerOptionRead(BaseModel):
+    id: int
+    label: str
+
+
+class InventoryLedgerOptionsRead(BaseModel):
+    parts: list[InventoryLedgerOptionRead] = Field(default_factory=list)
+    warehouses: list[InventoryLedgerOptionRead] = Field(default_factory=list)
+    users: list[InventoryLedgerOptionRead] = Field(default_factory=list)
+    transaction_types: list[TransactionType] = Field(default_factory=list)
+
+
 class LocationStockBalance(BaseModel):
     part_id: int
     part_number: str

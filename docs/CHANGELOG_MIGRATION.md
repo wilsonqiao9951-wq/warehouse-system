@@ -1,5 +1,14 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260807_0058 - Inventory ledger query indexes
+
+- Added tenant-leading indexes for transaction type, part, source warehouse,
+  destination warehouse, accountable user, and work order with creation time.
+- Added the read-only business inventory ledger API, tenant-referenced filter
+  options, cursor pagination, workflow evidence, and the management workbench.
+- Extends controlled tenant restore compatibility through revision `0058`.
+- Downgrade removes only the six query indexes and does not modify ledger data.
+
 ## 20260807_0057 - Durable operations health history
 
 - Added the platform-global `operations_health_samples` table with one

@@ -2129,6 +2129,42 @@ class InventoryTransaction(Base):
             "organization_id",
             "created_at",
         ),
+        Index(
+            "ix_inventory_tx_org_type_created",
+            "organization_id",
+            "transaction_type",
+            "created_at",
+        ),
+        Index(
+            "ix_inventory_tx_org_part_created",
+            "organization_id",
+            "part_id",
+            "created_at",
+        ),
+        Index(
+            "ix_inventory_tx_org_from_wh_created",
+            "organization_id",
+            "from_warehouse_id",
+            "created_at",
+        ),
+        Index(
+            "ix_inventory_tx_org_to_wh_created",
+            "organization_id",
+            "to_warehouse_id",
+            "created_at",
+        ),
+        Index(
+            "ix_inventory_tx_org_user_created",
+            "organization_id",
+            "user_id",
+            "created_at",
+        ),
+        Index(
+            "ix_inventory_tx_org_work_order_created",
+            "organization_id",
+            "work_order_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
