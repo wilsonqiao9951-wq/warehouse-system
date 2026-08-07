@@ -39,14 +39,14 @@ Status legend:
 - `Implemented` Inventory transaction table and API
 - `Implemented` Inventory balance API
 - `Implemented` Van inventory view per employee
-- `Partial` Full transaction ledger UI (backend available, dedicated frontend ledger page pending)
-- `Unknown` Physical inventory count cycle workflows and approval process
+- `Implemented` Full transaction ledger UI with server-side part, warehouse, date, type, user, work-order, and cursor filters
+- `Implemented` Physical inventory counts with submission, administrator approval, variance evidence, and uniquely linked adjustments
 
 ### Analytics and Controls
 - `Implemented` Work order profit calculation API
 - `Implemented` Employee performance baseline (open/completed workload)
 - `Implemented` Low stock signal in stock balance
-- `Missing` Abnormal parts usage detection
+- `Implemented` Abnormal parts usage detection and manager-visible severity/reason report
 - `Unknown` Existing AppSheet KPI formulas and dashboard definitions
 
 ### Export / Integration
@@ -181,7 +181,12 @@ AppSheet feature -> OpenPartsFlow module -> API endpoint -> frontend page
 - API endpoint:
   - `POST /api/inventory/transactions`
   - `GET /api/inventory/transactions`
-- Frontend page: Not yet linked in current UI (backend ready)
+  - `GET /api/inventory/ledger`
+  - `GET /api/inventory/ledger/options`
+- Frontend page: `frontend/app/inventory-ledger/page.tsx`
+- The business ledger resolves tenant-owned part, warehouse, bin, work-order,
+  accountable-user, custody-source, and movement-stage evidence. Warehouse,
+  manager, and administrator roles may read it; engineers are denied.
 
 10. AppSheet work-order intake
 - AppSheet feature: Create or update an unclaimed service job through a bot/Webhook
@@ -269,8 +274,9 @@ Phase 1 acceptance gate:
 After Phase 1 sign-off, release improvements in controlled increments:
 
 1. Inventory transaction ledger
-- Dedicated ledger UI with filters (part, warehouse, date, type, user)
-- Reconciliation report and discrepancy drill-down
+- `Implemented` Dedicated ledger UI with filters (part, warehouse, date, type, user, work order)
+- `Implemented` Workflow reconciliation references and work-order drill-down
+- Remaining improvement: dedicated discrepancy exception queue across count and custody workflows
 
 2. Van inventory
 - Van transfer workflows and rebalance recommendations

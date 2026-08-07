@@ -6,6 +6,51 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-07 - AppSheet parity inventory ledger workbench
+
+Status: implemented and locally verified; GitHub CI pending.
+
+Delivered:
+
+- Added a read-only tenant-scoped business ledger for warehouse users,
+  managers, and administrators, while explicitly denying engineers and
+  assistants.
+- Added server-side transaction type, part, source-or-destination warehouse,
+  accountable user, work-order, date-range, and cursor filters with a bounded
+  page size and a maximum 366-day requested range.
+- Resolved part, warehouse, storage-location, work-order, actor, custody source,
+  movement stage, unit cost, and linked workflow evidence without exposing
+  another tenant's labels or filter options.
+- Added the `Inventory Ledger` management page with a 30-day default view,
+  business filters, work-order drill-down, source/destination traceability,
+  value summaries, and progressive pagination.
+- Added migration `0058` with six tenant-leading ledger query indexes and
+  extended controlled restore compatibility through the new revision.
+
+Verification:
+
+- Ledger data resolution, tenant isolation, all filters, cursor pagination,
+  range validation, warehouse access, and engineer denial passed (3 tests);
+  the broader inventory, custody, RBAC, and restore suite passed (41 tests).
+- Fresh SQLite base-to-`0058`, zero-drift check, and
+  `0058 -> 0057 -> 0058` migration cycle passed.
+- Frontend ESLint, TypeScript, and Next.js production build passed for all 41
+  static routes.
+- All 255 backend tests passed.
+- PostgreSQL 16 fresh base-to-`0058`, zero-drift, RLS, all-six-index presence,
+  and `0058 -> 0057 -> 0058` migration rehearsal passed.
+- Updated transitive `nanoid` from `3.3.16` to `3.3.18` after the package audit
+  identified GHSA-2v37-7h3g-55p8; production and full npm audits now report no
+  known vulnerabilities.
+- Python requirement/full-environment audits, dependency consistency, Compose
+  topology, and production API/web image builds passed with no known dependency
+  vulnerabilities.
+- Backed up the local `0057` database as
+  `openpartsflow.pre-0058-20260807-172750.db` (SHA-256
+  `272BF2203D08C2067CA0873FBC0C52B25355E14637FAA641B32E6885D30D28A2`)
+  before upgrading the configured database to `0058` and confirming zero
+  model drift.
+
 ## 2026-08-07 - Phase 9 durable operations history
 
 Status: implemented and locally verified.

@@ -6,11 +6,13 @@ export default function ManagerShell({
   title,
   subtitle,
   metrics,
+  showDefaultControls = true,
   children
 }: {
   title: string;
   subtitle?: string;
   metrics?: Metric[];
+  showDefaultControls?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -32,15 +34,17 @@ export default function ManagerShell({
             {subtitle}
           </p>
         )}
-        <div className="two-col" style={{ marginTop: 8 }}>
-          <input placeholder="Search…" />
-          <select defaultValue="">
-            <option value="">All Status</option>
-            <option value="open">open</option>
-            <option value="in_progress">in_progress</option>
-            <option value="completed">completed</option>
-          </select>
-        </div>
+        {showDefaultControls && (
+          <div className="two-col" style={{ marginTop: 8 }}>
+            <input placeholder="Search…" />
+            <select defaultValue="">
+              <option value="">All Status</option>
+              <option value="open">open</option>
+              <option value="in_progress">in_progress</option>
+              <option value="completed">completed</option>
+            </select>
+          </div>
+        )}
       </div>
       {children}
     </section>
