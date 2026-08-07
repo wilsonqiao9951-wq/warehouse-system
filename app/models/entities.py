@@ -2409,6 +2409,22 @@ class ImportBatch(Base):
 
 class UserInvitation(Base):
     __tablename__ = "user_invitations"
+    __table_args__ = (
+        CheckConstraint(
+            "delivery_status IN ('manual', 'pending', 'sent', 'failed')",
+            name="ck_user_invitations_delivery_status",
+        ),
+        CheckConstraint(
+            "delivery_attempt_count >= 0",
+            name="ck_user_invitations_delivery_attempt_count_non_negative",
+        ),
+        Index(
+            "ix_user_invitations_org_delivery_created",
+            "organization_id",
+            "delivery_status",
+            "created_at",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
@@ -2417,6 +2433,11 @@ class UserInvitation(Base):
     role: Mapped[UserRole] = mapped_column(SqlEnum(UserRole), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     invited_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    delivery_status: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    delivery_failure_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    delivery_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_delivery_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

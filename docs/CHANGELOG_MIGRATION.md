@@ -805,3 +805,14 @@ Verification: all 209 backend tests passed, including encryption tamper and key-
 - Enabled Cookie sessions for password-confirmed exports, restores, billing operations, form editing, and governed visual-recognition actions instead of retaining Bearer-only business checks.
 
 Verification: all 218 backend tests passed, including Cookie attributes, CSRF absence/mismatch/cross-session rejection, Bearer precedence, engineer-device binding, password-confirmed audit export, logout/revocation, and MFA Cookie issuance; frontend ESLint, TypeScript, and the production build passed for all 40 static routes; Python requirement/full-environment and full/production npm audits reported 0 known vulnerabilities; production configuration, Compose contract/configuration, and API/web image builds passed.
+
+## 20260807_0051 - Verified invitation email delivery
+
+- Added fail-closed production/staging employee invitations over the validated TLS SMTP transport shared with password reset.
+- Removed raw sign-up URLs from production administrator responses; only the invited mailbox receives the random single-use capability.
+- Added tenant-scoped delivery status, attempt count, safe failure code, and delivery timestamps without retaining raw tokens.
+- Fixed same-email invitation supersession to include the organization boundary, preventing one tenant from invalidating another tenant's invitation.
+- Added safe invitation-creation audit evidence, local-development manual links, frontend delivery messaging, production configuration validation, portable-restore compatibility, and migration `0051`.
+- Refuses downgrade while non-manual invitation delivery evidence exists.
+
+Verification: all 225 backend tests passed, including recipient-only token delivery, relay failure evidence, fail-closed production behavior, single-use acceptance, and cross-tenant reissue isolation; fresh base-to-`0051` and `0051 -> 0050 -> 0051` migration rehearsals passed on SQLite; frontend ESLint, TypeScript, and the Next.js production build passed for all 40 static routes; Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.

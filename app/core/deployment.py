@@ -121,8 +121,14 @@ def validate_deployment_settings(config: Settings = settings) -> None:
         from app.services.password_reset_delivery import password_reset_configuration_errors
 
         errors.extend(password_reset_configuration_errors(config))
-        if config.smtp_password and _is_placeholder(config.smtp_password):
-            errors.append("SMTP_PASSWORD must not be a placeholder")
+    if config.invitation_email_enabled:
+        from app.services.password_reset_delivery import invitation_delivery_configuration_errors
+
+        errors.extend(invitation_delivery_configuration_errors(config))
+    if (
+        config.password_reset_email_enabled or config.invitation_email_enabled
+    ) and config.smtp_password and _is_placeholder(config.smtp_password):
+        errors.append("SMTP_PASSWORD must not be a placeholder")
 
     from app.services.mfa import mfa_configuration_errors
 

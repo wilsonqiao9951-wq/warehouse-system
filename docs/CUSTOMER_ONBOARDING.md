@@ -100,6 +100,12 @@ The preview shows current quantity, proposed opening quantity and projected quan
 
 The customer signs off on the part catalog and opening balances. Then import users, warehouses, parts, stock and open work orders in that order. Run a limited pilot before broad rollout.
 
+For production employee onboarding, configure and verify the TLS SMTP relay and
+set `INVITATION_EMAIL_ENABLED=true` before administrators invite users. Confirm
+that the invited employee receives the message in the intended mailbox; never
+copy invitation URLs through administrator chat, tickets, or onboarding notes.
+The API intentionally does not reveal production invitation links.
+
 ## 6. Billing lifecycle binding
 
 In `/platform`, select **Billing lifecycle** for the customer. Use `manual` mode

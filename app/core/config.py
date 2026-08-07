@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     smtp_use_starttls: bool = True
     smtp_use_ssl: bool = False
     smtp_timeout_seconds: int = 10
+    invitation_email_enabled: bool = False
     invitation_expire_hours: int = 72
     frontend_public_url: str = "http://localhost:3000"
     max_image_upload_bytes: int = 10 * 1024 * 1024

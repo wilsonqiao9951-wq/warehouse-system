@@ -118,6 +118,39 @@ def test_password_reset_email_configuration_is_fail_closed():
         )
 
 
+def test_invitation_email_configuration_is_fail_closed():
+    safe = deployment_settings(
+        invitation_email_enabled=True,
+        auth_email_from="OpenPartsFlow <security@example.com>",
+        smtp_host="smtp.example.com",
+        smtp_port=587,
+        smtp_username="relay-user",
+        smtp_password="secure-relay-password",
+        smtp_use_starttls=True,
+        smtp_use_ssl=False,
+    )
+    validate_deployment_settings(safe)
+
+    with pytest.raises(DeploymentConfigurationError, match="SMTP_HOST"):
+        validate_deployment_settings(
+            deployment_settings(
+                invitation_email_enabled=True,
+                auth_email_from="security@example.com",
+                smtp_host="",
+            )
+        )
+    with pytest.raises(DeploymentConfigurationError, match="SMTP_PASSWORD"):
+        validate_deployment_settings(
+            deployment_settings(
+                invitation_email_enabled=True,
+                auth_email_from="security@example.com",
+                smtp_host="smtp.example.com",
+                smtp_username="relay-user",
+                smtp_password="change-me",
+            )
+        )
+
+
 def test_stripe_production_configuration_is_fail_closed():
     safe = deployment_settings(
         stripe_billing_enabled=True,

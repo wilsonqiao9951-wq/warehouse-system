@@ -130,7 +130,15 @@ export default function EmployeesPage() {
             </p>
           )}
           {inviteError && <div className="error">{inviteError}</div>}
-          {createdInvite && <div className="success" style={{ marginTop: 12 }}>Invitation link (shown once): <a href={createdInvite.invitation_url}>{createdInvite.invitation_url}</a></div>}
+          {createdInvite && (
+            <div className="success" style={{ marginTop: 12 }}>
+              {createdInvite.invitation_url ? (
+                <>Local development invitation link (shown once): <a href={createdInvite.invitation_url}>{createdInvite.invitation_url}</a></>
+              ) : (
+                <>Invitation email queued for {createdInvite.email}. For account security, the sign-up link is sent only to the invited employee.</>
+              )}
+            </div>
+          )}
         </div>
       )}
       <table>
