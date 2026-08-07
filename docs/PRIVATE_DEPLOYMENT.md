@@ -55,13 +55,18 @@ chmod 600 .env.production
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Replace every `CHANGE_ME` value. Use the same URL-encoded database password in
-`POSTGRES_PASSWORD` and `DATABASE_URL`. `IMAGE_TAG` must be an immutable release
-or commit identifier, and `VCS_REF` must be the full source commit SHA.
+Replace every `CHANGE_ME` value. Generate different owner and application
+database passwords. `MIGRATION_DATABASE_URL` must use `POSTGRES_OWNER_USER` and
+`POSTGRES_PASSWORD`; `DATABASE_URL` must use the restricted `POSTGRES_APP_USER`
+and `POSTGRES_APP_PASSWORD`. `IMAGE_TAG` must be an immutable release or commit
+identifier, and `VCS_REF` must be the full source commit SHA.
 
 Important configuration rules:
 
 - Production and staging require PostgreSQL; SQLite is rejected.
+- The API role must be `NOSUPERUSER NOBYPASSRLS NOINHERIT`; it must never own
+  tables. The migration-owner credential is available only to the one-shot
+  migrator.
 - `JWT_SECRET_KEY` must be a non-placeholder secret of at least 32 characters.
 - `FRONTEND_PUBLIC_URL` and every CORS origin must be an exact HTTPS origin.
 - Production CORS never inherits localhost development origins.
@@ -86,7 +91,10 @@ docker compose --env-file .env.production -f docker-compose.production.yml up -d
 
 Compose waits for PostgreSQL, runs `alembic upgrade head` exactly once, waits
 for API readiness, and then starts the web proxy. The API itself never mutates
-the database schema during startup.
+the database schema during startup. A fresh database volume creates the
+restricted application role automatically. Existing-volume upgrades must run
+the idempotent role bootstrap before the API switches credentials; follow
+[`POSTGRES_RLS.md`](POSTGRES_RLS.md).
 
 Verify the deployment before admitting users:
 
@@ -95,6 +103,13 @@ docker compose --env-file .env.production -f docker-compose.production.yml ps
 curl --fail http://127.0.0.1:8080/health/live
 curl --fail http://127.0.0.1:8080/health/ready
 docker compose --env-file .env.production -f docker-compose.production.yml logs --no-log-prefix migrate api web
+```
+
+In an isolated maintenance check, run the PostgreSQL RLS verifier with the
+migration-owner URL before admitting users:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml run --rm migrate python -m scripts.verify_postgres_rls
 ```
 
 Repeat the probes through the public HTTPS hostname. A ready response requires

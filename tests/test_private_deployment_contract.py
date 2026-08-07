@@ -21,6 +21,25 @@ def test_production_compose_keeps_data_private_and_migrations_one_shot():
     assert services["db"]["networks"] == ["data"]
 
     assert services["migrate"]["command"] == ["alembic", "upgrade", "head"]
+    assert services["migrate"]["environment"]["DATABASE_URL"].startswith(
+        "${MIGRATION_DATABASE_URL:"
+    )
+    assert services["api"]["environment"]["DATABASE_URL"].startswith(
+        "${DATABASE_URL:"
+    )
+    assert (
+        services["migrate"]["environment"]["DATABASE_URL"]
+        != services["api"]["environment"]["DATABASE_URL"]
+    )
+    assert services["db"]["environment"]["POSTGRES_USER"].startswith(
+        "${POSTGRES_OWNER_USER:"
+    )
+    assert services["db"]["environment"]["POSTGRES_APP_USER"].startswith(
+        "${POSTGRES_APP_USER:"
+    )
+    assert any(
+        "init-app-role.sh" in volume for volume in services["db"]["volumes"]
+    )
     assert "--proxy-headers" in services["api"]["command"]
     assert "--forwarded-allow-ips=*" in services["api"]["command"]
     assert services["api"]["networks"] == ["edge", "data"]
@@ -60,6 +79,18 @@ def test_runtime_services_are_non_root_read_only_and_have_explicit_writes():
         "private_uploads:/app/data/private",
         "restore_rollbacks:/app/data/rollbacks",
     }
+
+
+def test_postgres_runtime_role_bootstrap_forbids_rls_bypass():
+    script = (ROOT / "deploy" / "postgres" / "init-app-role.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "NOSUPERUSER" in script
+    assert "NOBYPASSRLS" in script
+    assert "NOINHERIT" in script
+    assert "ALTER DEFAULT PRIVILEGES" in script
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE" in script
 
 
 def test_proxy_exposes_only_allowlisted_backend_routes_and_security_headers():

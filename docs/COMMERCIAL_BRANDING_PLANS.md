@@ -192,7 +192,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260807_0052` before starting the updated application:
+Apply migration `20260807_0053` before starting the updated application:
 
 ```bash
 alembic upgrade head
@@ -211,10 +211,15 @@ exists. Other guarded downgrades are refused when the corresponding customer
 evidence exists.
 Revision `0052` adds versioned disaster-recovery retention settings, fixed
 rollback expiry, purge attribution, and guarded cleanup indexes.
+Revision `0053` enables and forces tenant read/write row-level security on all
+current PostgreSQL tenant tables. Production now separates the schema-owner
+migration credential from the restricted `NOBYPASSRLS` application credential.
 
-## Next Phase 9 batches
+## Phase 9 deployment defense
 
-- PostgreSQL row-level security deployment defense in depth
+PostgreSQL row-level security, transaction-local tenant scope, real-database CI
+verification, and split migration/runtime database roles are implemented. See
+[`POSTGRES_RLS.md`](POSTGRES_RLS.md).
 
 Provider-specific Stripe checkout, invoices, taxes, refunds, and restricted
 billing recovery; administrator MFA and account recovery; verified invitation

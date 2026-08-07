@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.database import set_platform_database_scope
 from app.models import (
     AuditLog,
     BillingLifecycleEvent,
@@ -269,7 +270,7 @@ def reconcile_all_billing(
     total_created = 0
     total_resolved = 0
     organizations_checked = 0
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     begin_commercial_write(db)
     organizations = db.scalars(
         select(Organization).order_by(Organization.id).with_for_update()

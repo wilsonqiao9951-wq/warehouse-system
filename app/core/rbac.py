@@ -8,7 +8,7 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import Session, with_loader_criteria
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, set_tenant_database_scope
 from app.core.permissions import effective_permission_codes
 from app.core.security import decode_access_token
 from app.services.browser_sessions import (
@@ -190,7 +190,7 @@ def get_current_actor(
     x_csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
 ) -> Actor:
     if not settings.rbac_enforce:
-        db.info["organization_id"] = 1
+        set_tenant_database_scope(db, 1)
         return Actor(
             user_id=None,
             role=UserRole.ADMIN,
@@ -262,7 +262,7 @@ def get_current_actor(
         organization,
         platform_admin=user.is_platform_admin,
     )
-    db.info["organization_id"] = user.organization_id
+    set_tenant_database_scope(db, user.organization_id)
     permission_overrides = {
         row.permission_code: row.effect == "allow"
         for row in db.scalars(

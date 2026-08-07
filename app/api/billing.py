@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, set_platform_database_scope
 from app.core.rbac import (
     Actor,
     get_current_actor,
@@ -592,7 +592,7 @@ async def receive_stripe_billing_webhook(
             organization_id = int(organization_value)
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Stripe checkout is missing tenant metadata") from None
-        db.info.pop("organization_id", None)
+        set_platform_database_scope(db)
         organization = lock_organization(db, organization_id)
         account = _stripe_account_for_org(db, organization_id, create=True)
         customer_id = obj.get("customer")
@@ -712,7 +712,7 @@ async def receive_stripe_billing_webhook(
     if not isinstance(subscription_id, str) or not subscription_id.startswith("sub_"):
         raise HTTPException(status_code=422, detail="Stripe event is missing a subscription")
 
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     account = db.scalar(
         select(OrganizationBillingAccount).where(
             OrganizationBillingAccount.provider == "stripe",
@@ -1045,7 +1045,7 @@ def create_stripe_refund(
         require_stripe_configuration()
     except StripeConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     organization = lock_organization(db, payload.organization_id)
     account = _stripe_account_for_org(db, organization.id, create=False)
     if not account or not account.external_customer_id:
@@ -1211,7 +1211,7 @@ def list_platform_billing_accounts(
     actor: Actor = Depends(get_current_actor),
 ):
     require_platform_admin(actor)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     accounts = db.scalars(
         select(OrganizationBillingAccount).order_by(OrganizationBillingAccount.id)
     ).all()
@@ -1230,7 +1230,7 @@ def put_platform_billing_account(
 ):
     require_platform_admin(actor)
     _require_account_reauthentication(db, actor, payload.account_password)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     organization = lock_organization(db, organization_id)
     account = db.scalar(
         select(OrganizationBillingAccount)
@@ -1314,7 +1314,7 @@ def list_platform_billing_events(
     actor: Actor = Depends(get_current_actor),
 ):
     require_platform_admin(actor)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     query = select(BillingLifecycleEvent)
     if organization_id is not None:
         query = query.where(BillingLifecycleEvent.organization_id == organization_id)
@@ -1339,7 +1339,7 @@ def list_platform_subscription_notices(
     actor: Actor = Depends(get_current_actor),
 ):
     require_platform_admin(actor)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     query = select(SubscriptionNotice)
     if organization_id is not None:
         query = query.where(SubscriptionNotice.organization_id == organization_id)
@@ -1363,7 +1363,7 @@ def reconcile_platform_billing(
     actor: Actor = Depends(get_current_actor),
 ):
     require_platform_admin(actor)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     stats = reconcile_all_billing(db)
     db.commit()
     return BillingReconciliationRead(
@@ -1471,7 +1471,7 @@ def get_platform_commercial_report(
     selected = period_start or current_usage_period()
     if selected.day != 1:
         raise HTTPException(status_code=422, detail="Report period must start on day one")
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     return _platform_commercial_rows(db, selected)
 
 
@@ -1483,7 +1483,7 @@ def export_platform_commercial_report(
 ):
     require_platform_admin(actor)
     _require_account_reauthentication(db, actor, payload.account_password)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     report_rows = _platform_commercial_rows(db, payload.period_start)
     rows: list[list[object]] = [[
         "organization_id",

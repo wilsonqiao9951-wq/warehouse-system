@@ -16,6 +16,7 @@ import httpx
 from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
+from app.core.database import set_tenant_database_scope
 from app.models import (
     ExternalIntegration,
     ExternalSyncLog,
@@ -317,7 +318,7 @@ def process_due_deliveries(
                 log = db.get(ExternalSyncLog, log_id)
                 if not log:
                     continue
-                db.info["organization_id"] = log.organization_id
+                set_tenant_database_scope(db, log.organization_id)
                 deliver_outbound_event(db, log_id)
                 processed += 1
         except Exception:

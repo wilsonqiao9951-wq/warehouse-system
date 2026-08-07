@@ -1,27 +1,54 @@
-# Multi-tenancy implementation plan
+# Multi-tenancy implementation status
 
-OpenPartsFlow is being migrated from a single-company application to a tenant-aware SaaS platform.
+OpenPartsFlow now enforces tenant ownership at the API, ORM, and PostgreSQL
+database layers. Multi-customer operation is no longer dependent on callers
+remembering to add an `organization_id` filter.
 
-## Current foundation
+## Active controls
 
-- `organizations` is the tenant root entity.
-- Core operational records carry a non-null `organization_id` foreign key.
-- Existing records are assigned to organization `1` (`default`) during migration.
-- API response models expose `organization_id` for verification and support diagnostics.
-- Authenticated `X-User-Id` actors derive their organization from the server-side user record.
-- ORM reads are automatically scoped to the actor's organization.
-- New tenant-owned records automatically inherit the actor's organization.
-- Cross-organization object references are rejected in core operational flows.
-- Global uniqueness rules remain in place during this compatibility phase.
+- `organizations` is the tenant root and every tenant model has a non-null
+  `organization_id` foreign key.
+- Formal Cookie/Bearer authentication resolves the user from server-owned
+  records and verifies the signed organization and revocable auth version.
+- Every authenticated session is narrowed to the resolved organization before
+  business queries run. API-key requests are narrowed after the key owner is
+  resolved.
+- ORM reads receive tenant loader criteria and ORM writes inherit or validate
+  the active organization.
+- Cross-organization object references are rejected in operational,
+  inventory, integration, billing, backup, and knowledge workflows.
+- PostgreSQL revision `20260807_0053` enables and forces one read/write RLS
+  policy on every tenant model. A contract test requires the migration table
+  list to remain identical to the ORM tenant model registry.
+- Transaction-local PostgreSQL settings carry the tenant scope and are cleared
+  automatically on commit/rollback before a pooled connection can be reused.
+- Platform-wide access is opened only for authentication/bootstrap resolution,
+  verified platform-administrator operations, and explicitly reviewed
+  cross-tenant workers.
+- Production uses separate migration-owner and restricted application roles;
+  the application role is `NOSUPERUSER NOBYPASSRLS NOINHERIT`.
 
-## Required next phase
+## Defense model
 
-The core isolation layer is now active, but the temporary `X-User-Id` authentication mechanism is not suitable for selling the product. Before onboarding more than one production customer:
+```text
+authenticated identity / API key
+  -> application authorization and ownership checks
+  -> ORM tenant read/write scope
+  -> transaction-local PostgreSQL RLS context
+  -> forced database read/write policy
+```
 
-1. Replace `X-User-Id` with formal authentication and account lifecycle management.
-2. Complete cross-organization denial tests for every API and import/export domain.
-3. Replace global unique constraints with organization-scoped composite constraints where appropriate.
-4. Enable PostgreSQL Row-Level Security as defense in depth.
-5. Add a platform-admin control plane for creating, suspending and supporting organizations.
+Frontend capability flags remain usability hints only. Work-order ownership,
+registered-device, claim-version, completion-password, role, permission, and
+tenant checks are all enforced server-side in addition to RLS.
 
-Until those steps are complete, production must continue to operate as a single organization.
+Operational setup, verification, upgrade, and rollback requirements are in
+[`POSTGRES_RLS.md`](POSTGRES_RLS.md).
+
+## Ongoing change rule
+
+Any new model containing `organization_id` must be added to `TENANT_MODELS` and
+the next PostgreSQL migration must add the forced policy before release. CI
+fails when the model and migration coverage sets differ. New platform-wide or
+background access paths must use the reviewed scope helpers and include
+cross-tenant denial tests.

@@ -10,7 +10,7 @@ from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, set_platform_database_scope
 from app.core.operations import operations_monitor, utc_iso, utcnow_naive
 from app.core.rbac import Actor, get_current_actor, require_platform_admin
 from app.core.security import verify_password
@@ -112,7 +112,7 @@ def platform_operations_summary(
     actor: Actor = Depends(get_current_actor),
 ):
     require_platform_admin(actor)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     response.headers["Cache-Control"] = "no-store"
     now = utcnow_naive()
 
@@ -333,7 +333,7 @@ def recover_stale_outbound_deliveries(
 ):
     require_platform_admin(actor)
     _require_platform_reauthentication(db, actor, payload.account_password)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
 
     queued_at = utcnow_naive()
     stale_before = queued_at - timedelta(

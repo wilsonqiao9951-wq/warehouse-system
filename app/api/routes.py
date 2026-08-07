@@ -15,7 +15,7 @@ from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal, get_db
+from app.core.database import SessionLocal, get_db, set_platform_database_scope
 from app.core.config import settings
 from app.core.operations import operations_monitor
 from app.core.permissions import REPORTS_READ, USERS_READ
@@ -2014,7 +2014,7 @@ def delete_organization_domain(
 @router.get("/platform/organizations", response_model=list[OrganizationRead])
 def list_organizations(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_platform_admin(actor)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     organizations = db.scalars(select(Organization).order_by(Organization.id.asc())).all()
     return [_organization_read(db, organization) for organization in organizations]
 
@@ -2026,7 +2026,7 @@ def create_organization(
     actor: Actor = Depends(get_current_actor),
 ):
     require_platform_admin(actor)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     slug = payload.slug.strip().lower()
     email = payload.admin_email.strip().lower()
     if db.scalar(select(Organization.id).where(Organization.slug == slug)):
@@ -2082,7 +2082,7 @@ def update_organization(
     actor: Actor = Depends(get_current_actor),
 ):
     require_platform_admin(actor)
-    db.info.pop("organization_id", None)
+    set_platform_database_scope(db)
     organization = lock_organization(db, organization_id)
     if organization.settings_version != payload.expected_version:
         raise HTTPException(

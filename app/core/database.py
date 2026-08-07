@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
 
@@ -28,7 +28,12 @@ def configure_sqlite_connection(dbapi_connection, _connection_record) -> None:
 if engine.dialect.name == "sqlite":
     event.listen(engine, "connect", configure_sqlite_connection)
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+    info={"rls_platform_access": True},
+)
 
 
 class Base(DeclarativeBase):
@@ -37,6 +42,45 @@ class Base(DeclarativeBase):
 
 class DatabaseSchemaError(RuntimeError):
     """The configured database is not safe to serve with this application."""
+
+
+def _apply_postgres_rls_scope(session: Session, connection) -> None:
+    if connection.dialect.name != "postgresql":
+        return
+    organization_id = session.info.get("organization_id")
+    platform_access = bool(session.info.get("rls_platform_access", True))
+    connection.execute(
+        text(
+            "SELECT "
+            "set_config('openpartsflow.organization_id', :organization_id, true), "
+            "set_config('openpartsflow.platform_access', :platform_access, true)"
+        ),
+        {
+            "organization_id": str(organization_id) if organization_id else "",
+            "platform_access": "on" if platform_access else "off",
+        },
+    )
+
+
+@event.listens_for(Session, "after_begin")
+def _initialize_postgres_rls_scope(session, _transaction, connection) -> None:
+    _apply_postgres_rls_scope(session, connection)
+
+
+def set_tenant_database_scope(db: Session, organization_id: int) -> None:
+    if organization_id < 1:
+        raise ValueError("organization_id must be positive")
+    db.info["organization_id"] = organization_id
+    db.info["rls_platform_access"] = False
+    if db.in_transaction():
+        _apply_postgres_rls_scope(db, db.connection())
+
+
+def set_platform_database_scope(db: Session) -> None:
+    db.info.pop("organization_id", None)
+    db.info["rls_platform_access"] = True
+    if db.in_transaction():
+        _apply_postgres_rls_scope(db, db.connection())
 
 
 def get_db():

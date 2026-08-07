@@ -1512,3 +1512,47 @@ Verification:
 - All 230 backend tests passed across authentication, tenant isolation, engineer ownership, inventory custody, billing, integrations, backups/restores, AI, and offline workflows.
 - Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.
 - Backed up the local `0051` database as `openpartsflow.pre-0052-20260807-153430.db` (SHA-256 `484140685A362D342A7B6942E2A587697A11EEB5423D096F78890D868B33B87F`) before upgrading the configured database to `0052` head.
+
+## 2026-08-07 - Phase 9 PostgreSQL tenant row-level security
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added database-enforced tenant read/write isolation to all 51 current tenant
+  tables with PostgreSQL `ENABLE/FORCE ROW LEVEL SECURITY` and a shared policy.
+- Added transaction-local organization/platform context so pooled connections
+  automatically lose their prior scope on commit or rollback.
+- Narrowed authenticated user and external API-key sessions immediately after
+  server-owned tenant identity resolution; retained explicit reviewed platform
+  scope for platform administrators, Stripe callbacks, billing reconciliation,
+  delivery scanning, and operations recovery.
+- Replaced all direct tenant-scope `Session.info` mutations in application code
+  with tested tenant/platform database scope helpers.
+- Split production database credentials between a one-shot migration owner and
+  a restricted API role that cannot be superuser, inherit owner capability, or
+  bypass RLS.
+- Added an idempotent fresh/existing-volume role bootstrap, Compose contract
+  coverage, a real PostgreSQL verification command, CI integration, migration
+  `0053`, controlled-restore compatibility, and an operator runbook.
+
+Verification:
+
+- All 234 backend tests passed across authentication, tenant isolation,
+  engineer ownership, inventory custody, billing, integrations,
+  backups/restores, AI, and offline workflows.
+- PostgreSQL 16 base-to-`0053`, repeat role bootstrap,
+  `0053 -> 0052 -> 0053`, empty-scope denial, single-tenant visibility,
+  cross-tenant write rejection, platform access, 51-policy coverage, and
+  restricted-role capability checks passed.
+- SQLite base-to-`0053` and `0053 -> 0052 -> 0053` passed.
+- Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed
+  for all 40 static routes.
+- Python dependency consistency, requirement/full-environment vulnerability
+  audits, full/production npm audits, production configuration, Compose
+  configuration, and API/web image builds passed with no known dependency
+  vulnerabilities.
+- Backed up the local `0052` database as
+  `openpartsflow.pre-0053-20260807-155052.db` (SHA-256
+  `ACB810C4719C364698F373CDC92DE3479C3C879DD204290B2D04C0FFEEEC43D2`)
+  before upgrading the configured database to `0053` head.

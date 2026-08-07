@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import get_db, set_tenant_database_scope
 from app.core.permissions import INTEGRATIONS_MANAGE, INTEGRATIONS_READ
 from app.core.rbac import Actor, get_current_actor, require_permission
 from app.models import (
@@ -111,7 +111,7 @@ def get_external_integration(
         raise HTTPException(status_code=401, detail="Invalid or inactive API key")
     organization = db.get(Organization, candidate.organization_id)
     require_subscription_access(organization)
-    db.info["organization_id"] = candidate.organization_id
+    set_tenant_database_scope(db, candidate.organization_id)
     return candidate
 
 
