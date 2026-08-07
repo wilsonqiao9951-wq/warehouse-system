@@ -22,9 +22,19 @@ export default function InventoryCountsPage() {
       const [countRows, warehouseRows, partRows] = await Promise.all([
         api.listInventoryCounts(), api.listWarehouses(), api.listParts()
       ]);
+      const countMatch = window.location.hash.match(/^#count-(\d+)$/);
+      if (countMatch) {
+        const target = await api.getInventoryCount(Number(countMatch[1]));
+        if (!countRows.some((item) => item.id === target.id)) countRows.unshift(target);
+      }
       setCounts(countRows);
       setWarehouses(warehouseRows.filter((row) => row.is_active !== false && row.warehouse_type !== "van"));
       setParts(partRows.filter((row) => row.is_active));
+      if (countMatch) {
+        window.requestAnimationFrame(() => {
+          document.querySelector(window.location.hash)?.scrollIntoView({ block: "center" });
+        });
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load inventory counts");
     }
@@ -95,7 +105,7 @@ export default function InventoryCountsPage() {
 
       {counts.map((item) => {
         const draft = lineDrafts[item.id] || { partId: "" as const, quantity: 0 };
-        return <section className="card" key={item.id}>
+        return <section className="card" id={`count-${item.id}`} key={item.id}>
           <div className="section-heading-row"><div><h3 style={{ margin: 0 }}>{item.title}</h3><span className="muted">#{item.id} · {item.warehouse_name} · v{item.version}</span></div>
             <span className={`status-pill status-pill--${item.status}`}>{item.status}</span></div>
           {item.can_edit && <div className="form-grid" style={{ marginTop: 12 }}>

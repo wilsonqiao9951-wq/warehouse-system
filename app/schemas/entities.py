@@ -1978,6 +1978,52 @@ class InventoryLedgerOptionsRead(BaseModel):
     transaction_types: list[TransactionType] = Field(default_factory=list)
 
 
+class InventoryReconciliationExceptionRead(BaseModel):
+    id: str
+    source: Literal["replenishment", "vehicle_return", "inventory_count"]
+    kind: Literal[
+        "legacy_reconciliation",
+        "custody_ledger_mismatch",
+        "count_pending_variance",
+        "count_ledger_mismatch",
+    ]
+    severity: Literal["critical", "warning"]
+    entity_type: Literal[
+        "replenishment_request",
+        "vehicle_return_request",
+        "inventory_count",
+    ]
+    entity_id: int
+    line_id: int | None = None
+    status: str
+    title: str
+    detail: str
+    part_id: int
+    part_number: str
+    part_name: str
+    warehouse_label: str | None = None
+    quantity: int | None = None
+    variance_quantity: int | None = None
+    shipment_transaction_id: int | None = None
+    receipt_transaction_id: int | None = None
+    adjustment_transaction_id: int | None = None
+    action_route: str
+    action_label: str
+    updated_at: datetime
+
+
+class InventoryReconciliationPageRead(BaseModel):
+    items: list[InventoryReconciliationExceptionRead] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    critical: int = Field(ge=0)
+    warning: int = Field(ge=0)
+    replenishment: int = Field(ge=0)
+    vehicle_return: int = Field(ge=0)
+    inventory_count: int = Field(ge=0)
+    truncated: bool = False
+    candidate_scan_limit: int = Field(ge=1)
+
+
 class LocationStockBalance(BaseModel):
     part_id: int
     part_number: str

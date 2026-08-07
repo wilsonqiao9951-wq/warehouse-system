@@ -6070,6 +6070,36 @@ def list_replenishment_requests(
     return [_replenishment_read_for_actor(db, actor, item) for item in rows]
 
 
+@router.get(
+    "/inventory/replenishment-requests/{request_id}",
+    response_model=ReplenishmentRequestRead,
+)
+def get_replenishment_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    item = db.scalar(
+        select(ReplenishmentRequest).where(
+            ReplenishmentRequest.id == request_id,
+            ReplenishmentRequest.organization_id == actor.organization_id,
+        )
+    )
+    if not item or (
+        actor.role == UserRole.ENGINEER
+        and item.target_user_id != actor.user_id
+    ):
+        raise HTTPException(status_code=404, detail="Replenishment request not found")
+    return _replenishment_read_for_actor(db, actor, item)
+
+
 @router.post(
     "/inventory/replenishment-requests/{request_id}/reconcile",
     response_model=ReplenishmentRequestRead,
@@ -6604,6 +6634,36 @@ def list_vehicle_return_requests(
     return [_vehicle_return_read_for_actor(db, actor, item) for item in rows]
 
 
+@router.get(
+    "/inventory/vehicle-returns/{request_id}",
+    response_model=VehicleReturnRequestRead,
+)
+def get_vehicle_return_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(
+        actor,
+        UserRole.ADMIN,
+        UserRole.MANAGER,
+        UserRole.WAREHOUSE,
+        UserRole.ENGINEER,
+    )
+    item = db.scalar(
+        select(VehicleReturnRequest).where(
+            VehicleReturnRequest.id == request_id,
+            VehicleReturnRequest.organization_id == actor.organization_id,
+        )
+    )
+    if not item or (
+        actor.role == UserRole.ENGINEER
+        and item.engineer_id != actor.user_id
+    ):
+        raise HTTPException(status_code=404, detail="Vehicle return request not found")
+    return _vehicle_return_read_for_actor(db, actor, item)
+
+
 @router.post("/inventory/vehicle-returns/{request_id}/actions", response_model=VehicleReturnRequestRead)
 def act_on_vehicle_return_request(
     request_id: int,
@@ -6871,6 +6931,24 @@ def list_inventory_counts(
     if status:
         stmt = stmt.where(InventoryCountSession.status == status)
     return [_inventory_count_read(db, actor, item) for item in db.scalars(stmt.limit(limit)).all()]
+
+
+@router.get("/inventory/counts/{count_id}", response_model=InventoryCountRead)
+def get_inventory_count(
+    count_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    item = db.scalar(
+        select(InventoryCountSession).where(
+            InventoryCountSession.id == count_id,
+            InventoryCountSession.organization_id == actor.organization_id,
+        )
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Inventory count not found")
+    return _inventory_count_read(db, actor, item)
 
 
 @router.put("/inventory/counts/{count_id}/lines", response_model=InventoryCountRead)

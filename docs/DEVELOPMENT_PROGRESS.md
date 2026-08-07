@@ -6,9 +6,57 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
-## 2026-08-07 - AppSheet parity inventory ledger workbench
+## 2026-08-07 - Inventory reconciliation exception workbench
 
 Status: implemented and locally verified; GitHub CI pending.
+
+Delivered:
+
+- Added a bounded, tenant-isolated, read-only exception queue across
+  replenishment custody, vehicle returns, physical counts, and their immutable
+  inventory movements.
+- Separates critical evidence mismatches from pending count variances so an
+  operator can distinguish corruption/incomplete custody from normal approval
+  work.
+- Validates movement type, workflow link, movement stage, part, quantity,
+  source/destination warehouse, storage location, and required/forbidden links
+  for the current workflow state.
+- Added source/severity filters, priority ordering, truncation disclosure,
+  workflow evidence IDs, and direct drill-down to the exact replenishment,
+  return, or count even when it is older than the normal 100-row page.
+- Added revision `0059` for the tenant-leading legacy reconciliation scan and
+  extended controlled restore compatibility through the new revision.
+- Kept the queue non-mutating: all correction, approval, and historical
+  reconciliation remains inside the existing password-, device-, version-,
+  role-, and audit-protected workflows.
+
+Verification so far:
+
+- Exception classification, healthy-record exclusion, tenant isolation,
+  filters, response bounds, direct drill-down, warehouse/manager access, and
+  engineer/assistant denial passed (3 tests).
+- Replenishment custody and inventory-count regression suite passed (24 tests).
+- Frontend ESLint, TypeScript, and Next.js production build passed for all 42
+  static routes.
+- All 258 backend tests passed.
+- Fresh SQLite base-to-`0059`, zero-drift, and `0059 -> 0058 -> 0059`
+  migration cycle passed.
+- PostgreSQL 16 fresh base-to-`0059`, index-presence, zero-drift, RLS, and
+  `0059 -> 0058 -> 0059` migration rehearsal passed.
+- Python dependency consistency/requirement audit and full/production npm
+  audits passed with no known vulnerabilities; Compose topology and API/web
+  production images built successfully.
+- Backed up the local `0058` database as
+  `openpartsflow.pre-0059-20260807-174755.db` (SHA-256
+  `BEC7B0BD661F8B3746F1F49CE7FE98876D9C7025BB6D47A780DBB1E9A80C0B1C`)
+  before upgrading the configured database to `0059` and confirming zero
+  model drift.
+
+## 2026-08-07 - AppSheet parity inventory ledger workbench
+
+Status: implemented, locally verified, and published as draft PR #31. GitHub CI
+run 66 passed all backend, frontend, PostgreSQL/RLS, dependency-audit, and
+production-image jobs.
 
 Delivered:
 

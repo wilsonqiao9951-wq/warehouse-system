@@ -98,12 +98,27 @@ export default function WarehouseTasksPage() {
         api.listWarehouses(),
         api.listParts()
       ]);
+      const replenishmentMatch = window.location.hash.match(/^#replenishment-(\d+)$/);
+      const vehicleReturnMatch = window.location.hash.match(/^#vehicle-return-(\d+)$/);
+      if (replenishmentMatch) {
+        const target = await api.getReplenishmentRequest(Number(replenishmentMatch[1]));
+        if (!requestRows.some((item) => item.id === target.id)) requestRows.unshift(target);
+      }
+      if (vehicleReturnMatch) {
+        const target = await api.getVehicleReturnRequest(Number(vehicleReturnMatch[1]));
+        if (!returnRows.some((item) => item.id === target.id)) returnRows.unshift(target);
+      }
       setNotifications(notificationRows);
       setRequests(requestRows);
       setVehicleReturns(returnRows);
       setWarehouses(warehouseRows);
       setParts(partRows);
       setError("");
+      if (replenishmentMatch || vehicleReturnMatch) {
+        window.requestAnimationFrame(() => {
+          document.querySelector(window.location.hash)?.scrollIntoView({ block: "center" });
+        });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to load warehouse tasks.");
     }
@@ -514,7 +529,7 @@ export default function WarehouseTasksPage() {
             {vehicleReturns.map((item) => {
               const returnBusy = busy === `return-${item.id}`;
               return (
-                <article className="job-card replenishment-card" key={item.id}>
+                <article className="job-card replenishment-card" id={`vehicle-return-${item.id}`} key={item.id}>
                   <div className="section-heading-row">
                     <div>
                       <strong>{item.part_number || `Part #${item.part_id}`} — {item.part_name}</strong>
@@ -591,7 +606,7 @@ export default function WarehouseTasksPage() {
                   const hasActions = !item.requires_reconciliation
                     && (item.can_approve || item.can_reject || item.can_start_picking || item.can_ship || item.can_complete || item.can_cancel);
                   return (
-                    <article className="job-card replenishment-card" key={item.id}>
+                    <article className="job-card replenishment-card" id={`replenishment-${item.id}`} key={item.id}>
                       <div className="section-heading-row">
                         <div>
                           <strong>{partLabel(item)}</strong>
