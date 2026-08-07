@@ -215,6 +215,18 @@ def validate_deployment_settings(config: Settings = settings) -> None:
         errors.append(
             "WORKER_LEASE_HEARTBEAT_SECONDS must be no more than one third of WORKER_LEASE_SECONDS"
         )
+    if not 30 <= config.operations_history_interval_seconds <= 900:
+        errors.append(
+            "OPERATIONS_HISTORY_INTERVAL_SECONDS must be between 30 and 900"
+        )
+    if not 1 <= config.operations_history_retention_days <= 365:
+        errors.append(
+            "OPERATIONS_HISTORY_RETENTION_DAYS must be between 1 and 365"
+        )
+    if not 1000 <= config.operations_history_query_max_samples <= 500000:
+        errors.append(
+            "OPERATIONS_HISTORY_QUERY_MAX_SAMPLES must be between 1000 and 500000"
+        )
 
     if errors:
         formatted = "\n".join(f"- {error}" for error in errors)

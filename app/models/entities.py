@@ -366,6 +366,51 @@ class WorkerLease(Base):
     )
 
 
+class OperationsHealthSample(Base):
+    __tablename__ = "operations_health_samples"
+    __table_args__ = (
+        UniqueConstraint(
+            "instance_key",
+            "sampled_at",
+            name="uq_operations_health_instance_sample",
+        ),
+        CheckConstraint(
+            "length(instance_key) = 64",
+            name="ck_operations_health_instance_hash",
+        ),
+        CheckConstraint(
+            "worker_health IN ('ok', 'degraded')",
+            name="ck_operations_health_worker_status",
+        ),
+        CheckConstraint(
+            "uptime_seconds >= 0 AND request_window_seconds >= 1 "
+            "AND request_total >= 0 AND server_errors >= 0 "
+            "AND server_errors <= request_total "
+            "AND average_duration_ms >= 0 AND p95_duration_ms >= 0",
+            name="ck_operations_health_metrics_non_negative",
+        ),
+        Index("ix_operations_health_sampled_at", "sampled_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    instance_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    sampled_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    process_started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    uptime_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_revision: Mapped[str] = mapped_column(String(64), nullable=False)
+    schema_ready: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    worker_health: Mapped[str] = mapped_column(String(16), nullable=False)
+    request_window_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    request_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    server_errors: Mapped[int] = mapped_column(Integer, nullable=False)
+    average_duration_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    p95_duration_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class OrganizationDomain(Base):
     __tablename__ = "organization_domains"
     __table_args__ = (

@@ -195,6 +195,34 @@ export interface OperationsAlert {
   count: number;
 }
 
+export interface OperationsHistoryPoint {
+  bucket_at: string;
+  instances_reporting: number;
+  sample_count: number;
+  schema_not_ready_samples: number;
+  worker_degraded_samples: number;
+  request_window_seconds: number;
+  request_total: number;
+  server_errors: number;
+  server_error_rate: number;
+  average_duration_ms: number;
+  p95_duration_ms: number;
+}
+
+export interface PlatformOperationsHistory {
+  from_at: string;
+  to_at: string;
+  bucket_minutes: number;
+  expected_buckets: number;
+  buckets_present: number;
+  bucket_coverage_rate: number;
+  instances_seen: number;
+  sample_count: number;
+  latest_sample_at?: string | null;
+  truncated: boolean;
+  points: OperationsHistoryPoint[];
+}
+
 export interface PlatformOperationsSummary {
   status: "healthy" | "degraded" | "critical";
   checked_at: string;

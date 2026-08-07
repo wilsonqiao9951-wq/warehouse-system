@@ -4,7 +4,7 @@ from datetime import timedelta
 import json
 from time import perf_counter
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
@@ -27,8 +27,10 @@ from app.models import (
 from app.schemas import (
     OperationsStaleDeliveryRecovery,
     OperationsStaleDeliveryRecoveryRead,
+    PlatformOperationsHistoryRead,
     PlatformOperationsSummaryRead,
 )
+from app.services.operations_history import aggregate_operations_history
 
 
 router = APIRouter(tags=["operations"])
@@ -333,6 +335,30 @@ def platform_operations_summary(
         },
         "alerts": alerts,
     }
+
+
+@router.get(
+    "/api/platform/operations/history",
+    response_model=PlatformOperationsHistoryRead,
+)
+def platform_operations_history(
+    response: Response,
+    hours: int = Query(default=24, ge=1, le=168),
+    bucket_minutes: int = Query(default=15, ge=1, le=60),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    response.headers["Cache-Control"] = "no-store"
+    to_at = utcnow_naive()
+    from_at = to_at - timedelta(hours=hours)
+    return aggregate_operations_history(
+        db,
+        from_at=from_at,
+        to_at=to_at,
+        bucket_minutes=bucket_minutes,
+        max_samples=settings.operations_history_query_max_samples,
+    )
 
 
 @router.post(

@@ -6,6 +6,55 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-07 - Phase 9 durable operations history
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added a platform-global, retention-controlled health sample model and
+  migration `0057` for request-window, schema, worker, and uptime evidence that
+  survives API restarts.
+- Added per-replica sampling without scheduler election, idempotent interval
+  writes, transactional retention cleanup, and non-reversible SHA-256 storage of
+  randomized process identities.
+- Added a bounded, platform-administrator-only history endpoint with explicit
+  truncation, missing-bucket coverage, replica counts, and no tenant, host,
+  request, credential, or exception detail.
+- Correctly aggregates only the last rolling request snapshot per instance and
+  output bucket, avoiding repeated request counts across minute samples.
+- Added 6-hour through 7-day operations views while preserving external
+  synthetic probes as the authoritative SLA source.
+- Added fail-closed production configuration bounds, controlled-restore schema
+  compatibility, RBAC documentation, deployment guidance, and migration notes.
+
+Verification:
+
+- Operations history, live monitoring, authorization, and deployment-setting
+  target suite passed (42 tests), including bounded-query truncation and invalid
+  time-range rejection.
+- Fresh SQLite base-to-`0057`, zero-drift check, and
+  `0057 -> 0056 -> 0057` migration cycle passed.
+- Frontend ESLint, TypeScript, and Next.js production build passed for all 40
+  static routes.
+- All 252 backend tests passed.
+- PostgreSQL 16 fresh base-to-`0057`, zero-drift, RLS, and
+  `0057 -> 0056 -> 0057` rehearsal passed. The operations-history verifier
+  passed eight-replica concurrent writes, same-bucket idempotency, retention,
+  aggregation, and privacy using both owner and restricted
+  `NOSUPERUSER/NOBYPASSRLS` application credentials.
+- The repeatable PostgreSQL operations-history verifier is included in GitHub
+  CI alongside the RLS and worker-lease verifiers.
+- Python dependency consistency, requirement/full-environment vulnerability
+  audits, full/production npm audits, production configuration, Compose
+  topology, and API/web production image builds passed with no known dependency
+  vulnerabilities.
+- Backed up the local `0056` database as
+  `openpartsflow.pre-0057-20260807-170652.db` (SHA-256
+  `6F98273B331D741BC6BDD33787F049F17C148EA0DECCF6ED5C14B493C6C59646`)
+  before upgrading the configured database to `0057` and confirming zero
+  drift.
+
 ## 2026-08-07 - Phase 9 multi-instance worker leases
 
 Status: implemented and locally verified.

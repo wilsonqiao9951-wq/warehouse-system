@@ -1,5 +1,20 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260807_0057 - Durable operations health history
+
+- Added the platform-global `operations_health_samples` table with one
+  idempotent time-bucket sample per randomized API-process identity.
+- Hashes the process identity before storage and excludes all instance
+  identifiers, tenant data, request content, and exception text from the API.
+- Retains schema readiness, worker state, uptime, and bounded rolling request
+  metrics with configurable cadence, retention, and query limits.
+- Added platform-administrator-only history aggregation and the retained-history
+  panel in Platform Operations.
+- Request aggregation uses only the last rolling snapshot per instance in each
+  output bucket, preventing repeated counting across adjacent samples.
+- Downgrade removes only the new global history table and index; controlled
+  tenant restore compatibility is extended through revision `0057`.
+
 ## Purpose
 
 This changelog summarizes migration-related backend upgrades made to align OpenPartsFlow with AppSheet structure while preserving existing logic.

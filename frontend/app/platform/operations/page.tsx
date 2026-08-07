@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import ManagerShell from "@/components/manager-shell";
 import { api } from "@/lib/api";
-import { PlatformOperationsSummary } from "@/types";
+import { PlatformOperationsHistory, PlatformOperationsSummary } from "@/types";
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return "Never";
@@ -22,6 +22,8 @@ function formatUptime(seconds: number): string {
 
 export default function PlatformOperationsPage() {
   const [data, setData] = useState<PlatformOperationsSummary | null>(null);
+  const [history, setHistory] = useState<PlatformOperationsHistory | null>(null);
+  const [historyHours, setHistoryHours] = useState(24);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [recoveryReason, setRecoveryReason] = useState("");
@@ -32,14 +34,20 @@ export default function PlatformOperationsPage() {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      setData(await api.getPlatformOperationsSummary());
+      const bucketMinutes = historyHours <= 24 ? 5 : historyHours <= 72 ? 15 : 60;
+      const [summary, historical] = await Promise.all([
+        api.getPlatformOperationsSummary(),
+        api.getPlatformOperationsHistory(historyHours, bucketMinutes)
+      ]);
+      setData(summary);
+      setHistory(historical);
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load platform operations.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [historyHours]);
 
   useEffect(() => {
     void load();
@@ -83,7 +91,8 @@ export default function PlatformOperationsPage() {
         { label: "Overall", value: data?.status ?? "Loading" },
         { label: "Uptime", value: data ? formatUptime(data.uptime_seconds) : "-" },
         { label: "5m p95", value: data ? `${data.requests.p95_duration_ms.toFixed(1)} ms` : "-" },
-        { label: "5m 5xx", value: data ? `${(data.requests.server_error_rate * 100).toFixed(1)}%` : "-" }
+        { label: "5m 5xx", value: data ? `${(data.requests.server_error_rate * 100).toFixed(1)}%` : "-" },
+        { label: "Observed buckets", value: history ? `${(history.bucket_coverage_rate * 100).toFixed(1)}%` : "-" }
       ]}
     >
       <section className="card">
@@ -129,6 +138,68 @@ export default function PlatformOperationsPage() {
               <small>of {data.data_protection.active_organizations} active customers</small>
             </div>
           </div>
+        )}
+      </section>
+
+      <section className="card">
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div>
+            <h3>Observed service history</h3>
+            <p className="muted">
+              Self-reported samples persist across restarts. Missing buckets are visible, but external synthetic probes remain the authoritative SLA source.
+            </p>
+          </div>
+          <select
+            aria-label="Operations history period"
+            value={historyHours}
+            onChange={(event) => setHistoryHours(Number(event.target.value))}
+          >
+            <option value={6}>Last 6 hours</option>
+            <option value={24}>Last 24 hours</option>
+            <option value={72}>Last 3 days</option>
+            <option value={168}>Last 7 days</option>
+          </select>
+        </div>
+        {history && (
+          <>
+            <div className="pilot-metric-grid" style={{ marginTop: 12 }}>
+              <div className={`pilot-metric${history.bucket_coverage_rate < 0.9 ? " pilot-metric--alert" : ""}`}>
+                <div className="muted">Bucket coverage</div>
+                <div className="metric">{(history.bucket_coverage_rate * 100).toFixed(1)}%</div>
+                <small>{history.buckets_present} of {history.expected_buckets} expected</small>
+              </div>
+              <div className="pilot-metric">
+                <div className="muted">Instances observed</div>
+                <div className="metric">{history.instances_seen}</div>
+                <small>{history.sample_count} retained samples</small>
+              </div>
+              <div className="pilot-metric">
+                <div className="muted">Latest sample</div>
+                <div style={{ fontWeight: 700 }}>{formatTimestamp(history.latest_sample_at)}</div>
+                <small>{history.bucket_minutes}-minute buckets</small>
+              </div>
+            </div>
+            {history.truncated && <p className="notice notice-error">The configured query cap truncated older samples in this period.</p>}
+            <div className="table-wrap" style={{ marginTop: 12 }}>
+              <table>
+                <thead><tr><th>Bucket</th><th>Instances</th><th>Requests</th><th>5xx</th><th>p95</th><th>Worker/schema risk</th></tr></thead>
+                <tbody>
+                  {history.points.length === 0 ? (
+                    <tr><td colSpan={6}>No retained samples yet. The first sample is written when the API starts.</td></tr>
+                  ) : history.points.slice(-12).reverse().map((point) => (
+                    <tr key={point.bucket_at}>
+                      <td>{formatTimestamp(point.bucket_at)}</td>
+                      <td>{point.instances_reporting}</td>
+                      <td>{point.request_total}</td>
+                      <td>{point.server_errors} ({(point.server_error_rate * 100).toFixed(1)}%)</td>
+                      <td>{point.p95_duration_ms.toFixed(1)} ms</td>
+                      <td>{point.worker_degraded_samples} / {point.schema_not_ready_samples}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 
