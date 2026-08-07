@@ -569,6 +569,102 @@ export interface CrossRegionTransfer {
   to_region_name: string;
 }
 
+export interface AnalyticsKpi {
+  code: string;
+  label: string;
+  value?: number | null;
+  unit: "count" | "percent" | "hours" | "currency" | string;
+  previous_value?: number | null;
+  delta_percent?: number | null;
+  definition: string;
+}
+
+export interface AnalyticsTrendPoint {
+  bucket_start: string;
+  label: string;
+  created_count: number;
+  completed_count: number;
+  first_time_fix_rate?: number | null;
+  rework_rate?: number | null;
+  average_repair_minutes?: number | null;
+  revenue: number;
+  contribution: number;
+}
+
+export interface AnalyticsEngineerRow {
+  engineer_id?: number | null;
+  engineer_name: string;
+  completed_count: number;
+  first_time_fix_rate?: number | null;
+  first_time_fix_coverage: number;
+  rework_rate: number;
+  average_repair_minutes?: number | null;
+  parts_cost: number;
+  revenue: number;
+  contribution: number;
+}
+
+export interface AnalyticsJobTypeRow {
+  job_type: string;
+  completed_count: number;
+  first_time_fix_rate?: number | null;
+  rework_rate: number;
+  average_repair_minutes?: number | null;
+  contribution: number;
+}
+
+export interface AnalyticsRegionRow {
+  region_id: number;
+  region_code: string;
+  region_name: string;
+  warehouse_count: number;
+  stock_quantity: number;
+  stock_value: number;
+  low_stock_sku_count: number;
+  completed_work_orders_with_usage: number;
+  consumed_quantity: number;
+  consumed_parts_cost: number;
+}
+
+export interface EnterpriseAnalytics {
+  generated_at: string;
+  period: {
+    from_date: string;
+    to_date: string;
+    previous_from_date: string;
+    previous_to_date: string;
+    days: number;
+    grain: string;
+    timezone: string;
+  };
+  filters: {
+    engineer_id?: number | null;
+    job_type?: string | null;
+    engineers: Array<{ value: string; label: string }>;
+    job_types: Array<{ value: string; label: string }>;
+  };
+  kpis: AnalyticsKpi[];
+  trend: AnalyticsTrendPoint[];
+  engineers: AnalyticsEngineerRow[];
+  job_types: AnalyticsJobTypeRow[];
+  regions: AnalyticsRegionRow[];
+  data_quality: {
+    completed_work_orders: number;
+    first_time_fix_labeled: number;
+    first_time_fix_coverage: number;
+    repair_duration_labeled: number;
+    repair_duration_coverage: number;
+    engineer_attributed: number;
+    engineer_attribution_coverage: number;
+    warnings: string[];
+  };
+  source_freshness: {
+    work_orders_updated_at?: string | null;
+    work_order_parts_updated_at?: string | null;
+    inventory_transactions_updated_at?: string | null;
+  };
+}
+
 export interface StorageLocation {
   id: number;
   warehouse_id: number;

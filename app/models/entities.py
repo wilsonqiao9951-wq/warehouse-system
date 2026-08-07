@@ -1352,6 +1352,20 @@ class WorkOrder(Base):
             "form_template_version IS NULL OR form_template_version >= 0",
             name="ck_work_order_form_template_version_non_negative",
         ),
+        Index("ix_work_orders_org_created_at", "organization_id", "created_at"),
+        Index("ix_work_orders_org_completed_at", "organization_id", "completed_at"),
+        Index(
+            "ix_work_orders_org_completed_by_at",
+            "organization_id",
+            "completed_by_id",
+            "completed_at",
+        ),
+        Index(
+            "ix_work_orders_org_job_type_completed",
+            "organization_id",
+            "job_type",
+            "completed_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -1617,6 +1631,11 @@ class InventoryTransaction(Base):
             "AND movement_stage IN ('return_ship', 'return_receive'))",
             name="ck_inventory_replenishment_link",
         ),
+        Index(
+            "ix_inventory_transactions_org_created_at",
+            "organization_id",
+            "created_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -1651,6 +1670,13 @@ class InventoryTransaction(Base):
 
 class WorkOrderPart(Base):
     __tablename__ = "work_order_parts"
+    __table_args__ = (
+        Index(
+            "ix_work_order_parts_org_work_order",
+            "organization_id",
+            "work_order_id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)

@@ -48,6 +48,7 @@ import {
   InventoryRegion,
   InventoryRegionSummary,
   CrossRegionTransfer,
+  EnterpriseAnalytics,
   ReplenishmentRequest,
   VehicleReturnRequest,
   InventoryCount,
@@ -1658,6 +1659,30 @@ export const api = {
     method: "PUT",
     body: JSON.stringify(payload)
   }),
+  getEnterpriseAnalytics: (filters: {
+    from_date: string;
+    to_date: string;
+    engineer_id?: number;
+    job_type?: string;
+  }) => {
+    const params = new URLSearchParams({
+      from_date: filters.from_date,
+      to_date: filters.to_date
+    });
+    if (filters.engineer_id) params.set("engineer_id", String(filters.engineer_id));
+    if (filters.job_type) params.set("job_type", filters.job_type);
+    return request<EnterpriseAnalytics>(`/analytics/operations?${params.toString()}`);
+  },
+  downloadEnterpriseAnalytics: (filters: {
+    from_date: string;
+    to_date: string;
+    engineer_id?: number;
+    job_type?: string;
+  }, accountPassword: string) => downloadAuthenticatedFile(
+    "/analytics/operations/export",
+    { ...filters, account_password: accountPassword },
+    `openpartsflow-operations-${filters.from_date}-${filters.to_date}.csv`
+  ),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),
   getWorkOrderServiceIntelligence: (workOrderId: number) =>

@@ -1170,3 +1170,44 @@ Verification:
   passed on SQLite; the configured local database reports `0043` head.
 - Frontend ESLint and TypeScript checks passed; the Next.js 16.2.12 production
   build passed for all 36 static routes.
+
+## 2026-08-07 - Phase 9 enterprise operations analytics
+
+Status: implemented, locally migrated, and verified.
+
+Delivered:
+
+- Added one tenant-scoped operations endpoint with inclusive UTC date,
+  engineer, and job-type filters plus an equal-length prior-period comparison.
+- Defined created, completed, period-end backlog, first-time-fix, rework,
+  duration, and gross-contribution KPIs directly from durable source records.
+- Added automatic day/week/month trend grain and engineer/job-type breakdowns.
+- Added current regional stock/value/low-stock summaries and completed-job part
+  consumption without misrepresenting current inventory as a historical
+  snapshot.
+- Added first-time-fix, repair-duration, and engineer-attribution coverage,
+  interpretation warnings, and source-freshness timestamps.
+- Added a password-confirmed completed-work-order CSV with formula hardening,
+  a configured fail-closed row limit, SHA-256 and row-count evidence, and an
+  `enterprise_analytics_exported` audit event.
+- Added a chart-led Analytics workspace with reusable filters and permission-
+  aware export controls.
+- Added Alembic revision `20260807_0044` for the bounded reporting query paths.
+
+Verification:
+
+- KPI and regional results reconcile to exact seeded source records.
+- Equal-period comparisons, date validation, engineer/job-type filters,
+  tenant isolation, permission grants/denies, reauthentication, CSV injection
+  protection, digest evidence, audit metadata, and export row limits passed.
+- Frontend ESLint and TypeScript checks passed.
+- Backend: all 158 tests passed, including the complete migration history,
+  legacy adoption, backup/restore, tenant isolation, RBAC, inventory custody,
+  integrations, billing, monitoring, and analytics reconciliation coverage.
+- Fresh base-to-`0044` plus `0044 -> 0043 -> 0044` downgrade/upgrade rehearsal
+  passed on SQLite; the configured local database reports `0044` head.
+- The Next.js 16.2.12 production build passed for all 37 static routes.
+- Python compilation and dependency consistency passed; full and production
+  npm audits reported 0 known vulnerabilities.
+- Alembic model comparison reported only the documented pre-existing drift and
+  no missing analytics index or other new `0044` operation.

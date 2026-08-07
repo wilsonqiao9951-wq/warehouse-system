@@ -9,6 +9,7 @@ USERS_READ = "users.read"
 AUDIT_READ = "audit.read"
 AUDIT_EXPORT = "audit.export"
 REPORTS_READ = "reports.read"
+REPORTS_EXPORT = "reports.export"
 INTEGRATIONS_READ = "integrations.read"
 INTEGRATIONS_MANAGE = "integrations.manage"
 
@@ -48,6 +49,13 @@ PERMISSIONS = (
         "View operational reports",
         "View team performance, warehouse, and abnormal-usage reports.",
         frozenset({UserRole.ADMIN, UserRole.MANAGER}),
+    ),
+    PermissionDefinition(
+        REPORTS_EXPORT,
+        "Export operational analytics",
+        "Create password-confirmed work-order analytics CSV exports.",
+        frozenset({UserRole.ADMIN}),
+        True,
     ),
     PermissionDefinition(
         INTEGRATIONS_READ,
