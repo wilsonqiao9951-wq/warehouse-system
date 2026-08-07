@@ -1128,3 +1128,45 @@ Verification:
   build passed for all 35 static routes.
 - Python compilation and dependency consistency passed; full and production
   npm audits reported 0 known vulnerabilities.
+
+## 2026-08-07 - Phase 9 multi-region inventory
+
+Status: implemented, locally migrated, and verified.
+
+Delivered:
+
+- Added tenant-scoped, versioned operating regions with unique code/name,
+  validated IANA timezone, active/default invariants, and deterministic default
+  creation for existing and newly used organizations.
+- Added warehouse regional ownership and migrated all current warehouses to the
+  organization's default region without changing ledger balances or vehicle
+  custody.
+- Added manager/administrator region creation, versioned updates, and audited
+  warehouse assignment with an optimistic prior-region check and mandatory
+  business reason.
+- Added regional stock/low-stock/warehouse/vehicle summaries plus recent
+  cross-region transfer history.
+- Restricted cross-region main-warehouse transfers to managers and
+  administrators, retained ordinary warehouse-role transfers inside a region,
+  and preserved the generic vehicle-transfer prohibition.
+- Added `from_region_id`, `to_region_id`, and `cross_region` transfer audit
+  metadata while retaining standard actor and device evidence.
+- Added a Regions workspace for summaries, configuration, warehouse placement,
+  and transfer history, with read-only warehouse access.
+- Added controlled export/restore ordering and safe older-archive compatibility;
+  legacy adoption now generates regional defaults only after source row/hash
+  validation succeeds.
+- Added Alembic revision `20260807_0043` and upgraded the configured local
+  database from `0042` to `0043`.
+
+Verification:
+
+- Four new tests cover default assignment, validation/version/default rules,
+  warehouse audit evidence, cross-region authorization, regional balances and
+  history, tenant isolation, and vehicle custody protection.
+- Backend: all 154 tests passed, including full Alembic history, legacy
+  adoption, backup/restore, concurrency, RBAC, and custody coverage.
+- Fresh base-to-`0043` plus `0043 -> 0042 -> 0043` downgrade/upgrade rehearsal
+  passed on SQLite; the configured local database reports `0043` head.
+- Frontend ESLint and TypeScript checks passed; the Next.js 16.2.12 production
+  build passed for all 36 static routes.

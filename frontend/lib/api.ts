@@ -45,6 +45,9 @@ import {
   InventoryLocationScan,
   InventoryLocationLabel,
   InventoryNotification,
+  InventoryRegion,
+  InventoryRegionSummary,
+  CrossRegionTransfer,
   ReplenishmentRequest,
   VehicleReturnRequest,
   InventoryCount,
@@ -1619,6 +1622,42 @@ export const api = {
     }
   },
   listWarehouses: () => request<Warehouse[]>("/warehouses?limit=100"),
+  listInventoryRegions: () => request<InventoryRegion[]>("/inventory/regions"),
+  listInventoryRegionSummary: () =>
+    request<InventoryRegionSummary[]>("/inventory/regions/summary"),
+  listCrossRegionTransfers: () =>
+    request<CrossRegionTransfer[]>("/inventory/regions/cross-region-transfers?limit=50"),
+  createInventoryRegion: (payload: {
+    code: string;
+    name: string;
+    timezone: string;
+    is_default?: boolean;
+    is_active?: boolean;
+  }) => request<InventoryRegion>("/inventory/regions", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  updateInventoryRegion: (
+    regionId: number,
+    payload: {
+      expected_version: number;
+      code?: string;
+      name?: string;
+      timezone?: string;
+      is_default?: boolean;
+      is_active?: boolean;
+    }
+  ) => request<InventoryRegion>(`/inventory/regions/${regionId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  }),
+  assignWarehouseRegion: (
+    warehouseId: number,
+    payload: { region_id: number; expected_region_id?: number | null; reason: string }
+  ) => request<Warehouse>(`/warehouses/${warehouseId}/region`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  }),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),
   getWorkOrderServiceIntelligence: (workOrderId: number) =>

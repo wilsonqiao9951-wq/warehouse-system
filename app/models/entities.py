@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from enum import Enum
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Enum as SqlEnum, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Enum as SqlEnum, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -596,6 +596,59 @@ class UserPermissionGrant(Base):
     organization = relationship("Organization")
 
 
+class InventoryRegion(Base):
+    __tablename__ = "inventory_regions"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "code",
+            name="uq_inventory_regions_org_code",
+        ),
+        UniqueConstraint(
+            "organization_id",
+            "name",
+            name="uq_inventory_regions_org_name",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_inventory_regions_version_non_negative",
+        ),
+        CheckConstraint(
+            "is_default = 0 OR is_active = 1",
+            name="ck_inventory_regions_default_active",
+        ),
+        Index(
+            "uq_inventory_regions_org_default",
+            "organization_id",
+            unique=True,
+            sqlite_where=text("is_default = 1"),
+            postgresql_where=text("is_default"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    organization = relationship("Organization")
+    warehouses = relationship("Warehouse", back_populates="region")
+
+
 class Warehouse(Base):
     __tablename__ = "warehouses"
     __table_args__ = (
@@ -611,10 +664,16 @@ class Warehouse(Base):
     warehouse_type: Mapped[str] = mapped_column(String(20), default="main")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     assigned_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    region_id: Mapped[int | None] = mapped_column(
+        ForeignKey("inventory_regions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     assigned_user = relationship("User")
+    region = relationship("InventoryRegion", back_populates="warehouses")
     organization = relationship("Organization")
 
 

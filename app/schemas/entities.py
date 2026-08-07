@@ -905,6 +905,82 @@ class ExternalPartRecommendationRead(BaseModel):
     reason: str
 
 
+class InventoryRegionCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=50)
+    name: str = Field(min_length=1, max_length=120)
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
+    is_default: bool = False
+    is_active: bool = True
+
+
+class InventoryRegionUpdate(BaseModel):
+    expected_version: int = Field(ge=0)
+    code: str | None = Field(default=None, min_length=1, max_length=50)
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    is_default: bool | None = None
+    is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def require_change(self):
+        if not (self.model_fields_set - {"expected_version"}):
+            raise ValueError("At least one region field must be supplied")
+        return self
+
+
+class InventoryRegionRead(BaseModel):
+    id: int
+    organization_id: int
+    code: str
+    name: str
+    timezone: str
+    is_default: bool
+    is_active: bool
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InventoryRegionSummary(BaseModel):
+    region_id: int
+    region_code: str
+    region_name: str
+    timezone: str
+    is_default: bool
+    is_active: bool
+    warehouse_count: int
+    main_warehouse_count: int
+    vehicle_warehouse_count: int
+    total_quantity: int
+    low_stock_sku_count: int
+    cross_region_transfer_count: int
+
+
+class CrossRegionTransferRead(BaseModel):
+    transaction_id: int
+    created_at: datetime
+    part_id: int
+    part_number: str
+    part_name: str
+    quantity: int
+    from_warehouse_id: int
+    from_warehouse_name: str
+    from_region_id: int
+    from_region_name: str
+    to_warehouse_id: int
+    to_warehouse_name: str
+    to_region_id: int
+    to_region_name: str
+
+
+class WarehouseRegionAssignment(BaseModel):
+    region_id: int = Field(gt=0)
+    expected_region_id: int | None = Field(default=None, gt=0)
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class WarehouseCreate(BaseModel):
     code: str | None = None
     name: str
@@ -917,6 +993,7 @@ class WarehouseCreate(BaseModel):
 class WarehouseRead(WarehouseCreate):
     id: int
     organization_id: int
+    region_id: int | None = None
     created_at: datetime
     updated_at: datetime
 

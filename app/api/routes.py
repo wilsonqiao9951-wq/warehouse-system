@@ -40,6 +40,7 @@ from app.models import (
     InventoryNotification,
     InventoryCountLine,
     InventoryCountSession,
+    InventoryRegion,
     ReplenishmentRequest,
     VehicleReturnRequest,
     ImportBatch,
@@ -172,6 +173,7 @@ from app.services.inventory import (
     begin_inventory_write,
 )
 from app.services.integration_delivery import enqueue_work_order_event
+from app.services.regions import ensure_default_region
 from app.services.commercial import (
     PLAN_DEFAULTS,
     apply_plan_defaults,
@@ -1421,6 +1423,7 @@ def create_warehouse(payload: WarehouseCreate, db: Session = Depends(get_db), ac
             values["warehouse_type"],
         )
     values["code"] = (payload.code or payload.name).strip().upper().replace(" ", "-")
+    values["region_id"] = ensure_default_region(db, actor.organization_id).id
     item = Warehouse(**values)
     db.add(item)
     db.commit()
@@ -3869,6 +3872,36 @@ def add_inventory_transaction(
     payload: InventoryTransactionCreate, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
+    source_region_id = None
+    target_region_id = None
+    cross_region = False
+    if (
+        payload.transaction_type == TransactionType.TRANSFER
+        and payload.from_warehouse_id
+        and payload.to_warehouse_id
+    ):
+        source = db.get(Warehouse, payload.from_warehouse_id)
+        target = db.get(Warehouse, payload.to_warehouse_id)
+        if source and target and not (
+            warehouse_is_vehicle(db, source) or warehouse_is_vehicle(db, target)
+        ):
+            default_region_id = db.scalar(
+                select(InventoryRegion.id).where(
+                    InventoryRegion.is_default.is_(True)
+                )
+            )
+            source_region_id = source.region_id or default_region_id
+            target_region_id = target.region_id or default_region_id
+            cross_region = bool(
+                source_region_id is not None
+                and target_region_id is not None
+                and source_region_id != target_region_id
+            )
+            if cross_region and actor.role not in {UserRole.ADMIN, UserRole.MANAGER}:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Cross-region transfers require administrator or manager access",
+                )
     effective_payload = payload.model_copy(update={"user_id": actor.user_id}) if actor.user_id else payload
     tx = create_transaction(db, effective_payload)
     _audit(
@@ -3877,7 +3910,15 @@ def add_inventory_transaction(
         f"inventory_{payload.transaction_type.value}",
         "inventory_transaction",
         tx.id,
-        {"part_id": payload.part_id, "qty": payload.quantity, "from": payload.from_warehouse_id, "to": payload.to_warehouse_id},
+        {
+            "part_id": payload.part_id,
+            "qty": payload.quantity,
+            "from": payload.from_warehouse_id,
+            "to": payload.to_warehouse_id,
+            "from_region_id": source_region_id,
+            "to_region_id": target_region_id,
+            "cross_region": cross_region,
+        },
     )
     db.commit()
     db.refresh(tx)
