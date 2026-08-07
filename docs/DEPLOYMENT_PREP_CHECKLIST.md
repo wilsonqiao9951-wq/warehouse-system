@@ -1,5 +1,10 @@
 # OpenPartsFlow 首次内部试点 — 部署准备清单
 
+> 生产部署以 `docs/PRIVATE_DEPLOYMENT.md` 和
+> `docker-compose.production.yml` 为准。测试环境之外不再允许关闭
+> `RBAC_ENFORCE` 或启用旧版请求头认证；下方旧试点说明仅保留为历史
+> 上线背景。
+
 本文与 `docs/PILOT_RUNBOOK.md`、`docs/REAL_DEVICE_TEST_PLAN.md`、`docs/APP_BUILD_GUIDE.md` 配合使用。部署前由负责人逐项勾选并保留证据（截图、配置版本号、备份文件名）。
 
 ---

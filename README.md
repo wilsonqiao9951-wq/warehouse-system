@@ -26,6 +26,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Role-compatible enterprise user access policies with explicit allow/deny/inherit overrides and complete audit evidence
 - Tenant-scoped enterprise operations analytics with reconciled KPIs, quality coverage, regional stock, and audited CSV export
 - Read-only enterprise operations Agent with bounded intents, source-defined evidence, quota control, and privacy-preserving run audit
+- Private-deployment container stack with PostgreSQL, one-shot migrations, persistent evidence volumes, same-origin web/API routing, health gates, and fail-closed production configuration
 - Tenant-isolated portable ZIP backups with secret redaction, media manifests, and durable SHA-256 evidence
 - Controlled restore rehearsal, safe record/media recovery, exact-plan application, and drift-protected rollback
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
@@ -100,6 +101,24 @@ This opens two terminals:
 - Frontend: `http://localhost:3000`
 
 On a clean `main` branch the script first checks GitHub and applies a fast-forward update. Dirty worktrees and offline starts keep the local version. Database preparation runs before either service is launched: versioned databases receive Alembic migrations, while an unversioned legacy SQLite database is backed up, rebuilt, verified, and adopted automatically. Any failed safety check stops startup. See [`docs/LEGACY_DATABASE_ADOPTION.md`](docs/LEGACY_DATABASE_ADOPTION.md).
+
+### Private deployment
+
+The production stack is separate from local development. It runs PostgreSQL,
+a one-shot Alembic migration gate, the API, and a static PWA reverse proxy while
+exposing only port `8080` to the enterprise ingress:
+
+```bash
+cp .env.production.example .env.production
+# Replace every CHANGE_ME value before continuing.
+docker compose --env-file .env.production -f docker-compose.production.yml build
+docker compose --env-file .env.production -f docker-compose.production.yml run --rm --no-deps migrate python -m scripts.validate_production_config
+docker compose --env-file .env.production -f docker-compose.production.yml up -d
+```
+
+TLS must terminate at the organization's gateway or load balancer. Deployment,
+upgrade, backup, rollback, health-check, and security requirements are in
+[`docs/PRIVATE_DEPLOYMENT.md`](docs/PRIVATE_DEPLOYMENT.md).
 
 ## API Migration Notes
 

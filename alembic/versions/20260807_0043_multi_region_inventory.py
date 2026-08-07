@@ -31,7 +31,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.CheckConstraint(
-            "is_default = 0 OR is_active = 1",
+            "NOT is_default OR is_active",
             name="ck_inventory_regions_default_active",
         ),
         sa.CheckConstraint(
@@ -96,10 +96,12 @@ def upgrade() -> None:
                 "(organization_id, code, name, timezone, is_default, is_active, "
                 "version, created_at, updated_at) "
                 "VALUES (:organization_id, 'PRIMARY', 'Primary region', 'UTC', "
-                "1, 1, 0, :created_at, :updated_at)"
+                ":is_default, :is_active, 0, :created_at, :updated_at)"
             ),
             {
                 "organization_id": organization_id,
+                "is_default": True,
+                "is_active": True,
                 "created_at": now,
                 "updated_at": now,
             },
@@ -109,7 +111,7 @@ def upgrade() -> None:
             "UPDATE warehouses SET region_id = ("
             "SELECT inventory_regions.id FROM inventory_regions "
             "WHERE inventory_regions.organization_id = warehouses.organization_id "
-            "AND inventory_regions.is_default = 1 LIMIT 1"
+            "AND inventory_regions.is_default LIMIT 1"
             ") WHERE region_id IS NULL"
         )
     )

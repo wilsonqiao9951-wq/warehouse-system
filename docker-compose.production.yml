@@ -1,0 +1,145 @@
+name: openpartsflow
+
+x-api-environment: &api-environment
+  APP_ENV: production
+  APP_DEBUG: "false"
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env.production}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env.production}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  FRONTEND_PUBLIC_URL: ${FRONTEND_PUBLIC_URL:?Set FRONTEND_PUBLIC_URL in .env.production}
+  CORS_EXTRA_ORIGINS: ${CORS_EXTRA_ORIGINS:-}
+  DATA_EXPORT_PUBLIC_FILES_ROOT: /app/data/uploads
+  DATA_EXPORT_PRIVATE_FILES_ROOT: /app/data/private
+  DATA_RESTORE_ROLLBACK_FILES_ROOT: /app/data/rollbacks
+  RBAC_ENFORCE: "true"
+  LEGACY_HEADER_AUTH: "false"
+
+x-api-security: &api-security
+  read_only: true
+  user: "10001:10001"
+  init: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  logging: &bounded-logging
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-openpartsflow}
+      POSTGRES_USER: ${POSTGRES_USER:-openpartsflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - data
+    logging: *bounded-logging
+
+  migrate:
+    <<: *api-security
+    image: openpartsflow-api:${IMAGE_TAG:-local}
+    build:
+      context: .
+      args:
+        OPENPARTSFLOW_VERSION: ${IMAGE_TAG:-local}
+        VCS_REF: ${VCS_REF:-unknown}
+    env_file:
+      - ${OPENPARTSFLOW_ENV_FILE:-.env.production}
+    environment: *api-environment
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - data
+
+  api:
+    <<: *api-security
+    image: openpartsflow-api:${IMAGE_TAG:-local}
+    build:
+      context: .
+      args:
+        OPENPARTSFLOW_VERSION: ${IMAGE_TAG:-local}
+        VCS_REF: ${VCS_REF:-unknown}
+    env_file:
+      - ${OPENPARTSFLOW_ENV_FILE:-.env.production}
+    environment: *api-environment
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - uploads:/app/data/uploads
+      - private_uploads:/app/data/private
+      - restore_rollbacks:/app/data/rollbacks
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - edge
+      - data
+
+  web:
+    image: openpartsflow-web:${IMAGE_TAG:-local}
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-/api}
+        OPENPARTSFLOW_VERSION: ${IMAGE_TAG:-local}
+        VCS_REF: ${VCS_REF:-unknown}
+    restart: unless-stopped
+    read_only: true
+    user: "101:101"
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${OPENPARTSFLOW_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - edge
+    logging: *bounded-logging
+
+volumes:
+  postgres_data:
+  uploads:
+  private_uploads:
+  restore_rollbacks:
+
+networks:
+  edge:
+  data:
+    internal: true

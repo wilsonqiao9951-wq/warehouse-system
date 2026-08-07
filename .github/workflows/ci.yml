@@ -35,3 +35,46 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+
+  private-deployment:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: openpartsflow
+          POSTGRES_USER: openpartsflow
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openpartsflow -d openpartsflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      DATABASE_URL: postgresql+psycopg://openpartsflow:ci-postgres-password@127.0.0.1:5432/openpartsflow
+      POSTGRES_PASSWORD: ci-postgres-password
+      JWT_SECRET_KEY: ci-only-jwt-secret-with-at-least-32-characters
+      FRONTEND_PUBLIC_URL: https://parts.example.test
+      CORS_EXTRA_ORIGINS: https://parts.example.test
+      DATA_EXPORT_PUBLIC_FILES_ROOT: /app/data/uploads
+      DATA_EXPORT_PRIVATE_FILES_ROOT: /app/data/private
+      DATA_RESTORE_ROLLBACK_FILES_ROOT: /app/data/rollbacks
+      OPENPARTSFLOW_ENV_FILE: .env.production.example
+      IMAGE_TAG: ci
+      VCS_REF: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m scripts.validate_production_config
+      - run: alembic upgrade head
+      - run: python -c "from sqlalchemy import create_engine, text; from app.core.config import settings; assert create_engine(settings.database_url).connect().scalar(text('SELECT version_num FROM alembic_version')) == '20260807_0045'"
+      - run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
+      - run: docker compose --env-file .env.production.example -f docker-compose.production.yml build api web
