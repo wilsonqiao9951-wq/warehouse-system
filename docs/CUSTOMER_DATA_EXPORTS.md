@@ -72,12 +72,11 @@ content. `DATA_EXPORT_PUBLIC_FILES_ROOT` and
 `DATA_EXPORT_PRIVATE_FILES_ROOT` define the only local roots eligible for
 inclusion.
 
-`opf-portable-v1` is a documented data-portability and backup format; it is not
-accepted by an automatic restore endpoint. Restore must remain a separate,
-staged workflow with archive validation, target-organization approval,
-referential checks, dry-run reporting, and rollback controls before any data is
-written. This prevents an uploaded archive from overwriting live customer data
-without review.
+`opf-portable-v1` is accepted only by the separate controlled restore workflow.
+It performs archive validation, an existing-row dry-run, explicit approval,
+exact-archive and live-plan revalidation, atomic eligible-field application,
+and drift-protected rollback. It does not recreate deleted rows or write media.
+See [`CONTROLLED_DATA_RESTORES.md`](CONTROLLED_DATA_RESTORES.md).
 
 ## API
 

@@ -569,6 +569,53 @@ class OrganizationDataExportRead(BaseModel):
     generated_at: datetime
 
 
+class OrganizationDataRestoreDecision(BaseModel):
+    expected_version: int = Field(ge=0)
+    decision: Literal["approve", "reject"]
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+    note: str = Field(min_length=3, max_length=1000)
+
+
+class OrganizationDataRestoreRollback(BaseModel):
+    expected_version: int = Field(ge=0)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class OrganizationDataRestoreRead(BaseModel):
+    id: int
+    organization_id: int
+    requested_by: int | None = None
+    approved_by: int | None = None
+    rejected_by: int | None = None
+    applied_by: int | None = None
+    rolled_back_by: int | None = None
+    matched_export_id: int | None = None
+    format_version: Literal["opf-portable-v1"]
+    status: Literal["validated", "approved", "rejected", "applied", "rolled_back"]
+    archive_sha256: str = Field(min_length=64, max_length=64)
+    archive_size_bytes: int = Field(ge=0)
+    plan_sha256: str = Field(min_length=64, max_length=64)
+    source_schema_revision: str | None = None
+    source_exported_at: datetime | None = None
+    record_count: int = Field(ge=0)
+    file_count: int = Field(ge=0)
+    update_count: int = Field(ge=0)
+    unchanged_count: int = Field(ge=0)
+    conflict_count: int = Field(ge=0)
+    protected_count: int = Field(ge=0)
+    table_summary: dict[str, dict[str, int]]
+    validation_messages: list[str]
+    approval_note: str | None = None
+    rollback_size_bytes: int = Field(ge=0)
+    version: int = Field(ge=0)
+    approved_at: datetime | None = None
+    rejected_at: datetime | None = None
+    applied_at: datetime | None = None
+    rolled_back_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class CommercialUsagePeriodRead(BaseModel):
     period_start: date
     ai_requests: int = Field(ge=0)

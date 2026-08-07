@@ -289,8 +289,17 @@ raw payload or payment-method data.
 |---|---:|---:|---:|---:|
 | List organization export evidence | Deny | Deny | Allow | Home tenant only |
 | Generate and download portable backup | Deny | Deny | Allow, current-password reauthentication | Home tenant only |
+| List restore rehearsals | Deny | Deny | Allow | Home tenant only |
+| Validate restore archive | Deny | Deny | Allow, current-password reauthentication | Home tenant only |
+| Approve/reject restore plan | Deny | Deny | Allow, password + matching version | Home tenant only |
+| Apply exact approved archive | Deny | Deny | Allow, password + archive/plan/version match | Home tenant only |
+| Roll back applied fields | Deny | Deny | Allow, password + integrity/drift/version checks | Home tenant only |
 
 Exports use the same tenant model registry as application reads. Authentication
 hashes, API key hashes, invitation tokens, device secrets, and DNS verification
 secrets are excluded. The archive contains sensitive business and customer data
 and is streamed only to the authenticated requester.
+
+Controlled restores never mutate authentication, billing, audit, ledger, or
+custody records. The initial application boundary updates only existing
+allowlisted master/configuration/knowledge rows; conflicts block approval.

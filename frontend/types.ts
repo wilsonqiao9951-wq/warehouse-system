@@ -219,6 +219,54 @@ export interface OrganizationDataExport {
   generated_at: string;
 }
 
+export type OrganizationDataRestoreStatus =
+  | "validated"
+  | "approved"
+  | "rejected"
+  | "applied"
+  | "rolled_back";
+
+export interface OrganizationDataRestore {
+  id: number;
+  organization_id: number;
+  requested_by?: number | null;
+  approved_by?: number | null;
+  rejected_by?: number | null;
+  applied_by?: number | null;
+  rolled_back_by?: number | null;
+  matched_export_id?: number | null;
+  format_version: "opf-portable-v1";
+  status: OrganizationDataRestoreStatus;
+  archive_sha256: string;
+  archive_size_bytes: number;
+  plan_sha256: string;
+  source_schema_revision?: string | null;
+  source_exported_at?: string | null;
+  record_count: number;
+  file_count: number;
+  update_count: number;
+  unchanged_count: number;
+  conflict_count: number;
+  protected_count: number;
+  table_summary: Record<string, {
+    records: number;
+    updates: number;
+    unchanged: number;
+    conflicts: number;
+    protected: number;
+  }>;
+  validation_messages: string[];
+  approval_note?: string | null;
+  rollback_size_bytes: number;
+  version: number;
+  approved_at?: string | null;
+  rejected_at?: string | null;
+  applied_at?: string | null;
+  rolled_back_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PlatformCommercialReportRow {
   organization_id: number;
   organization_name: string;

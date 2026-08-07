@@ -186,7 +186,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260806_0036` before starting the updated application:
+Apply migration `20260806_0037` before starting the updated application:
 
 ```bash
 alembic upgrade head
@@ -196,14 +196,15 @@ Revision `0032` assigns existing organizations the Professional defaults and
 active subscription state. Revision `0033` creates the monthly usage ledger.
 Revision `0034` adds verified customer domains. Revision `0035` adds provider
 bindings, ordered lifecycle events, and durable subscription notices. Revision
-`0036` adds customer data export integrity evidence.
+`0036` adds customer data export integrity evidence. Revision `0037` adds
+controlled restore rehearsal, approval, application, and rollback evidence.
 Downgrades are refused when the corresponding customer evidence exists.
 
 ## Next Phase 9 batches
 
 - Provider-specific checkout, invoice, tax, refund, and restricted customer
   billing-recovery portal integration
-- Controlled restore validation, dry-run, approval, and application evidence
+- Deleted-row restore and staged media writeback with file rollback evidence
 - MFA and account recovery for platform and organization administrators
 
 Verified hostname ownership, automatic custom-host login branding, and the
@@ -219,3 +220,6 @@ Tenant/platform usage reports and audited CSV rules are documented in
 Tenant-isolated portable backups, secret exclusions, checksum evidence, and the
 controlled restore boundary are documented in
 [`CUSTOMER_DATA_EXPORTS.md`](CUSTOMER_DATA_EXPORTS.md).
+
+Controlled existing-row restore validation, approval, application, and rollback
+are documented in [`CONTROLLED_DATA_RESTORES.md`](CONTROLLED_DATA_RESTORES.md).

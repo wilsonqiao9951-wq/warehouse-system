@@ -876,3 +876,44 @@ Verification:
 - Python dependency consistency and full/production npm audits passed with 0
   known vulnerabilities; the lockfile was refreshed for patched
   `brace-expansion` and `js-yaml` development dependencies.
+
+## 2026-08-06 - Phase 9 controlled existing-row data restores
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added an administrator-only restore workspace with current-password
+  reauthentication for validation, decisions, application, and rollback.
+- Added bounded `opf-portable-v1` validation for ZIP path safety, duplicate and
+  encrypted entries, tenant/schema identity, table/file inventory, secret and
+  cross-tenant columns, checksums, counts, and configured size limits.
+- Added durable dry-run evidence with archive and plan hashes, source export
+  matching, per-table update/unchanged/conflict/protected counts, actor
+  attribution, timestamps, notes, and optimistic versions.
+- Added explicit approval/rejection and exact-archive application that
+  recomputes the plan against live data and aborts on any post-review drift.
+- Added atomic existing-row restoration for allowlisted customer/equipment,
+  warehouse/location, part/machine, completion-policy, form-template, and
+  reviewed machine-knowledge data.
+- Kept authentication, billing, audit, work-order custody, inventory ledger,
+  synchronization, and other control-plane rows immutable.
+- Added checksum-protected before/after rollback snapshots that refuse to
+  overwrite later edits.
+- Added Alembic revision `20260806_0037`, operator documentation, API/RBAC
+  mapping, limits, tests, and guarded downgrade.
+- Kept deleted-row recreation and atomic media writeback as explicit future
+  batches instead of silently applying partial or unsafe recovery.
+
+Verification:
+
+- Restore validation, tamper rejection, conflict gating, plan drift,
+  application, rollback, roles, reauthentication, and audit target tests:
+  5 passed; export regressions: 3 passed.
+- Backend: all 135 tests passed.
+- Fresh base-to-`0037`, empty `0037 -> 0036 -> 0037`, schema/index/constraint
+  inspection, and configured-evidence downgrade refusal passed on SQLite.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for
+  all 33 static routes.
+- Python dependency consistency and full/production npm audits passed with 0
+  known vulnerabilities.
