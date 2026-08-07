@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     operations_backup_warning_days: int = 7
     operations_stale_processing_minutes: int = 10
     operations_slow_request_ms: int = 1000
+    operations_history_enabled: bool = True
+    operations_history_interval_seconds: int = 60
+    operations_history_retention_days: int = 30
+    operations_history_query_max_samples: int = 100000
     # Includes room for the manifest/ZIP overhead around a max-sized export.
     max_data_restore_archive_bytes: int = 528 * 1024 * 1024
     max_data_restore_uncompressed_bytes: int = 528 * 1024 * 1024

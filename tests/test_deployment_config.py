@@ -78,6 +78,18 @@ def test_safe_production_configuration_and_cors_are_accepted():
             {"worker_lease_seconds": 90, "worker_lease_heartbeat_seconds": 31},
             "WORKER_LEASE_HEARTBEAT_SECONDS",
         ),
+        (
+            {"operations_history_interval_seconds": 10},
+            "OPERATIONS_HISTORY_INTERVAL_SECONDS",
+        ),
+        (
+            {"operations_history_retention_days": 0},
+            "OPERATIONS_HISTORY_RETENTION_DAYS",
+        ),
+        (
+            {"operations_history_query_max_samples": 999},
+            "OPERATIONS_HISTORY_QUERY_MAX_SAMPLES",
+        ),
     ],
 )
 def test_unsafe_deployment_configuration_fails_closed(overrides, message):

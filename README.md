@@ -24,7 +24,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Stripe Checkout, customer portal, tenant-verified refunds, raw-body signed webhooks, and durable request/event idempotency evidence
 - Tenant and platform commercial usage reports with password-confirmed, audited CSV export
 - Tenant-scoped enterprise audit search, activity summaries, and password-confirmed hash-evidenced CSV export
-- Minimal live/ready probes plus platform-only request, worker, integration, billing, and backup operations monitoring
+- Minimal live/ready probes plus platform-only live and durable privacy-safe request, worker, integration, billing, and backup operations monitoring
 - Database-elected background schedulers with generation fencing, heartbeat takeover, and multi-replica standby visibility
 - Role-compatible enterprise user access policies with explicit allow/deny/inherit overrides and complete audit evidence
 - Tenant-scoped enterprise operations analytics with reconciled KPIs, quality coverage, regional stock, and audited CSV export
@@ -142,7 +142,7 @@ are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 - `POST /api/organization/data-exports` creates a password-confirmed tenant backup ZIP with JSONL records, referenced local evidence files, secret redaction, and a checksum manifest; see [`docs/CUSTOMER_DATA_EXPORTS.md`](docs/CUSTOMER_DATA_EXPORTS.md).
 - `POST /api/organization/data-restores/rehearsals` validates a backup and records a dry-run before separate approval, exact-archive application, and rollback; see [`docs/CONTROLLED_DATA_RESTORES.md`](docs/CONTROLLED_DATA_RESTORES.md).
 - `GET /api/audit-logs/search` and `/summary` require effective `audit.read`; password-confirmed `POST /api/audit-logs/export` requires `audit.export` and returns a formula-safe, SHA-256-recorded CSV. See [`docs/AUDIT_LOGS.md`](docs/AUDIT_LOGS.md).
-- `GET /health/live` and `/health/ready` provide minimal orchestration probes; platform administrators use `GET /api/platform/operations/summary` and `/platform/operations` for live SLA-operability evidence. See [`docs/OPERATIONS_MONITORING.md`](docs/OPERATIONS_MONITORING.md).
+- `GET /health/live` and `/health/ready` provide minimal orchestration probes; platform administrators use `GET /api/platform/operations/summary`, `GET /api/platform/operations/history`, and `/platform/operations` for live plus retained SLA-operability evidence. The retained history is self-reported, so an external probe remains authoritative. See [`docs/OPERATIONS_MONITORING.md`](docs/OPERATIONS_MONITORING.md).
 - `GET /api/permissions/me` resolves role defaults and administrator-issued user overrides; the administrator matrix is documented in [`docs/ENTERPRISE_ACCESS_POLICIES.md`](docs/ENTERPRISE_ACCESS_POLICIES.md).
 - `GET /api/analytics/operations` returns reconciled work-order, service-quality, contribution, and regional-inventory metrics; password-confirmed `POST /api/analytics/operations/export` creates a formula-safe, digest-evidenced CSV. See [`docs/ENTERPRISE_ANALYTICS.md`](docs/ENTERPRISE_ANALYTICS.md).
 - `POST /api/agent/operations` runs a permission-controlled, read-only operating review over allowlisted tenant evidence and retains only digest-level question metadata. See [`docs/ENTERPRISE_OPERATIONS_AGENT.md`](docs/ENTERPRISE_OPERATIONS_AGENT.md).

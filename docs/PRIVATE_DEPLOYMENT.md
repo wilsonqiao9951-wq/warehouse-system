@@ -77,6 +77,9 @@ Important configuration rules:
 - Public, private, and rollback storage roots must be absolute and distinct.
 - `RBAC_ENFORCE=true` and `LEGACY_HEADER_AUTH=false` are forced outside tests.
 - Leave `PUBLIC_API_BASE_URL=/api` for the same-origin proxy topology.
+- Keep operations-history sampling enabled for internal trend evidence. Size
+  its interval, retention, and query cap for the planned API replica count;
+  this self-reported history does not replace an external SLA probe.
 
 The `.env.production` file is git-ignored. Keep a protected copy in the
 customer's secret manager; never attach it to tickets, logs, or backups.
@@ -152,6 +155,12 @@ use shared PostgreSQL leases, generation fencing, heartbeats, and a durable
 next-run schedule, so replicated API processes do not run the same scheduler
 cycle concurrently. See [`WORKER_LEASES.md`](WORKER_LEASES.md).
 
+Each API replica independently writes privacy-safe service-health samples. This
+is intentional: scheduler work has one elected owner, while request health must
+represent every replica. After an upgrade, verify the operations-history view
+reports the expected replica count and retains pre-restart samples. See
+[`OPERATIONS_MONITORING.md`](OPERATIONS_MONITORING.md).
+
 The reference Compose topology still runs one API replica because it is a
 single-host package with local named media volumes and one bundled proxy. Scale
 API instances only behind an orchestrator/load balancer that provides the same
@@ -198,3 +207,6 @@ For suspected compromise:
 - Multi-host deployments require shared object/media storage and an external
   load balancer/orchestrator; database worker leases solve scheduler election,
   not storage replication or host failover by themselves.
+- Self-reported operations history cannot observe a total application,
+  database, ingress, or network outage. Use an independent external probe as
+  the authoritative customer SLA source.

@@ -2889,6 +2889,34 @@ class OperationsAlertRead(BaseModel):
     count: int = Field(ge=0)
 
 
+class OperationsHistoryPointRead(BaseModel):
+    bucket_at: datetime
+    instances_reporting: int = Field(ge=0)
+    sample_count: int = Field(ge=0)
+    schema_not_ready_samples: int = Field(ge=0)
+    worker_degraded_samples: int = Field(ge=0)
+    request_window_seconds: int = Field(ge=1)
+    request_total: int = Field(ge=0)
+    server_errors: int = Field(ge=0)
+    server_error_rate: float = Field(ge=0, le=1)
+    average_duration_ms: float = Field(ge=0)
+    p95_duration_ms: float = Field(ge=0)
+
+
+class PlatformOperationsHistoryRead(BaseModel):
+    from_at: datetime
+    to_at: datetime
+    bucket_minutes: int = Field(ge=1, le=60)
+    expected_buckets: int = Field(ge=1)
+    buckets_present: int = Field(ge=0)
+    bucket_coverage_rate: float = Field(ge=0, le=1)
+    instances_seen: int = Field(ge=0)
+    sample_count: int = Field(ge=0)
+    latest_sample_at: datetime | None = None
+    truncated: bool
+    points: list[OperationsHistoryPointRead] = Field(default_factory=list)
+
+
 class PlatformOperationsSummaryRead(BaseModel):
     status: Literal["healthy", "degraded", "critical"]
     checked_at: datetime

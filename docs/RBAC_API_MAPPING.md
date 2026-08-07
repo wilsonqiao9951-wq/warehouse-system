@@ -108,7 +108,17 @@ The `audit.export` permission defaults to administrators and controls `POST /api
 
 `GET /health/live` and `GET /health/ready` are intentionally unauthenticated so load balancers and orchestrators can probe the process. They expose only uptime plus high-level database, schema, and worker state; they never expose tenant counts, URLs, errors, credentials, or configuration values.
 
-`GET /api/platform/operations/summary` requires `is_platform_admin=true`, not merely the customer `admin` role. The endpoint deliberately removes the tenant session scope only after that platform check, then aggregates actionable counts across integration delivery, billing notices, backups, and restore conflicts. Customer administrators, managers, engineers, warehouse users, assistants, API keys, and unauthenticated callers are denied. Detailed worker exception messages are not retained or returned; only the exception class is exposed to the platform operator. See [`OPERATIONS_MONITORING.md`](OPERATIONS_MONITORING.md).
+`GET /api/platform/operations/summary` and
+`GET /api/platform/operations/history` require `is_platform_admin=true`, not
+merely the customer `admin` role. The endpoints deliberately remove the tenant
+session scope only after that platform check. The summary aggregates actionable
+counts across integration delivery, billing notices, backups, and restore
+conflicts; history returns bounded, identity-free service samples. Customer
+administrators, managers, engineers, warehouse users, assistants, API keys, and
+unauthenticated callers are denied. Detailed worker exception messages and
+instance identifiers are not retained in API responses; only high-level state
+and the exception class are exposed to the platform operator. See
+[`OPERATIONS_MONITORING.md`](OPERATIONS_MONITORING.md).
 
 Background scheduler ownership is elected through the platform-global database
 lease table. The platform summary exposes generation, expiration, current-run,

@@ -42,6 +42,10 @@ from app.services.worker_leases import (
     DatabaseWorkerLease,
     run_leased_worker_cycle,
 )
+from app.services.operations_history import (
+    operations_instance_key,
+    write_operations_health_sample,
+)
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -111,16 +115,21 @@ async def _leased_worker_loop(
         if not cycle_in_flight:
             await asyncio.to_thread(lease.release)
 
+
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
     delivery_task = None
     billing_task = None
+    history_task = None
     testing = get_db in app_instance.dependency_overrides
+    process_instance_id = _worker_owner_id()
     operations_monitor.reset(
         delivery_enabled=settings.integration_delivery_enabled and not testing,
         delivery_interval_seconds=settings.integration_delivery_poll_seconds,
         billing_enabled=settings.billing_reconciliation_enabled and not testing,
         billing_interval_seconds=settings.billing_reconciliation_poll_seconds,
+        history_enabled=settings.operations_history_enabled and not testing,
+        history_interval_seconds=settings.operations_history_interval_seconds,
     )
     if not testing:
         validate_deployment_settings()
@@ -141,7 +150,7 @@ async def lifespan(app_instance: FastAPI):
         delivery_task = asyncio.create_task(
             _leased_worker_loop(
                 name="integration_delivery",
-                owner_id=_worker_owner_id(),
+                owner_id=process_instance_id,
                 interval_seconds=max(5, settings.integration_delivery_poll_seconds),
                 initial_delay_seconds=max(5, settings.integration_delivery_poll_seconds),
                 task=lambda heartbeat: process_due_deliveries(
@@ -158,7 +167,7 @@ async def lifespan(app_instance: FastAPI):
         billing_task = asyncio.create_task(
             _leased_worker_loop(
                 name="billing_reconciliation",
-                owner_id=_worker_owner_id(),
+                owner_id=process_instance_id,
                 interval_seconds=max(60, settings.billing_reconciliation_poll_seconds),
                 initial_delay_seconds=0,
                 task=lambda heartbeat: reconcile_billing_lifecycle(
@@ -168,6 +177,46 @@ async def lifespan(app_instance: FastAPI):
                 failure_message="Billing lifecycle reconciliation failed",
             )
         )
+    if settings.operations_history_enabled and not testing:
+        instance_key = operations_instance_key(process_instance_id)
+
+        async def operations_history_loop() -> None:
+            while True:
+                operations_monitor.worker_started("operations_history")
+                try:
+                    snapshot = operations_monitor.snapshot(
+                        window_seconds=settings.operations_request_window_seconds
+                    )
+                    result = await asyncio.to_thread(
+                        write_operations_health_sample,
+                        SessionLocal,
+                        instance_key=instance_key,
+                        snapshot=snapshot,
+                        schema_ready=bool(
+                            getattr(app_instance.state, "schema_ready", False)
+                        ),
+                        schema_revision=str(
+                            getattr(
+                                app_instance.state,
+                                "schema_revision",
+                                "unknown",
+                            )
+                        ),
+                        interval_seconds=settings.operations_history_interval_seconds,
+                        retention_days=settings.operations_history_retention_days,
+                    )
+                    operations_monitor.worker_succeeded(
+                        "operations_history",
+                        result_count=1 if result.created else 0,
+                    )
+                except Exception as exc:
+                    operations_monitor.worker_failed("operations_history", exc)
+                    logger.exception("Operations history sampling failed")
+                await asyncio.sleep(
+                    max(30, settings.operations_history_interval_seconds)
+                )
+
+        history_task = asyncio.create_task(operations_history_loop())
     try:
         yield
     finally:
@@ -181,6 +230,12 @@ async def lifespan(app_instance: FastAPI):
             billing_task.cancel()
             try:
                 await billing_task
+            except asyncio.CancelledError:
+                pass
+        if history_task:
+            history_task.cancel()
+            try:
+                await history_task
             except asyncio.CancelledError:
                 pass
 

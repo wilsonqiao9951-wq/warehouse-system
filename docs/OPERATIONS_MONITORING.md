@@ -60,12 +60,14 @@ Exception messages are logged server-side with the normal request/operation
 context but are not stored in runtime state or returned to the UI. The console
 shows only the exception class.
 
-Runtime request evidence and local worker status are process-local and reset on
-restart. Scheduler generation, expiration, current run, next run, and safe
-completion evidence are stored in PostgreSQL and shown to platform
-administrators without the owner identifier. For contractual SLA history, an
-external monitoring system must still poll every replica and store time-series
-results. See [`WORKER_LEASES.md`](WORKER_LEASES.md).
+The live request window and local worker status are process-local and reset on
+restart. A separate sampler persists bounded snapshots for operational trend
+review, while scheduler generation, expiration, current run, next run, and safe
+completion evidence are stored in PostgreSQL. Neither interface reveals the
+owner or host identifier. For contractual SLA measurement, an external
+monitoring system must still poll the public service from outside the
+application and retain its own time series. See
+[`WORKER_LEASES.md`](WORKER_LEASES.md).
 
 ## Platform operations summary
 
@@ -87,6 +89,41 @@ The summary includes:
 The endpoint aggregates counts only. It does not return customer names,
 webhook payloads, response bodies, billing messages, archive paths, or error
 details. The page refreshes every 30 seconds and supports an explicit refresh.
+
+## Durable self-reported history
+
+Every API process writes one health sample per configured interval to
+`operations_health_samples`. The per-process identifier contains a random
+startup value, is SHA-256 hashed before storage, and is never returned by the
+API. The table is platform-global because it describes service instances, not
+customers. It contains only schema readiness, high-level worker health,
+process uptime, and bounded request-window counts and latency values. It does
+not contain tenant identifiers, request paths, user identifiers, client IPs,
+payloads, URLs, exception messages, credentials, or host names.
+
+`GET /api/platform/operations/history` is restricted to
+`is_platform_admin=true`. It accepts a period from 1 to 168 hours and an output
+bucket from 1 to 60 minutes. Reads are capped by
+`OPERATIONS_HISTORY_QUERY_MAX_SAMPLES`; a capped response sets
+`truncated=true`. The browser offers 6-hour, 24-hour, 3-day, and 7-day views.
+
+Sampling is intentionally independent on every API replica. Within an output
+bucket, schema/worker risk fields count all retained samples. Request fields
+combine only the last rolling-window snapshot from each reporting instance,
+so a request present in successive minute samples is not added repeatedly.
+`p95_duration_ms` is the maximum of those instance snapshots, not a globally
+reconstructed percentile.
+
+Retention cleanup runs transactionally whenever a new sample is written.
+Samples older than `OPERATIONS_HISTORY_RETENTION_DAYS` are deleted. A restart
+creates a new opaque instance identity; the prior samples remain until normal
+retention expiry.
+
+This history is self-reported. A database failure can make a sample fail, and a
+complete application or network outage cannot write evidence about itself.
+Missing buckets therefore remain visible and operationally useful, but they
+are not proof of measured downtime or uptime. Customer-facing SLA calculations
+must use an independent synthetic probe outside the application boundary.
 
 ## Interrupted outbound delivery recovery
 
@@ -134,6 +171,10 @@ Operational procedure:
 | `OPERATIONS_SLOW_REQUEST_MS` | 1000 | p95 latency warning threshold |
 | `WORKER_LEASE_SECONDS` | 90 | Expired-owner failover boundary |
 | `WORKER_LEASE_HEARTBEAT_SECONDS` | 10 | Lease renewal/election cadence |
+| `OPERATIONS_HISTORY_ENABLED` | true | Persist self-reported service snapshots |
+| `OPERATIONS_HISTORY_INTERVAL_SECONDS` | 60 | Per-replica sample cadence; production range 30-900 |
+| `OPERATIONS_HISTORY_RETENTION_DAYS` | 30 | Sample retention; production range 1-365 |
+| `OPERATIONS_HISTORY_QUERY_MAX_SAMPLES` | 100000 | Hard read cap; production range 1,000-500,000 |
 
 A request error-rate alert requires at least 20 samples and a 5xx rate of at
 least 5%. A latency alert requires at least five samples. Counts above zero
@@ -146,16 +187,20 @@ backups, and restore conflicts.
    Alembic head before a readiness response can be served.
 2. Configure the load balancer to use `/health/ready` and the process supervisor
    to use `/health/live`.
-3. Poll both endpoints from outside the application host and retain history.
+3. Poll both endpoints from outside the application host and retain the
+   independent SLA history.
 4. Sign in as the platform administrator and open `/platform/operations`.
-5. Confirm one enabled worker moves from `starting` to `ok`; replicated
+5. Confirm the durable-history panel receives a sample from every replica,
+   survives a controlled API restart, and shows a missing bucket when sampling
+   is deliberately prevented.
+6. Confirm one enabled worker moves from `starting` to `ok`; replicated
    non-owner processes should move to healthy `standby`. Stop the owner in a
    rehearsal and verify the lease generation increments after takeover.
-6. Create a test outbound delivery, confirm the due count changes, then deliver
+7. Create a test outbound delivery, confirm the due count changes, then deliver
    or retry it and confirm recovery. In a non-production rehearsal, interrupt a
    worker attempt, wait beyond the stale cutoff, and exercise the protected
    recovery control.
-7. Verify the backup-overdue count falls after each customer backup policy is
+8. Verify the backup-overdue count falls after each customer backup policy is
    satisfied.
-8. Route critical alerts to the on-call system and define response ownership in
+9. Route critical alerts to the on-call system and define response ownership in
    the customer SLA; this application view alone is not an SLA guarantee.

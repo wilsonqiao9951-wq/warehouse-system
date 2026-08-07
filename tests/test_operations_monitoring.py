@@ -249,6 +249,11 @@ def test_platform_operations_rejects_customer_administrator(client):
             },
         )
         assert recovery_denied.status_code == 403
+        history_denied = client.get(
+            "/api/platform/operations/history",
+            headers={"X-User-Id": str(created.json()["id"])},
+        )
+        assert history_denied.status_code == 403
     finally:
         settings.rbac_enforce = original_rbac
         settings.legacy_header_auth = original_legacy

@@ -4,6 +4,7 @@ import {
   AuditLogSummary,
   PermissionEffect,
   OperationsStaleDeliveryRecoveryResult,
+  PlatformOperationsHistory,
   PlatformOperationsSummary,
   BillingLifecycleEvent,
   BillingProvider,
@@ -1221,6 +1222,10 @@ export const api = {
   },
   getPlatformOperationsSummary: () =>
     request<PlatformOperationsSummary>("/platform/operations/summary"),
+  getPlatformOperationsHistory: (hours = 24, bucketMinutes = 15) =>
+    request<PlatformOperationsHistory>(
+      `/platform/operations/history?hours=${hours}&bucket_minutes=${bucketMinutes}`
+    ),
   recoverStaleIntegrationDeliveries: (payload: {
     account_password: string;
     reason: string;
