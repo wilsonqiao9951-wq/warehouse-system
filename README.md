@@ -12,6 +12,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Shared engineer work-order pool with atomic claiming
 - Account- and registered-device-bound field execution
 - Password re-verification and exact engineer/device completion attribution
+- HttpOnly secure browser sessions with session-bound CSRF proof and standalone Bearer compatibility
 - Structured work-order learning data for faults, outcomes, first-time fix, rework, and server-measured duration
 - Governed machine service knowledge with published faults, repair steps, tools, cautions, media, and verified field evidence
 - Idempotent knowledge drafts generated from completed jobs plus tenant-protected field photo/video storage

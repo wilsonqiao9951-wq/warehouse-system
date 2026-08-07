@@ -203,7 +203,7 @@ If any inventory transaction is already linked to the request, reconciliation re
 GET /api/inventory/my-van?limit=500
 ```
 
-This endpoint accepts only an engineer and derives the user from the Bearer token. The client does not submit a user ID. After a successful receipt, the mobile My Van page refreshes this endpoint so the new vehicle balance is visible immediately.
+This endpoint accepts only an engineer and derives the user from the authenticated Cookie or Bearer session. The client does not submit a user ID. After a successful receipt, the mobile My Van page refreshes this endpoint so the new vehicle balance is visible immediately.
 
 ## Concurrency, retries, and errors
 

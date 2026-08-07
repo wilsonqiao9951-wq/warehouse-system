@@ -13,7 +13,7 @@ non-administrator through the enterprise access policy matrix.
 | Legacy list | Allow | Allow | Deny |
 | Search and cursor pagination | Allow | Allow | Deny |
 | 30-day summary | Allow | Allow | Deny |
-| CSV export | Deny | Password-confirmed Bearer session | Deny |
+| CSV export | Deny | Password-confirmed authenticated session | Deny |
 
 An explicit user override may change a non-administrator default in this table.
 Password verification, tenant scope, row limits, and audit evidence still apply.
@@ -67,7 +67,7 @@ The JSON body accepts the same search filters and requires
 `account_password`. Export behavior is deliberately stricter:
 
 1. only an administrator role is accepted;
-2. a Bearer session and the current account password are required;
+2. an authenticated Cookie or Bearer session and the current account password are required;
 3. the server counts matching rows before materializing the CSV;
 4. `MAX_AUDIT_EXPORT_ROWS` rejects oversized exports with `413`;
 5. cells beginning with spreadsheet formula characters are prefixed safely;

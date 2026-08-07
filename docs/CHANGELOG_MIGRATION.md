@@ -794,3 +794,14 @@ vulnerabilities.
 - Added safe MFA security outcomes, Profile enrollment/recovery controls, login challenge UI, export redaction, controlled-restore compatibility, and migration `0050`.
 
 Verification: all 209 backend tests passed, including encryption tamper and key-rotation coverage; fresh base-to-`0050` and `0050 -> 0049 -> 0050` migration rehearsals passed on SQLite; frontend ESLint, TypeScript, and the Next.js production build passed for all 40 static routes; Python and npm audits reported 0 known vulnerabilities; production API/web images built successfully; Alembic comparison contains no missing `0050` operation.
+
+## 20260807 - Secure browser sessions
+
+- Added an explicit Cookie login mode that keeps the signed access credential in a production `Secure`, `HttpOnly`, `SameSite=Strict`, host-only Cookie and never returns it to browser JavaScript.
+- Added a high-entropy CSRF proof whose digest is signed into each Cookie session; all unsafe Cookie-authenticated methods reject missing, mismatched, and cross-session proofs.
+- Preserved explicit Bearer login and Authorization-header precedence for standalone clients, automation, local cross-origin development, and existing API integrations.
+- Migrated same-origin HTTPS web deployments to Cookie mode automatically, including credentials and CSRF handling for JSON, uploads, downloads, offline replay, private images, and knowledge media.
+- Preserved engineer registered-device and work-order claim binding in both Cookie and Bearer modes, and added server-side Cookie expiry for logout, session revocation, and MFA credential rotation.
+- Enabled Cookie sessions for password-confirmed exports, restores, billing operations, form editing, and governed visual-recognition actions instead of retaining Bearer-only business checks.
+
+Verification: all 218 backend tests passed, including Cookie attributes, CSRF absence/mismatch/cross-session rejection, Bearer precedence, engineer-device binding, password-confirmed audit export, logout/revocation, and MFA Cookie issuance; frontend ESLint, TypeScript, and the production build passed for all 40 static routes; Python requirement/full-environment and full/production npm audits reported 0 known vulnerabilities; production configuration, Compose contract/configuration, and API/web image builds passed.

@@ -31,7 +31,7 @@ from app.core.rbac import (
     require_work_order_scope,
     require_work_order_write_scope,
 )
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
 from app.models import (
     AuditLog,
     AuthSecurityEvent,
@@ -73,6 +73,7 @@ from app.models import (
 from app.schemas import (
     AbnormalUsageRow,
     AuthSecurityEventRead,
+    BrowserSessionResponse,
     CustomerCreate,
     CustomerRead,
     EquipmentCreate,
@@ -201,6 +202,14 @@ from app.services.auth_security import (
     login_source_fingerprint,
     password_reset_is_rate_limited,
     record_auth_security_event,
+)
+from app.services.browser_sessions import (
+    browser_session_token,
+    clear_browser_session,
+    new_csrf_token,
+    require_csrf_proof,
+    set_browser_session,
+    wants_browser_session,
 )
 from app.services.password_reset_delivery import (
     PasswordResetDeliveryError,
@@ -367,7 +376,38 @@ def _resolve_login_device(
     return x_device_id
 
 
-@router.post("/auth/login", response_model=TokenResponse | MfaChallengeRead)
+def _create_login_session(
+    response: Response,
+    user: User,
+    device_id: str | None,
+    session_mode: str | None,
+) -> TokenResponse | BrowserSessionResponse:
+    use_cookie = wants_browser_session(session_mode)
+    csrf_token = new_csrf_token() if use_cookie else None
+    token, expires_in = create_access_token(
+        user.id,
+        user.organization_id,
+        auth_version=user.auth_version,
+        device_id=device_id,
+        csrf_token=csrf_token,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    if use_cookie and csrf_token:
+        set_browser_session(response, token, expires_in)
+        return BrowserSessionResponse(
+            csrf_token=csrf_token,
+            expires_in=expires_in,
+            user=user,
+            device_id=device_id,
+        )
+    return TokenResponse(access_token=token, expires_in=expires_in, user=user, device_id=device_id)
+
+
+@router.post(
+    "/auth/login",
+    response_model=TokenResponse | BrowserSessionResponse | MfaChallengeRead,
+)
 def login(
     request: Request,
     response: Response,
@@ -376,6 +416,7 @@ def login(
     x_device_id: str | None = Header(default=None, alias="X-Device-Id"),
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
     x_device_name: str | None = Header(default=None, alias="X-Device-Name"),
+    x_session_mode: str | None = Header(default=None, alias="X-Session-Mode"),
 ):
     now = datetime.utcnow()
     email = form.username.strip().lower()
@@ -459,6 +500,8 @@ def login(
         )
         db.commit()
         response.status_code = 202
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
         return MfaChallengeRead(challenge_token=challenge_token, expires_in=expires_in)
 
     def reject_device(status_code: int, detail: str) -> None:
@@ -494,13 +537,7 @@ def login(
         occurred_at=now,
     )
     db.commit()
-    token, expires_in = create_access_token(
-        user.id,
-        user.organization_id,
-        auth_version=user.auth_version,
-        device_id=device_id,
-    )
-    return TokenResponse(access_token=token, expires_in=expires_in, user=user, device_id=device_id)
+    return _create_login_session(response, user, device_id, x_session_mode)
 
 
 def _mfa_principal_fingerprint(user: User) -> str:
@@ -614,14 +651,19 @@ def _consume_mfa_code(db: Session, user: User, code: str, now: datetime) -> str 
     return None
 
 
-@router.post("/auth/mfa/login/complete", response_model=TokenResponse)
+@router.post(
+    "/auth/mfa/login/complete",
+    response_model=TokenResponse | BrowserSessionResponse,
+)
 def complete_mfa_login(
     payload: MfaLoginComplete,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     x_device_id: str | None = Header(default=None, alias="X-Device-Id"),
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
     x_device_name: str | None = Header(default=None, alias="X-Device-Name"),
+    x_session_mode: str | None = Header(default=None, alias="X-Session-Mode"),
 ):
     now = datetime.utcnow()
     source_fingerprint = login_source_fingerprint(request)
@@ -752,13 +794,7 @@ def complete_mfa_login(
         occurred_at=now,
     )
     db.commit()
-    token, expires_in = create_access_token(
-        user.id,
-        user.organization_id,
-        auth_version=user.auth_version,
-        device_id=device_id,
-    )
-    return TokenResponse(access_token=token, expires_in=expires_in, user=user, device_id=device_id)
+    return _create_login_session(response, user, device_id, x_session_mode)
 
 
 @router.get("/auth/mfa/status", response_model=MfaStatusRead)
@@ -819,6 +855,7 @@ def start_mfa_enrollment(
 def confirm_mfa_enrollment(
     payload: MfaCodeVerify,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
@@ -853,6 +890,7 @@ def confirm_mfa_enrollment(
     user.auth_version += 1
     _record_mfa_event(db, request, user, "mfa_enrolled", occurred_at=now)
     db.commit()
+    clear_browser_session(response)
     return MfaRecoveryCodesRead(recovery_codes=recovery_codes)
 
 
@@ -860,6 +898,7 @@ def confirm_mfa_enrollment(
 def regenerate_mfa_recovery_codes(
     payload: MfaRecoveryRegenerate,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
@@ -880,6 +919,7 @@ def regenerate_mfa_recovery_codes(
     user.auth_version += 1
     _record_mfa_event(db, request, user, "mfa_recovery_regenerated", occurred_at=now)
     db.commit()
+    clear_browser_session(response)
     return MfaRecoveryCodesRead(recovery_codes=recovery_codes)
 
 
@@ -887,6 +927,7 @@ def regenerate_mfa_recovery_codes(
 def disable_mfa(
     payload: MfaDisable,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
@@ -909,7 +950,7 @@ def disable_mfa(
     user.auth_version += 1
     _record_mfa_event(db, request, user, "mfa_disabled", occurred_at=now)
     db.commit()
-    return Response(status_code=204)
+    clear_browser_session(response)
 
 
 @router.get("/auth/me", response_model=UserRead)
@@ -1158,15 +1199,38 @@ def complete_password_reset(
     db.commit()
 
 
+@router.post("/auth/logout", status_code=204)
+def logout(
+    request: Request,
+    response: Response,
+    x_csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
+):
+    token = browser_session_token(request)
+    if token:
+        try:
+            _, _, _, _, csrf_hash = decode_access_token(token)
+        except ValueError:
+            # An expired or otherwise invalid session may always be discarded.
+            csrf_hash = None
+        if csrf_hash is not None:
+            require_csrf_proof(
+                request,
+                expected_hash=csrf_hash,
+                submitted_token=x_csrf_token,
+            )
+    clear_browser_session(response)
+
+
 @router.post("/auth/sessions/revoke-all", status_code=204)
 def revoke_all_sessions(
     payload: SessionRevoke,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    if actor.auth_method != "bearer" or actor.user_id is None:
-        raise HTTPException(status_code=401, detail="Bearer authentication required")
+    if actor.auth_method not in {"bearer", "cookie"} or actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Authenticated session required")
     user = db.get(User, actor.user_id)
     if not user or not verify_password(payload.account_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Account password verification failed")
@@ -1191,6 +1255,7 @@ def revoke_all_sessions(
     )
     db.add(user)
     db.commit()
+    clear_browser_session(response)
 
 
 @router.get("/auth/security-events", response_model=list[AuthSecurityEventRead])
@@ -2024,8 +2089,8 @@ def _audit(
 def _require_account_reauthentication(db: Session, actor: Actor, password: str | None) -> None:
     if actor.auth_method == "test":
         return
-    if actor.auth_method != "bearer" or actor.user_id is None:
-        raise HTTPException(status_code=401, detail="Bearer authentication required")
+    if actor.auth_method not in {"bearer", "cookie"} or actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Authenticated session required")
     user = db.get(User, actor.user_id)
     if not password or not user or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Account password verification failed")
@@ -3424,7 +3489,7 @@ def _can_manage_recognition_observation(
         return bool(
             actor.role == UserRole.ENGINEER
             and actor.user_id is not None
-            and actor.auth_method == "bearer"
+            and actor.auth_method in {"bearer", "cookie"}
             and actor.device_verified
             and actor.device_record_id is not None
             and work_order is not None

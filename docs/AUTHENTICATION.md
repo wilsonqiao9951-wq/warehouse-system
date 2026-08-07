@@ -1,8 +1,23 @@
 # Authentication rollout
 
-OpenPartsFlow supports email/password login with Argon2 password hashes and expiring Bearer JWT access tokens.
+OpenPartsFlow supports email/password login with Argon2 password hashes and expiring JWT sessions. The production same-origin web application requests an HttpOnly Cookie session; standalone API, development, and mobile clients may continue to request a Bearer response explicitly.
 
-Engineer sessions are also bound to a registered device. The mobile client creates a stable random device ID and a 256-bit device secret. The API stores only the secret hash and includes the device ID in the JWT. Every device-bound request must present both the Bearer token and `X-Device-Token`.
+Engineer sessions are also bound to a registered device. The mobile client creates a stable random device ID and a 256-bit device secret. The API stores only the secret hash and includes the device ID in the JWT. Every device-bound request must present the session (Cookie or Bearer) and `X-Device-Token`.
+
+## Browser Cookie sessions and API compatibility
+
+The login endpoints accept an explicit mode header:
+
+```text
+X-Session-Mode: cookie
+X-Session-Mode: bearer
+```
+
+Cookie mode never returns the JWT in the response body. In production and staging it sets `__Host-opf_session` with `Secure`, `HttpOnly`, `SameSite=Strict`, no `Domain`, and `Path=/`; the Cookie lifetime matches the access-token lifetime. The response returns only a random CSRF proof. Its SHA-256 digest is signed into that specific JWT, and every Cookie-authenticated `POST`, `PUT`, `PATCH`, or `DELETE` must send the value as `X-CSRF-Token`. A proof from another login session is rejected. The frontend may retain this non-authenticating proof locally, but the credential itself is inaccessible to JavaScript.
+
+The web client defaults `NEXT_PUBLIC_AUTH_SESSION_MODE=auto`: a secure same-origin `/api` deployment selects Cookie mode, while the separate HTTP development API and standalone clients retain Bearer mode. Set the value explicitly to `cookie` or `bearer` only for a reviewed deployment. All browser requests include credentials; engineer Cookie sessions continue to require the registered device secret and active work-order claim generation.
+
+`POST /api/auth/logout` validates the session-bound CSRF proof before expiring the Cookie. Password-confirmed session revocation and MFA operations that rotate the authentication version also expire the browser Cookie in their response. Supplying an Authorization Bearer header takes precedence over an incidental Cookie and preserves backward-compatible non-browser API behavior without CSRF headers.
 
 ## Production settings
 
@@ -66,7 +81,7 @@ POST /api/auth/password-reset/complete
 
 Production and staging expose reset requests only when the SMTP relay, sender, TLS mode, credential pairing, port, and timeout pass startup validation. Account lookup responses are identical for known, unknown, disabled, and ineligible users. Requests are bounded by keyed account and trusted-source fingerprints; once the limit is reached, the API keeps returning the same accepted response without creating additional tokens or delivery work.
 
-Each eligible request invalidates earlier unused tokens and creates 32 random bytes. Only the keyed token hash is stored. Tokens expire after 30 minutes by default, are consumed through a conditional database update, and cannot be replayed. Completing a reset replaces the Argon2 password hash, increments the account authentication version, invalidates every older bearer session, and records safe security evidence.
+Each eligible request invalidates earlier unused tokens and creates 32 random bytes. Only the keyed token hash is stored. Tokens expire after 30 minutes by default, are consumed through a conditional database update, and cannot be replayed. Completing a reset replaces the Argon2 password hash, increments the account authentication version, invalidates every older Cookie or Bearer session, and records safe security evidence.
 
 SMTP delivery runs after the HTTP response so account existence cannot be inferred from relay latency. The raw token exists only in the reset URL passed to the mail task and is never written to the database, logs, API response, or customer export in production. Delivery status retains only `pending`, `sent`, or a safe failure code; a user can request another link after a relay failure. Development/test mode may expose a clearly labeled local reset URL when email delivery is disabled.
 
@@ -127,7 +142,7 @@ Vehicle replenishment receipt uses the same registered-device session with an ad
 
 - the authenticated account has the exact engineer role;
 - the replenishment `target_user_id` matches the authenticated user;
-- the Bearer JWT names an active registered device and `X-Device-Token` proves possession of that device secret;
+- the Cookie or Bearer JWT names an active registered device and `X-Device-Token` proves possession of that device secret;
 - the destination van remains assigned to the same engineer;
 - `account_password` verifies against the current account password;
 - the replenishment is still `shipped` at the supplied `expected_version`.
@@ -138,7 +153,7 @@ Managers and administrators approve or reject replenishment requests before cust
 
 Legacy custody rows marked `requires_reconciliation` reject every normal workflow action. Only an administrator may reconcile one through the dedicated endpoint, using a reason, matching version, and current administrator password. A row with linked inventory movements cannot use the historical reconciliation path. The password is verified and discarded exactly like the engineer receipt password.
 
-Manual replenishment creation requires a client-generated `client_request_id` and business reason. The ID provides organization-scoped retry idempotency; it is not an authentication credential and never replaces Bearer/device authorization.
+Manual replenishment creation requires a client-generated `client_request_id` and business reason. The ID provides organization-scoped retry idempotency; it is not an authentication credential and never replaces session/device authorization.
 
 Vehicle returns follow the inverse custody rule. Only the vehicle owner on a registered device may create the request or confirm handover. Handover requires the current account password and records the engineer plus device before vehicle stock is deducted. Warehouse/admin users may approve and receive, but cannot impersonate the engineer handover.
 
@@ -152,5 +167,4 @@ The application is fail-closed in every runnable environment: RBAC is enabled an
 
 ## Remaining commercial hardening
 
-- Prefer HttpOnly secure cookies for browser deployments that do not require standalone Bearer-token clients
 - Invitation acceptance exists; invitation-email ownership proof remains to reuse the verified reset mail transport

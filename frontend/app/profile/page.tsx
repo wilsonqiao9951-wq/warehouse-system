@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { api, clearOfflineSession } from "@/lib/api";
+import { api, clearLocalAuthentication } from "@/lib/api";
 import { AuthSecurityEvent, MfaEnrollment, MfaStatus, User } from "@/types";
 
 const outcomeLabel: Record<AuthSecurityEvent["outcome"], string> = {
@@ -26,12 +26,13 @@ const outcomeLabel: Record<AuthSecurityEvent["outcome"], string> = {
   mfa_recovery_regenerated: "Recovery codes replaced"
 };
 
-function signOut(reason: string) {
-  clearOfflineSession();
-  window.localStorage.removeItem("opf_access_token");
-  window.localStorage.removeItem("opf_role");
-  window.localStorage.removeItem("opf_user_id");
-  window.location.href = `/login?reason=${encodeURIComponent(reason)}`;
+async function signOut(reason: string) {
+  try {
+    await api.logout();
+  } finally {
+    clearLocalAuthentication();
+    window.location.href = `/login?reason=${encodeURIComponent(reason)}`;
+  }
 }
 
 export default function ProfilePage() {
@@ -70,7 +71,7 @@ export default function ProfilePage() {
     setError("");
     try {
       await api.revokeAllSessions(password);
-      signOut("sessions-revoked");
+      await signOut("sessions-revoked");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to revoke sessions");
       setBusy(false);
@@ -116,7 +117,7 @@ export default function ProfilePage() {
     setError("");
     try {
       await api.disableMfa(mfaPassword, mfaCode);
-      signOut("mfa-disabled");
+      await signOut("mfa-disabled");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to disable MFA");
       setBusy(false);
@@ -189,7 +190,7 @@ export default function ProfilePage() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
                 {recoveryCodes.map((code) => <code key={code}>{code}</code>)}
               </div>
-              <button type="button" style={{ marginTop: 14 }} onClick={() => signOut("mfa-updated")}>I saved the codes — sign in again</button>
+              <button type="button" style={{ marginTop: 14 }} onClick={() => void signOut("mfa-updated")}>I saved the codes — sign in again</button>
             </div>
           )}
           {!mfaStatus.enabled && recoveryCodes.length === 0 && !mfaEnrollment && (

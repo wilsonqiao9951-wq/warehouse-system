@@ -119,6 +119,7 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-/api}
+        NEXT_PUBLIC_AUTH_SESSION_MODE: ${PUBLIC_AUTH_SESSION_MODE:-auto}
         OPENPARTSFLOW_VERSION: ${IMAGE_TAG:-local}
         VCS_REF: ${VCS_REF:-unknown}
     restart: unless-stopped

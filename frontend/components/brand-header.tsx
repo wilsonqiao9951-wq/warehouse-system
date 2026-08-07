@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { api } from "@/lib/api";
+import { api, hasStoredAuthentication } from "@/lib/api";
 import { OrganizationBranding } from "@/types";
 
 const DEFAULT_BRAND: OrganizationBranding = {
@@ -19,9 +19,8 @@ export default function BrandHeader() {
   const [plan, setPlan] = useState("");
 
   const load = useCallback(async () => {
-    const token = window.localStorage.getItem("opf_access_token");
     const requestedSlug = new URLSearchParams(window.location.search).get("organization");
-    if (token) {
+    if (hasStoredAuthentication()) {
       try {
         const settings = await api.getOrganizationSettings();
         setBranding(settings);

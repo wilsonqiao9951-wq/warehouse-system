@@ -39,7 +39,7 @@ OpenPartsFlow separates visibility, field execution, and management. Frontend ca
 - Other engineers can see status history, parts usage, photos, voice notes, repair progress, claimant, and completer. They do not receive customer signature images, financial values, or device-record identifiers.
 - Responses include `can_claim`, `can_edit`, and `can_complete`, calculated by the server.
 
-`POST /api/work-orders/{id}/claim` requires an engineer Bearer token plus a verified registered device. It uses one conditional database update, so concurrent claim attempts have a single winner.
+`POST /api/work-orders/{id}/claim` requires an engineer Cookie or Bearer session plus a verified registered device. It uses one conditional database update, so concurrent claim attempts have a single winner.
 
 `POST /api/work-orders/{id}/release` is restricted to managers/admins, requires a reason, clears the claim, increments `claim_version`, and records an audit event.
 

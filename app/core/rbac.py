@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import secrets
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session, with_loader_criteria
@@ -11,6 +11,10 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.permissions import effective_permission_codes
 from app.core.security import decode_access_token
+from app.services.browser_sessions import (
+    browser_session_token,
+    require_csrf_proof,
+)
 from app.services.commercial import require_subscription_access
 from app.models import (
     AuditLog,
@@ -177,11 +181,13 @@ class Actor:
 
 
 def get_current_actor(
+    request: Request,
     db: Session = Depends(get_db),
     token: str | None = Depends(oauth2_scheme),
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     x_device_token: str | None = Header(default=None, alias="X-Device-Token"),
     x_claim_version: int | None = Header(default=None, alias="X-Claim-Version"),
+    x_csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
 ) -> Actor:
     if not settings.rbac_enforce:
         db.info["organization_id"] = 1
@@ -197,11 +203,30 @@ def get_current_actor(
     token_organization_id: int | None = None
     token_auth_version: int | None = None
     token_device_id: str | None = None
+    token_csrf_hash: str | None = None
     auth_method = "none"
-    if token:
+    access_token = token
+    if access_token:
+        auth_method = "bearer"
+    else:
+        access_token = browser_session_token(request)
+        if access_token:
+            auth_method = "cookie"
+    if access_token:
         try:
-            user_id, token_organization_id, token_auth_version, token_device_id = decode_access_token(token)
-            auth_method = "bearer"
+            (
+                user_id,
+                token_organization_id,
+                token_auth_version,
+                token_device_id,
+                token_csrf_hash,
+            ) = decode_access_token(access_token)
+            if auth_method == "cookie":
+                require_csrf_proof(
+                    request,
+                    expected_hash=token_csrf_hash,
+                    submitted_token=x_csrf_token,
+                )
         except ValueError as exc:
             raise HTTPException(
                 status_code=401,
@@ -217,7 +242,7 @@ def get_current_actor(
     else:
         raise HTTPException(
             status_code=401,
-            detail="Bearer authentication required",
+            detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -312,7 +337,7 @@ def require_work_order_scope(db: Session, actor: Actor, work_order_id: int) -> N
 
 def require_bound_device(actor: Actor) -> None:
     if (
-        actor.auth_method != "bearer"
+        actor.auth_method not in {"bearer", "cookie"}
         or not actor.user_id
         or not actor.device_verified
         or not actor.device_record_id
