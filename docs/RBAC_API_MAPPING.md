@@ -310,6 +310,23 @@ Provider events never authorize user actions and do not bypass tenant filters.
 They may update only the documented commercial lifecycle fields and retain no
 raw payload or payment-method data.
 
+## Multi-region inventory
+
+| Operation | Engineer | Manager | Admin | Warehouse |
+|---|---:|---:|---:|---:|
+| Read regions, summaries, and cross-region history | Deny | Allow | Allow | Allow |
+| Create/update regions | Deny | Allow | Allow | Deny |
+| Assign warehouse region with reason | Deny | Allow | Allow | Deny |
+| Same-region generic main-warehouse transfer | Deny | Allow | Allow | Allow |
+| Cross-region generic main-warehouse transfer | Deny | Allow | Allow | Deny |
+| Generic transfer involving a vehicle | Deny | Deny | Deny | Deny |
+
+Region and warehouse reads/writes remain tenant scoped. Version checks protect
+region edits, prior-region checks protect warehouse assignments, and every
+cross-region transfer retains region identities in the audit event. Vehicle
+inventory continues through replenishment receipt, work-order usage, and vehicle
+return custody only.
+
 ## Customer data backups
 
 | Operation | Engineer | Manager | Org admin | Platform admin |

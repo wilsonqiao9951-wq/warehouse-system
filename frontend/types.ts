@@ -521,6 +521,52 @@ export interface Warehouse {
   warehouse_type?: string;
   is_active?: boolean;
   assigned_user_id?: number | null;
+  region_id?: number | null;
+}
+
+export interface InventoryRegion {
+  id: number;
+  organization_id: number;
+  code: string;
+  name: string;
+  timezone: string;
+  is_default: boolean;
+  is_active: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryRegionSummary {
+  region_id: number;
+  region_code: string;
+  region_name: string;
+  timezone: string;
+  is_default: boolean;
+  is_active: boolean;
+  warehouse_count: number;
+  main_warehouse_count: number;
+  vehicle_warehouse_count: number;
+  total_quantity: number;
+  low_stock_sku_count: number;
+  cross_region_transfer_count: number;
+}
+
+export interface CrossRegionTransfer {
+  transaction_id: number;
+  created_at: string;
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  quantity: number;
+  from_warehouse_id: number;
+  from_warehouse_name: string;
+  from_region_id: number;
+  from_region_name: string;
+  to_warehouse_id: number;
+  to_warehouse_name: string;
+  to_region_id: number;
+  to_region_name: string;
 }
 
 export interface StorageLocation {

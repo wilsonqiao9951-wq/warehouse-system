@@ -656,3 +656,23 @@ production build passed for all 34 static routes.
 - Adds an administrator permission matrix, effective-policy navigation, and
   enforced employee, audit, report, and integration permission boundaries.
 - Updates the protected legacy-adoption head verification through `0042`.
+
+## 20260807_0043 - Multi-region inventory ownership
+
+- Adds tenant-scoped inventory regions with unique code/name, validated IANA
+  timezone, one active default, optimistic versioning, and audit timestamps.
+- Adds indexed warehouse region ownership, seeds a `PRIMARY` region for every
+  existing organization, and backfills every existing warehouse.
+- Adds regional stock summaries and cross-region transfer history, with
+  administrator/manager-only cross-region writes and read access for warehouse
+  personnel.
+- Preserves the separate authenticated vehicle replenishment, use, and return
+  workflows; generic vehicle transfers remain blocked.
+- Adds portable export/controlled restore ordering and legacy-adoption default
+  generation after source checksum validation.
+
+Verification: four region lifecycle, authorization, tenant-isolation, summary,
+audit, and vehicle-protection tests passed; all 154 backend tests passed; fresh
+base-to-`0043` and `0043 -> 0042 -> 0043` migration rehearsals passed on SQLite;
+ESLint, TypeScript, and the Next.js production build passed for all 36 static
+routes.

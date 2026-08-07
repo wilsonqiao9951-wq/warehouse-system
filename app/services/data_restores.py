@@ -46,6 +46,7 @@ RESTORABLE_TABLES = {
     "completion_policies",
     "customers",
     "equipment",
+    "inventory_regions",
     "machine_knowledge_entries",
     "machine_knowledge_profiles",
     "part_machine_associations",
@@ -58,6 +59,7 @@ RESTORABLE_TABLES = {
 CREATE_TABLE_ORDER = (
     "customers",
     "equipment",
+    "inventory_regions",
     "warehouses",
     "storage_locations",
     "parts",
@@ -108,6 +110,20 @@ RESTORE_SCHEMA_COMPATIBILITY = {
         "20260807_0041",
         "20260807_0042",
     },
+    "20260807_0043": {
+        "20260806_0036",
+        "20260806_0037",
+        "20260807_0038",
+        "20260807_0039",
+        "20260807_0040",
+        "20260807_0041",
+        "20260807_0042",
+        "20260807_0043",
+    },
+}
+
+RESTORE_OPTIONAL_COLUMNS = {
+    "warehouses": {"region_id"},
 }
 
 
@@ -550,6 +566,7 @@ def _plan_row(
             for column in table.columns
             if column.name not in excluded and column.name not in payload
         }
+        missing -= RESTORE_OPTIONAL_COLUMNS.get(table_name, set())
         if missing:
             raise DataRestoreInvalid(
                 f"{table_name} row {row_id} is missing columns required for rehydration"

@@ -480,6 +480,30 @@ def _copy_snapshot_into_candidate(
                     common_data_sha256=source_digest,
                 )
             )
+        # Region configuration did not exist in legacy snapshots. Seed it only
+        # after all source row counts and common-column checks have passed, so
+        # generated configuration cannot mask or distort copied source data.
+        if "inventory_regions" in _business_tables(target):
+            target.execute(
+                "INSERT INTO inventory_regions "
+                "(organization_id, code, name, timezone, is_default, is_active, "
+                "version, created_at, updated_at) "
+                "SELECT organizations.id, 'PRIMARY', 'Primary region', 'UTC', "
+                "1, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+                "FROM organizations WHERE NOT EXISTS ("
+                "SELECT 1 FROM inventory_regions "
+                "WHERE inventory_regions.organization_id = organizations.id"
+                ")"
+            )
+            target.execute(
+                "UPDATE warehouses SET region_id = ("
+                "SELECT inventory_regions.id FROM inventory_regions "
+                "WHERE inventory_regions.organization_id = warehouses.organization_id "
+                "AND inventory_regions.is_default = 1 LIMIT 1"
+                ") WHERE region_id IS NULL"
+            )
+            target.commit()
+            _assert_integrity(target, "Migrated candidate with regional defaults")
         versions = _source_revision(target)
         if versions != (head_revision,):
             raise LegacyDatabaseAdoptionError(
