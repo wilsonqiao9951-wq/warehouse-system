@@ -39,6 +39,7 @@ MFA_CHALLENGE_EXPIRE_MINUTES=5
 MFA_ENROLLMENT_EXPIRE_MINUTES=10
 MFA_MAX_ATTEMPTS=5
 PASSWORD_RESET_EMAIL_ENABLED=true
+INVITATION_EMAIL_ENABLED=true
 AUTH_EMAIL_FROM=OpenPartsFlow <security@example.com>
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
@@ -84,6 +85,12 @@ Production and staging expose reset requests only when the SMTP relay, sender, T
 Each eligible request invalidates earlier unused tokens and creates 32 random bytes. Only the keyed token hash is stored. Tokens expire after 30 minutes by default, are consumed through a conditional database update, and cannot be replayed. Completing a reset replaces the Argon2 password hash, increments the account authentication version, invalidates every older Cookie or Bearer session, and records safe security evidence.
 
 SMTP delivery runs after the HTTP response so account existence cannot be inferred from relay latency. The raw token exists only in the reset URL passed to the mail task and is never written to the database, logs, API response, or customer export in production. Delivery status retains only `pending`, `sent`, or a safe failure code; a user can request another link after a relay failure. Development/test mode may expose a clearly labeled local reset URL when email delivery is disabled.
+
+## Verified employee invitations
+
+Production and staging invitations require `INVITATION_EMAIL_ENABLED=true` and the same validated TLS SMTP transport used by password reset. If delivery is disabled or misconfigured, `POST /api/users/invitations` fails before creating an invitation. The administrator response never contains the sign-up URL; only the invited mailbox receives the random single-use capability. Development and test environments may return a clearly labeled manual URL when invitation email is disabled.
+
+Only SHA-256 token hashes are stored. Each invitation retains `manual`, `pending`, `sent`, or `failed` delivery status, attempt count, safe failure code, and delivery timestamps without retaining the raw token. Reissuing an invitation invalidates only unused invitations for the same normalized email inside the administrator's organization; it cannot affect another tenant using the same address. Creation is tenant-audited without storing the email or token in audit metadata.
 
 ## Administrator multi-factor authentication
 
@@ -164,7 +171,3 @@ Notification/manual request creation, picking, shipping, receipt, completion, ca
 ## Legacy identity headers
 
 The application is fail-closed in every runnable environment: RBAC is enabled and `X-User-Id` authentication is disabled even when an older local `.env` still contains pilot values. Tests may opt into an in-memory legacy actor only inside the isolated test fixture. The production frontend contains no legacy identity fallback.
-
-## Remaining commercial hardening
-
-- Invitation acceptance exists; invitation-email ownership proof remains to reuse the verified reset mail transport

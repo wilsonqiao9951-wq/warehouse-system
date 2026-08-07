@@ -141,7 +141,8 @@ class InvitationCreated(BaseModel):
     name: str
     role: UserRole
     expires_at: datetime
-    invitation_url: str
+    delivery_status: Literal["manual", "pending", "sent", "failed"]
+    invitation_url: str | None = None
 
 
 class InvitationInfo(BaseModel):

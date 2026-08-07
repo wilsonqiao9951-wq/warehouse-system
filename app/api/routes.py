@@ -212,8 +212,11 @@ from app.services.browser_sessions import (
     wants_browser_session,
 )
 from app.services.password_reset_delivery import (
+    InvitationDeliveryError,
     PasswordResetDeliveryError,
+    deliver_invitation_email,
     deliver_password_reset_email,
+    invitation_delivery_available,
     password_reset_delivery_available,
 )
 from app.services.mfa import (
@@ -963,7 +966,7 @@ def auth_me(db: Session = Depends(get_db), actor: Actor = Depends(get_current_ac
     return user
 
 
-def _password_reset_manual_mode() -> bool:
+def _auth_email_manual_mode() -> bool:
     return settings.app_env.lower() in {"development", "test"}
 
 
@@ -1014,7 +1017,7 @@ def _deliver_password_reset_background(
 )
 def password_reset_configuration():
     return PasswordResetConfigurationRead(
-        available=_password_reset_manual_mode() or password_reset_delivery_available(),
+        available=_auth_email_manual_mode() or password_reset_delivery_available(),
         expires_in_minutes=settings.password_reset_expire_minutes,
     )
 
@@ -1030,7 +1033,7 @@ def request_password_reset(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
-    manual_mode = _password_reset_manual_mode()
+    manual_mode = _auth_email_manual_mode()
     delivery_available = password_reset_delivery_available()
     if not manual_mode and not delivery_available:
         raise HTTPException(
@@ -1273,13 +1276,59 @@ def list_auth_security_events(
     ).all()
 
 
+def _deliver_invitation_background(
+    session_factory,
+    invitation_id: int,
+    recipient: str,
+    recipient_name: str,
+    organization_name: str,
+    role: str,
+    invitation_url: str,
+) -> None:
+    failure_code = None
+    try:
+        deliver_invitation_email(
+            recipient=recipient,
+            recipient_name=recipient_name,
+            organization_name=organization_name,
+            role=role,
+            invitation_url=invitation_url,
+        )
+    except InvitationDeliveryError as exc:
+        failure_code = str(exc)[:64]
+
+    now = datetime.utcnow()
+    with session_factory() as db:
+        invitation = db.get(UserInvitation, invitation_id)
+        if not invitation:
+            return
+        invitation.delivery_attempt_count += 1
+        invitation.last_delivery_attempt_at = now
+        invitation.delivery_status = "failed" if failure_code else "sent"
+        invitation.delivery_failure_code = failure_code
+        invitation.delivered_at = None if failure_code else now
+        db.add(invitation)
+        db.commit()
+
+
 @router.post("/users/invitations", response_model=InvitationCreated)
 def create_user_invitation(
     payload: InvitationCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN)
+    manual_mode = _auth_email_manual_mode()
+    delivery_available = invitation_delivery_available()
+    if not delivery_available and (
+        not manual_mode or settings.invitation_email_enabled
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Invitation email delivery is not configured",
+        )
     email = payload.email.strip().lower()
     organization = lock_organization(db, actor.organization_id)
     if db.scalar(select(User.id).where(func.lower(User.email) == email)):
@@ -1293,6 +1342,7 @@ def create_user_invitation(
     now = datetime.utcnow()
     pending = db.scalars(
         select(UserInvitation).where(
+            UserInvitation.organization_id == actor.organization_id,
             func.lower(UserInvitation.email) == email,
             UserInvitation.used_at.is_(None),
         )
@@ -1301,24 +1351,55 @@ def create_user_invitation(
         invitation.used_at = now
     raw_token = secrets.token_urlsafe(32)
     invitation = UserInvitation(
+        organization_id=actor.organization_id,
         email=email,
         name=payload.name.strip(),
         role=payload.role,
         token_hash=sha256(raw_token.encode()).hexdigest(),
         invited_by=actor.user_id,
+        delivery_status="pending" if delivery_available else "manual",
         expires_at=now + timedelta(hours=settings.invitation_expire_hours),
     )
     db.add(invitation)
+    db.flush()
+    _audit(
+        db,
+        actor,
+        "create_user_invitation",
+        "user_invitation",
+        invitation.id,
+        {
+            "role": payload.role.value,
+            "delivery_status": invitation.delivery_status,
+            "expires_at": invitation.expires_at,
+        },
+    )
     db.commit()
     db.refresh(invitation)
     base_url = settings.frontend_public_url.rstrip("/")
+    invitation_url = (
+        f"{base_url}/accept-invitation?{urlencode({'token': raw_token})}"
+    )
+    if delivery_available:
+        session_factory = getattr(request.app.state, "testing_session_local", SessionLocal)
+        background_tasks.add_task(
+            _deliver_invitation_background,
+            session_factory,
+            invitation.id,
+            invitation.email,
+            invitation.name,
+            organization.name,
+            invitation.role.value,
+            invitation_url,
+        )
     return InvitationCreated(
         id=invitation.id,
         email=invitation.email,
         name=invitation.name,
         role=invitation.role,
         expires_at=invitation.expires_at,
-        invitation_url=f"{base_url}/accept-invitation?token={raw_token}",
+        delivery_status=invitation.delivery_status,
+        invitation_url=invitation_url if manual_mode and not delivery_available else None,
     )
 
 

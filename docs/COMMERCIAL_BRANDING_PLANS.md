@@ -101,6 +101,12 @@ invitation for the same email does not consume a second seat. Directly creating
 the invited user consumes the existing reserved seat and closes that pending
 invitation.
 
+In production and staging, invitation creation is available only when the
+validated TLS email transport is enabled. The single-use sign-up URL is sent
+only to the invited mailbox and is never returned to the administrator. Safe
+delivery status and timestamps remain available as operational evidence; a
+same-email invitation in another organization is never superseded.
+
 Warehouse capacity counts active records separately:
 
 - `main` uses `max_warehouses`
@@ -186,7 +192,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260807_0039` before starting the updated application:
+Apply migration `20260807_0051` before starting the updated application:
 
 ```bash
 alembic upgrade head

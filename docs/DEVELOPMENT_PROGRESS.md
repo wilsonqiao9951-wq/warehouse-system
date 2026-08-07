@@ -1447,3 +1447,24 @@ Verification:
 - All 218 backend tests passed across authentication, tenant isolation, work-order ownership, inventory custody, billing, backup/restore, AI, and offline workflows.
 - Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes.
 - Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose contract/configuration, and API/web image builds passed with no known dependency vulnerabilities.
+
+## 2026-08-07 - Phase 9 verified employee invitations
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Required a validated TLS SMTP path for every production/staging invitation and failed before mutation when delivery is disabled or invalid.
+- Sent the single-use sign-up URL only to the invited mailbox; production administrator responses, database rows, audit metadata, logs, and customer exports do not retain or reveal the raw token.
+- Added durable `manual`, `pending`, `sent`, and `failed` delivery evidence with attempt count, safe failure code, and timestamps.
+- Corrected invitation replacement to include the organization boundary so equal emails across tenants remain isolated.
+- Added recipient-safe employee UI messaging, shared relay validation, Alembic revision `0051`, controlled-restore compatibility, onboarding guidance, and production configuration examples.
+
+Verification:
+
+- Recipient-only delivery, header injection rejection, TLS relay behavior, safe failure evidence, disabled-production behavior, manual development acceptance, token replay prevention, and cross-tenant replacement isolation passed.
+- All 225 backend tests passed across authentication, tenant isolation, work-order ownership, inventory custody, billing, backup/restore, AI, and offline workflows.
+- Fresh base-to-`0051` plus `0051 -> 0050 -> 0051` passed on SQLite.
+- Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes.
+- Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose configuration, and API/web image builds passed with no known dependency vulnerabilities.
+- Backed up the local `0050` database as `openpartsflow.pre-0051-20260807-150000.db` (SHA-256 `6CB9399D906BDF61F2B5C3182D1902124C9D30660A596BF503C2B3B35AAE5567`) before upgrading the configured database to `0051` head.

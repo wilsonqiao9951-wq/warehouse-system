@@ -595,7 +595,8 @@ export interface InvitationCreated {
   name: string;
   role: UserRole;
   expires_at: string;
-  invitation_url: string;
+  delivery_status: "manual" | "pending" | "sent" | "failed";
+  invitation_url?: string | null;
 }
 
 export interface InvitationInfo {
