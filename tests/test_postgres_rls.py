@@ -33,14 +33,14 @@ class _FakeSession:
         return self.connection_value
 
 
-def _migration_module():
+def _migration_module(filename: str, module_name: str):
     path = (
         Path(__file__).resolve().parents[1]
         / "alembic"
         / "versions"
-        / "20260807_0053_postgres_row_level_security.py"
+        / filename
     )
-    spec = spec_from_file_location("openpartsflow_rls_migration", path)
+    spec = spec_from_file_location(module_name, path)
     module = module_from_spec(spec)
     assert spec and spec.loader
     spec.loader.exec_module(module)
@@ -48,12 +48,21 @@ def _migration_module():
 
 
 def test_postgres_rls_migration_covers_every_tenant_model():
-    migration = _migration_module()
+    baseline = _migration_module(
+        "20260807_0053_postgres_row_level_security.py",
+        "openpartsflow_rls_baseline_migration",
+    )
+    profit_snapshots = _migration_module(
+        "20260807_0061_add_profit_snapshots.py",
+        "openpartsflow_profit_snapshot_migration",
+    )
     model_tables = {model.__tablename__ for model in TENANT_MODELS}
-    assert set(migration.TENANT_TABLES) == model_tables
-    assert len(migration.TENANT_TABLES) == len(model_tables)
-    assert "platform_access" in migration.POLICY_EXPRESSION
-    assert "organization_id" in migration.POLICY_EXPRESSION
+    secured_tables = set(baseline.TENANT_TABLES) | {profit_snapshots.TABLE_NAME}
+    assert secured_tables == model_tables
+    assert len(secured_tables) == len(model_tables)
+    for migration in (baseline, profit_snapshots):
+        assert "platform_access" in migration.POLICY_EXPRESSION
+        assert "organization_id" in migration.POLICY_EXPRESSION
 
 
 def test_postgres_scope_uses_transaction_local_settings():

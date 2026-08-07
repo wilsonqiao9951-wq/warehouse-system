@@ -2236,6 +2236,51 @@ class WorkOrderPart(Base):
     organization = relationship("Organization")
 
 
+class WorkOrderProfitSnapshot(Base):
+    __tablename__ = "work_order_profit_snapshots"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "work_order_id", name="uq_profit_snapshot_org_work_order"),
+        CheckConstraint(
+            "attribution_method IN ('parts_usage_region', 'engineer_vehicle_region', 'default_region', 'unattributed')",
+            name="ck_profit_snapshot_attribution_method",
+        ),
+        CheckConstraint("length(source_fingerprint) = 64", name="ck_profit_snapshot_source_fingerprint"),
+        Index("ix_profit_snapshot_org_date", "organization_id", "snapshot_date"),
+        Index("ix_profit_snapshot_org_engineer_date", "organization_id", "engineer_id", "snapshot_date"),
+        Index("ix_profit_snapshot_org_region_date", "organization_id", "region_id", "snapshot_date"),
+        Index("ix_profit_snapshot_org_machine_date", "organization_id", "machine_type", "snapshot_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey("work_orders.id"), nullable=False, index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    ticket_number: Mapped[str] = mapped_column(String(120), nullable=False)
+    engineer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    engineer_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    region_id: Mapped[int | None] = mapped_column(ForeignKey("inventory_regions.id", ondelete="SET NULL"), nullable=True)
+    region_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    region_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    attribution_warehouse_id: Mapped[int | None] = mapped_column(ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
+    attribution_method: Mapped[str] = mapped_column(String(40), nullable=False)
+    machine_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    revenue: Mapped[float] = mapped_column(Float, nullable=False)
+    labor_cost: Mapped[float] = mapped_column(Float, nullable=False)
+    parts_cost: Mapped[float] = mapped_column(Float, nullable=False)
+    profit: Mapped[float] = mapped_column(Float, nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    organization = relationship("Organization")
+    work_order = relationship("WorkOrder")
+    engineer = relationship("User")
+    region = relationship("InventoryRegion")
+    attribution_warehouse = relationship("Warehouse")
+
+
 class QCPicture(Base):
     __tablename__ = "qc_pictures"
 

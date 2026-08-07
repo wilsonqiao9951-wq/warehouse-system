@@ -68,6 +68,7 @@ from app.models import (
     WorkOrderFormField,
     WorkOrderFormTemplate,
     WorkOrderPart,
+    WorkOrderProfitSnapshot,
     WorkOrderPartMemory,
     WorkOrderVoiceNote,
 )
@@ -110,6 +111,7 @@ TENANT_MODELS = (
     WorkOrderFormTemplate,
     InventoryTransaction,
     WorkOrderPart,
+    WorkOrderProfitSnapshot,
     WorkOrderPartMemory,
     QCPicture,
     JobStatus,

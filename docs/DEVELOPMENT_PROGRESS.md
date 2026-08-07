@@ -6,9 +6,55 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-07 - Persisted work-order profit snapshots and rankings
+
+Status: implemented; release verification in progress.
+
+Delivered:
+
+- Captures exactly one tenant-scoped profit snapshot in the same transaction
+  that completes and locks a work order.
+- Stores historical accountable-engineer, machine-type, revenue, labor,
+  installed-parts cost, profit, region-attribution, and SHA-256 source evidence.
+- Attributes service region from actual parts usage, then the engineer vehicle,
+  then the tenant default, while preserving an explicit unattributed state.
+- Added daily coverage and profit series plus engineer, region, and machine-type
+  rankings with bounded date ranges and result counts.
+- Added manager/administrator password-confirmed, audited, idempotent historical
+  backfill that retains conflicting snapshots for investigation.
+- Added the `/profit-snapshots` management workbench, tenant export inclusion,
+  forced PostgreSQL RLS, revision `0061`, and controlled restore compatibility.
+
+Verification so far:
+
+- Snapshot capture, backfill idempotency/conflicts, ranking reconciliation,
+  tenant isolation, role enforcement, range bounds, audit evidence, and the
+  real work-order completion path passed (4 tests).
+- Completion ownership, device authentication, policy, and inventory-flow
+  regression suites passed (15 tests).
+- Frontend ESLint, TypeScript, and Next.js production build passed for all 44
+  static routes.
+- All 265 backend tests passed, including the complete migration-chain RLS
+  coverage gate for every tenant model.
+- Fresh SQLite base-to-`0061`, zero-drift, four-index presence, and
+  `0061 -> 0060 -> 0061` migration cycle passed.
+- PostgreSQL 16 fresh base-to-`0061`, zero-drift, forced RLS/policy presence,
+  tenant read/write/platform verification, and `0061 -> 0060 -> 0061`
+  migration cycle passed.
+- Python dependency consistency/vulnerability checks and full/production npm
+  audits passed with no known vulnerabilities; Compose topology and API/web
+  production images built successfully.
+- Backed up the local `0060` database as
+  `openpartsflow.pre-0061-20260807-183024.db` (1,540,096 bytes; SHA-256
+  `C4608F794F3272B945D5CEAE6F71FEE1C93826AD2C7F7E5A470393FF4CC8FBAE`)
+  before upgrading the configured database to `0061` and confirming zero
+  model drift.
+
 ## 2026-08-07 - Van inventory planning and consumption trends
 
-Status: implemented and locally verified.
+Status: implemented, locally verified, and published as draft PR #33. GitHub
+CI run 68 passed all backend, frontend, PostgreSQL/RLS, dependency-audit, and
+production-image jobs.
 
 Delivered:
 

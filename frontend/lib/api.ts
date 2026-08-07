@@ -58,6 +58,8 @@ import {
   InventoryRegionSummary,
   CrossRegionTransfer,
   EnterpriseAnalytics,
+  ProfitSnapshotBackfill,
+  ProfitSnapshotDashboard,
   EnterpriseAgentIntent,
   EnterpriseAgentOptions,
   EnterpriseAgentResponse,
@@ -1906,6 +1908,21 @@ export const api = {
     if (filters.job_type) params.set("job_type", filters.job_type);
     return request<EnterpriseAnalytics>(`/analytics/operations?${params.toString()}`);
   },
+  getProfitSnapshots: (filters: { from_date: string; to_date: string; ranking_limit?: number }) => {
+    const params = new URLSearchParams({ from_date: filters.from_date, to_date: filters.to_date });
+    if (filters.ranking_limit) params.set("ranking_limit", String(filters.ranking_limit));
+    return request<ProfitSnapshotDashboard>(`/analytics/profit-snapshots?${params.toString()}`);
+  },
+  backfillProfitSnapshots: (payload: {
+    from_date: string;
+    to_date: string;
+    after_work_order_id?: number;
+    limit?: number;
+    account_password: string;
+  }) => request<ProfitSnapshotBackfill>("/analytics/profit-snapshots/backfill", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
   downloadEnterpriseAnalytics: (filters: {
     from_date: string;
     to_date: string;

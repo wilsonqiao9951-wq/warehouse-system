@@ -44,6 +44,8 @@ Status legend:
 
 ### Analytics and Controls
 - `Implemented` Work order profit calculation API
+- `Implemented` Immutable daily completed-work-order profit snapshots with explicit historical coverage
+- `Implemented` Profit ranking by service region, accountable engineer, and machine type
 - `Implemented` Employee performance baseline (open/completed workload)
 - `Implemented` Low stock signal in stock balance
 - `Implemented` Abnormal parts usage detection and manager-visible severity/reason report
@@ -284,8 +286,8 @@ After Phase 1 sign-off, release improvements in controlled increments:
 - `Implemented` Engineer-level work-order consumption totals, job counts, daily averages, and daily trends
 
 3. Work order profit calculation
-- Persisted daily profit snapshots
-- Profit ranking by region, engineer, machine type
+- `Implemented` Persisted daily profit snapshots captured atomically at completion, with password-confirmed historical backfill
+- `Implemented` Profit ranking by region, engineer, and machine type with missing-coverage disclosure
 
 4. Employee performance
 - Multi-metric scorecard (throughput, completion, parts efficiency)

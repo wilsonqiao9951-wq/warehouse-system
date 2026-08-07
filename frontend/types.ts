@@ -836,6 +836,55 @@ export interface EnterpriseAnalytics {
   };
 }
 
+export interface ProfitSnapshotRanking {
+  dimension: "engineer" | "region" | "machine_type";
+  key: string;
+  label: string;
+  completed_count: number;
+  revenue: number;
+  labor_cost: number;
+  parts_cost: number;
+  profit: number;
+  margin_rate?: number | null;
+}
+
+export interface ProfitSnapshotDashboard {
+  generated_at: string;
+  from_date: string;
+  to_date: string;
+  summary: {
+    completed_work_orders: number;
+    snapshot_count: number;
+    missing_snapshot_count: number;
+    coverage_rate: number;
+    revenue: number;
+    labor_cost: number;
+    parts_cost: number;
+    profit: number;
+    margin_rate?: number | null;
+  };
+  daily: Array<{
+    snapshot_date: string;
+    completed_count: number;
+    revenue: number;
+    labor_cost: number;
+    parts_cost: number;
+    profit: number;
+  }>;
+  engineers: ProfitSnapshotRanking[];
+  regions: ProfitSnapshotRanking[];
+  machine_types: ProfitSnapshotRanking[];
+  last_captured_at?: string | null;
+}
+
+export interface ProfitSnapshotBackfill {
+  scanned: number;
+  created: number;
+  existing: number;
+  conflicts: number;
+  next_after_work_order_id?: number | null;
+}
+
 export type EnterpriseAgentIntent =
   | "daily_brief"
   | "backlog_risk"

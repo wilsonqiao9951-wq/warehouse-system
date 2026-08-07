@@ -249,6 +249,7 @@ from app.services.commercial import (
 )
 from app.services.recommendations import build_part_recommendations
 from app.services.service_intelligence import build_service_intelligence
+from app.services.profit_snapshots import capture_profit_snapshot
 from app.services.visual_recognition import (
     VISION_PROMPT_VERSION,
     VisionConfigurationError,
@@ -5146,6 +5147,7 @@ def _finalize_work_order(db: Session, actor: Actor, item: WorkOrder) -> WorkOrde
             "repair_duration_minutes": item.repair_duration_minutes,
         },
     )
+    capture_profit_snapshot(db, item)
     _audit(
         db,
         actor,
