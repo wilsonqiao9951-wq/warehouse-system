@@ -24,6 +24,7 @@ def main() -> int:
     frontend = urlsplit(settings.frontend_public_url)
     print("OpenPartsFlow deployment configuration is valid.")
     print(f"environment={settings.app_env.lower()}")
+    print(f"deployment_region={settings.deployment_region}")
     print(f"database_driver={database.drivername}")
     print(f"frontend_origin={frontend.scheme}://{frontend.netloc}")
     print(f"cors_origin_count={len(cors_allowed_origins(settings))}")

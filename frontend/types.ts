@@ -252,6 +252,10 @@ export interface OrganizationSettings extends OrganizationBranding {
   max_vehicle_warehouses?: number | null;
   ai_monthly_limit?: number | null;
   api_monthly_limit?: number | null;
+  data_residency_region?: string | null;
+  data_residency_enforced_at?: string | null;
+  deployment_region: string;
+  data_residency_status: "unrestricted" | "compliant" | "blocked";
   usage_period_start: string;
   ai_monthly_used: number;
   api_monthly_used: number;

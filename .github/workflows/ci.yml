@@ -61,6 +61,7 @@ jobs:
           --health-retries 10
     env:
       APP_ENV: production
+      DEPLOYMENT_REGION: us-east-1
       APP_DEBUG: "false"
       DATABASE_URL: postgresql+psycopg://openpartsflow:ci-postgres-password@127.0.0.1:5432/openpartsflow
       POSTGRES_PASSWORD: ci-postgres-password

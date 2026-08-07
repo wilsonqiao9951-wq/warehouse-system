@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.data_residency import normalize_region_code
 from app.models.entities import TransactionType, UserRole
 from app.services.domains import normalize_custom_domain
 
@@ -229,6 +230,18 @@ class OrganizationCreate(BaseModel):
     admin_password: str = Field(min_length=10, max_length=128)
     plan_code: Literal["starter", "professional", "enterprise"] = "professional"
     trial_days: int = Field(default=14, ge=0, le=90)
+    data_residency_region: str | None = Field(default=None, max_length=64)
+
+    @field_validator("data_residency_region")
+    @classmethod
+    def normalize_data_residency_region(cls, value: str | None) -> str | None:
+        return normalize_region_code(value)
+
+    @model_validator(mode="after")
+    def require_enterprise_residency(self):
+        if self.data_residency_region and self.plan_code != "enterprise":
+            raise ValueError("Data residency is available only on the Enterprise plan")
+        return self
 
 
 class OrganizationUpdate(BaseModel):
@@ -248,6 +261,13 @@ class OrganizationUpdate(BaseModel):
     max_vehicle_warehouses: int | None = Field(default=None, ge=1)
     ai_monthly_limit: int | None = Field(default=None, ge=0)
     api_monthly_limit: int | None = Field(default=None, ge=0)
+    data_residency_region: str | None = Field(default=None, max_length=64)
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+    @field_validator("data_residency_region")
+    @classmethod
+    def normalize_data_residency_region(cls, value: str | None) -> str | None:
+        return normalize_region_code(value)
 
     @field_validator("trial_ends_at")
     @classmethod
@@ -258,7 +278,7 @@ class OrganizationUpdate(BaseModel):
 
     @model_validator(mode="after")
     def require_update(self):
-        if not (self.model_fields_set - {"expected_version"}):
+        if not (self.model_fields_set - {"expected_version", "account_password"}):
             raise ValueError("At least one organization setting must be supplied")
         return self
 
@@ -337,6 +357,10 @@ class OrganizationSettingsRead(OrganizationBrandingRead):
     max_vehicle_warehouses: int | None = None
     ai_monthly_limit: int | None = None
     api_monthly_limit: int | None = None
+    data_residency_region: str | None = None
+    data_residency_enforced_at: datetime | None = None
+    deployment_region: str
+    data_residency_status: Literal["unrestricted", "compliant", "blocked"]
     usage_period_start: date
     ai_monthly_used: int = Field(default=0, ge=0)
     api_monthly_used: int = Field(default=0, ge=0)
@@ -369,6 +393,10 @@ class OrganizationRead(BaseModel):
     max_vehicle_warehouses: int | None = None
     ai_monthly_limit: int | None = None
     api_monthly_limit: int | None = None
+    data_residency_region: str | None = None
+    data_residency_enforced_at: datetime | None = None
+    deployment_region: str
+    data_residency_status: Literal["unrestricted", "compliant", "blocked"]
     usage_period_start: date
     ai_monthly_used: int = Field(default=0, ge=0)
     api_monthly_used: int = Field(default=0, ge=0)

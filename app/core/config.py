@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     app_name: str = "OpenPartsFlow"
     app_env: str = "development"
+    deployment_region: str = "local"
     app_debug: bool = False
     log_level: str = "INFO"
     database_url: str = "sqlite:///./openpartsflow.db"

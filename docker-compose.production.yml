@@ -2,6 +2,7 @@ name: openpartsflow
 
 x-api-environment: &api-environment
   APP_ENV: production
+  DEPLOYMENT_REGION: ${DEPLOYMENT_REGION:?Set DEPLOYMENT_REGION in .env.production}
   APP_DEBUG: "false"
   DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env.production}
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env.production}

@@ -6,6 +6,40 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-07 - Phase 9 Enterprise data residency controls
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added normalized deployment-region identity with fail-closed staging and
+  production validation.
+- Added Enterprise-only organization residency pinning, enforcement timestamps,
+  optimistic settings versions, platform-password confirmation, and audit
+  evidence without credential content.
+- Added runtime denial for login, existing sessions, invitations, API keys, and
+  public branding when tenant and deployment regions differ.
+- Added a production startup database guard before integration/billing workers,
+  so a mismatched database cannot continue processing in the background.
+- Added platform create/edit UI, customer read-only status, migration `0055`,
+  guarded downgrade, controlled-restore compatibility, and the relocation
+  runbook in `docs/DATA_RESIDENCY.md`.
+
+Verification:
+
+- Backend: all 239 tests passed, including residency normalization, Enterprise
+  entitlement, password confirmation, audit secrecy, session/API-key denial,
+  public metadata hiding, and production startup mismatch refusal.
+- SQLite and PostgreSQL 16: fresh base-to-`0055`, `0055 -> 0054 -> 0055`,
+  `alembic check`, evidence-protected downgrade, deployment readiness, and RLS
+  checks passed.
+- Frontend ESLint, TypeScript, and the Next.js production build passed for all
+  40 static routes; Python and npm dependency audits found no vulnerabilities.
+- Backed up the local `0054` database as
+  `openpartsflow.pre-0055-20260807-161848.db` (SHA-256
+  `09ED203577A1D9ABDB689D07BDA04B7080DBB49CE46C34B3006C07ABD9661037`)
+  before upgrading the configured database to `0055` head.
+
 ## 2026-08-07 - Phase 9 private deployment readiness
 
 Status: implemented and locally verified.

@@ -60,10 +60,14 @@ database passwords. `MIGRATION_DATABASE_URL` must use `POSTGRES_OWNER_USER` and
 `POSTGRES_PASSWORD`; `DATABASE_URL` must use the restricted `POSTGRES_APP_USER`
 and `POSTGRES_APP_PASSWORD`. `IMAGE_TAG` must be an immutable release or commit
 identifier, and `VCS_REF` must be the full source commit SHA.
+`DEPLOYMENT_REGION` must identify the physical data-plane region (for example,
+`us-east-1`) and must match every pinned organization in this database.
 
 Important configuration rules:
 
 - Production and staging require PostgreSQL; SQLite is rejected.
+- `DEPLOYMENT_REGION` must be a normalized, non-local region code. Startup
+  refuses a database containing an organization pinned to another region.
 - The API role must be `NOSUPERUSER NOBYPASSRLS NOINHERIT`; it must never own
   tables. The migration-owner credential is available only to the one-shot
   migrator.
@@ -121,6 +125,10 @@ Release CI must also report `No new upgrade operations detected` from
 `alembic check` against PostgreSQL. See
 [`SCHEMA_CONTRACT.md`](SCHEMA_CONTRACT.md); never use `alembic stamp` to bypass
 a mismatch.
+
+For Enterprise organization pinning and cross-region relocation controls, see
+[`DATA_RESIDENCY.md`](DATA_RESIDENCY.md). Changing the environment value alone
+does not move data and intentionally prevents the API from starting.
 
 ## Upgrade procedure
 

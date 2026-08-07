@@ -55,6 +55,16 @@ class Organization(Base):
             "AND data_restore_rollback_retention_days BETWEEN 7 AND 3650",
             name="ck_organizations_data_retention_days",
         ),
+        CheckConstraint(
+            "(data_residency_region IS NULL AND data_residency_enforced_at IS NULL) "
+            "OR (data_residency_region IS NOT NULL AND data_residency_enforced_at IS NOT NULL)",
+            name="ck_organizations_data_residency_evidence",
+        ),
+        CheckConstraint(
+            "data_residency_region IS NULL OR plan_code = 'enterprise'",
+            name="ck_organizations_data_residency_plan",
+        ),
+        Index("ix_organizations_data_residency_region", "data_residency_region"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -80,6 +90,12 @@ class Organization(Base):
     )
     data_restore_rollback_retention_days: Mapped[int] = mapped_column(
         Integer, default=30, nullable=False
+    )
+    data_residency_region: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    data_residency_enforced_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
     )
     settings_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

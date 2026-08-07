@@ -340,6 +340,15 @@ export default function SettingsPage() {
               <div>Vehicle inventories: {organization.active_vehicle_warehouses} / {organization.max_vehicle_warehouses ?? "Unlimited"}</div>
               <div>AI requests: {usageLabel(organization.ai_monthly_used, organization.ai_monthly_limit)}</div>
               <div>External API requests: {usageLabel(organization.api_monthly_used, organization.api_monthly_limit)}</div>
+              <div>
+                Data residency: {organization.data_residency_region || "Not contractually pinned"}
+                {organization.data_residency_enforced_at && (
+                  <span className="muted"> · enforced {new Date(organization.data_residency_enforced_at).toLocaleString()}</span>
+                )}
+              </div>
+              <div className="muted">
+                Deployment {organization.deployment_region} · {organization.data_residency_status}
+              </div>
               <div className="muted">Current UTC billing period started {organization.usage_period_start}.</div>
             </div>
           </div>

@@ -868,6 +868,17 @@ def create_stripe_checkout_session(
     if not price_id:
         raise HTTPException(status_code=409, detail="This plan is not available for Stripe checkout")
     organization = lock_organization(db, actor.organization_id)
+    if (
+        organization.data_residency_region is not None
+        and payload.target_plan_code != "enterprise"
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Clear the organization's data residency assignment before "
+                "starting checkout for a non-Enterprise plan"
+            ),
+        )
     account = _stripe_account_for_org(db, organization.id, create=True, actor=actor)
     if account.external_subscription_id:
         raise HTTPException(status_code=409, detail="Use the billing portal for an existing subscription")
