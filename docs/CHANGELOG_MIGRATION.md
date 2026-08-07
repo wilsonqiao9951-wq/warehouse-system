@@ -862,3 +862,27 @@ checks passed; the SQLite migration cycle passed; frontend ESLint, TypeScript,
 and the Next.js 16.2.12 production build passed for all 40 static routes;
 Python and npm dependency audits reported 0 known vulnerabilities; production
 configuration, Compose configuration, and API/web image builds passed.
+
+## 20260807_0054 - Reconciled database/model schema contract
+
+- Cleared every PostgreSQL and SQLite Alembic autogeneration difference by
+  aligning model index declarations with the deployed query indexes and
+  removing five redundant primary-key index declarations.
+- Backfilled null knowledge/recognition creation and update timestamps before
+  enforcing the existing non-null application contract.
+- Replaced the legacy global warehouse-name constraint with tenant-scoped
+  `(organization_id, name)` uniqueness, allowing separate organizations to use
+  equal warehouse names and codes without weakening in-tenant uniqueness.
+- Added a pre-mutation downgrade refusal when cross-organization equal names
+  can no longer fit the older global constraint.
+- Added SQLite and PostgreSQL `alembic check` CI gates, controlled-restore
+  compatibility through `0054`, tenant behavior coverage, and the schema
+  contract runbook.
+
+Verification: all 234 backend tests passed; fresh SQLite and PostgreSQL
+base-to-`0054`, `0054 -> 0053 -> 0054`, zero-drift checks, duplicate-name
+downgrade refusal, and post-cycle RLS verification passed; frontend ESLint,
+TypeScript, and the Next.js 16.2.12 production build passed for all 40 static
+routes; Python and npm dependency audits reported 0 known vulnerabilities;
+production configuration, Compose configuration, and API/web image builds
+passed.

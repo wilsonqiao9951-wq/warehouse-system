@@ -1556,3 +1556,48 @@ Verification:
   `openpartsflow.pre-0053-20260807-155052.db` (SHA-256
   `ACB810C4719C364698F373CDC92DE3479C3C879DD204290B2D04C0FFEEEC43D2`)
   before upgrading the configured database to `0053` head.
+
+## 2026-08-07 - Phase 9 database schema contract reconciliation
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Audited fresh SQLite and PostgreSQL databases with Alembic autogeneration
+  instead of assuming migration and model metadata were aligned.
+- Removed five false redundant primary-key index declarations and registered
+  the existing knowledge, recovery, history, and claim indexes in model
+  metadata.
+- Added migration `0054` to backfill and enforce eight required
+  knowledge/recognition timestamps.
+- Replaced global warehouse-name uniqueness with organization-scoped
+  uniqueness; validated that two customers can use the same warehouse name and
+  code while tenant reads remain isolated.
+- Added a downgrade guard that preserves `0054` unchanged when real
+  cross-organization names cannot fit the legacy global constraint.
+- Added mandatory SQLite and PostgreSQL `alembic check` CI gates, restore
+  compatibility, and the durable schema change procedure.
+
+Verification:
+
+- Fresh SQLite and PostgreSQL base-to-`0054` migrations both report
+  `No new upgrade operations detected`.
+- SQLite `0054 -> 0053 -> 0054`, duplicate-name downgrade refusal, cleanup,
+  and successful retry passed.
+- PostgreSQL `0054 -> 0053 -> 0054`, post-cycle schema check, and retained RLS
+  read/write/platform verification passed.
+- Tenant/API, RLS coverage, and private-deployment targeted tests passed.
+- All 234 backend tests passed across authentication, tenant isolation,
+  engineer ownership, inventory custody, billing, integrations,
+  backups/restores, AI, and offline workflows.
+- Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed
+  for all 40 static routes.
+- Python dependency consistency, requirement/full-environment vulnerability
+  audits, full/production npm audits, production configuration, Compose
+  configuration, and API/web image builds passed with no known dependency
+  vulnerabilities.
+- Backed up the local `0053` database as
+  `openpartsflow.pre-0054-20260807-160102.db` (SHA-256
+  `CDA4B75A7F2A14261F3E9E2173BEF316C7C9F2A475BEB960BB31A018CF115AFE`)
+  before upgrading the configured database to `0054` head and confirming zero
+  drift.

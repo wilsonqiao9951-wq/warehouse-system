@@ -226,6 +226,13 @@ class OrganizationDataRestore(Base):
             "organization_id",
             "created_at",
         ),
+        Index(
+            "ix_org_data_restore_retention",
+            "organization_id",
+            "status",
+            "rollback_expires_at",
+            "updated_at",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -1203,7 +1210,7 @@ class Customer(Base):
     __tablename__ = "customers"
     __table_args__ = (UniqueConstraint("organization_id", "account_number", name="uq_customers_org_account"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     account_number: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -1226,7 +1233,7 @@ class UserDevice(Base):
     __tablename__ = "user_devices"
     __table_args__ = (UniqueConstraint("organization_id", "device_id", name="uq_user_devices_org_device"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     device_id: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -1245,7 +1252,7 @@ class Equipment(Base):
     __tablename__ = "equipment"
     __table_args__ = (UniqueConstraint("organization_id", "asset_tag", name="uq_equipment_org_asset_tag"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True, index=True)
     asset_tag: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -1358,6 +1365,7 @@ class MachineKnowledgeEntry(Base):
             "profile_id",
             "status",
         ),
+        Index("ix_machine_knowledge_entries_origin_key", "origin_key"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -1415,7 +1423,7 @@ class CompletionPolicy(Base):
     __tablename__ = "completion_policies"
     __table_args__ = (UniqueConstraint("organization_id", "job_type_key", name="uq_completion_policy_org_job_type"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
     job_type_key: Mapped[str] = mapped_column(String(120), default="*", nullable=False)
     require_repair_result: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -1729,6 +1737,24 @@ class WorkOrder(Base):
             "organization_id",
             "job_type",
             "completed_at",
+        ),
+        Index(
+            "ix_work_orders_org_equipment_completed",
+            "organization_id",
+            "equipment_id",
+            "completed_at",
+        ),
+        Index(
+            "ix_work_orders_org_customer_completed",
+            "organization_id",
+            "customer_id",
+            "completed_at",
+        ),
+        Index(
+            "ix_work_orders_org_claim_status",
+            "organization_id",
+            "claimed_by_id",
+            "status",
         ),
     )
 
@@ -2083,7 +2109,7 @@ class QCPicture(Base):
 class WorkOrderVoiceNote(Base):
     __tablename__ = "work_order_voice_notes"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False, index=True)
     work_order_id: Mapped[int] = mapped_column(ForeignKey("work_orders.id"), nullable=False, index=True)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

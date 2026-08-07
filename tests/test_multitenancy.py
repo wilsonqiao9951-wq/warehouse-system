@@ -66,6 +66,10 @@ def test_core_api_isolates_organizations(client):
         first_customer = client.post(
             "/api/customers", json={"name": "Organization One Customer", "account_number": "ORG1-CUSTOMER"}
         ).json()
+        first_warehouse = client.post(
+            "/api/warehouses",
+            json={"name": "Shared Warehouse Name"},
+        ).json()
 
         with client.app.state.testing_session_local() as db:
             second_organization = Organization(id=2, name="Second Organization", slug="second")
@@ -94,6 +98,21 @@ def test_core_api_isolates_organizations(client):
         assert listed_parts.status_code == 200
         assert [part["part_number"] for part in listed_parts.json()] == ["ORG2-PART"]
         assert first_part["part_number"] not in {part["part_number"] for part in listed_parts.json()}
+
+        same_name_warehouse = client.post(
+            "/api/warehouses",
+            headers=second_headers,
+            json={"name": "Shared Warehouse Name"},
+        )
+        assert same_name_warehouse.status_code == 200
+        assert same_name_warehouse.json()["organization_id"] == 2
+        assert same_name_warehouse.json()["name"] == first_warehouse["name"]
+
+        listed_warehouses = client.get("/api/warehouses", headers=second_headers)
+        assert listed_warehouses.status_code == 200
+        assert [row["id"] for row in listed_warehouses.json()] == [
+            same_name_warehouse.json()["id"]
+        ]
 
         listed_work_orders = client.get("/api/work-orders", headers=second_headers)
         assert listed_work_orders.status_code == 200

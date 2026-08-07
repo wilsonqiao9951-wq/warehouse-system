@@ -192,7 +192,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260807_0053` before starting the updated application:
+Apply migration `20260807_0054` before starting the updated application:
 
 ```bash
 alembic upgrade head
@@ -214,6 +214,9 @@ rollback expiry, purge attribution, and guarded cleanup indexes.
 Revision `0053` enables and forces tenant read/write row-level security on all
 current PostgreSQL tenant tables. Production now separates the schema-owner
 migration credential from the restricted `NOBYPASSRLS` application credential.
+Revision `0054` reconciles the database/model schema contract, makes governed
+knowledge timestamps non-null, and changes warehouse name uniqueness from
+global to organization-scoped.
 
 ## Phase 9 deployment defense
 

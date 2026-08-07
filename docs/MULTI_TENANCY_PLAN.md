@@ -27,6 +27,8 @@ remembering to add an `organization_id` filter.
   cross-tenant workers.
 - Production uses separate migration-owner and restricted application roles;
   the application role is `NOSUPERUSER NOBYPASSRLS NOINHERIT`.
+- Warehouse names and codes are unique within an organization, not globally,
+  so separate customers may use the same operational naming convention.
 
 ## Defense model
 
@@ -52,3 +54,6 @@ the next PostgreSQL migration must add the forced policy before release. CI
 fails when the model and migration coverage sets differ. New platform-wide or
 background access paths must use the reviewed scope helpers and include
 cross-tenant denial tests.
+
+Migration/model alignment is enforced on both SQLite and PostgreSQL as
+documented in [`SCHEMA_CONTRACT.md`](SCHEMA_CONTRACT.md).
