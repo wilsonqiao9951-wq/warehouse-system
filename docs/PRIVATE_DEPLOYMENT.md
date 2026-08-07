@@ -117,6 +117,11 @@ both a reachable database and the exact Alembic head. Worker health may report
 `degraded` without changing core readiness; investigate it in Platform
 Operations before sign-off.
 
+Release CI must also report `No new upgrade operations detected` from
+`alembic check` against PostgreSQL. See
+[`SCHEMA_CONTRACT.md`](SCHEMA_CONTRACT.md); never use `alembic stamp` to bypass
+a mismatch.
+
 ## Upgrade procedure
 
 1. Record the current `IMAGE_TAG`, `VCS_REF`, schema revision, and health output.
