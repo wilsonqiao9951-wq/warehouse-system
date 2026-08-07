@@ -12,6 +12,7 @@ from app.api.integrations import router as integrations_router
 from app.api.work_order_forms import router as work_order_forms_router
 from app.api.routes import router
 from app.api.billing import router as billing_router
+from app.api.data_exports import router as data_exports_router
 from app.core.config import settings
 from app.core.database import Base, SessionLocal, engine, ensure_schema_compatibility, get_db
 from app.core.logging import setup_logging
@@ -92,6 +93,7 @@ app.add_middleware(
 )
 app.include_router(router, prefix="/api")
 app.include_router(billing_router, prefix="/api")
+app.include_router(data_exports_router, prefix="/api")
 app.include_router(integrations_router, prefix="/api")
 app.include_router(work_order_forms_router, prefix="/api")
 app.include_router(pages_router)

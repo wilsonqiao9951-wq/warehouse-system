@@ -204,6 +204,21 @@ export interface OrganizationCommercialReport {
   periods: CommercialUsagePeriod[];
 }
 
+export interface OrganizationDataExport {
+  id: number;
+  organization_id: number;
+  requested_by?: number | null;
+  format_version: "opf-portable-v1";
+  sha256: string;
+  size_bytes: number;
+  record_count: number;
+  file_count: number;
+  missing_file_count: number;
+  include_files: boolean;
+  table_counts: Record<string, number>;
+  generated_at: string;
+}
+
 export interface PlatformCommercialReportRow {
   organization_id: number;
   organization_name: string;

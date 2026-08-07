@@ -835,3 +835,44 @@ Verification:
   all 32 static routes.
 - Python dependency consistency passed; production npm audit reported 0
   vulnerabilities.
+
+## 2026-08-06 - Phase 9 customer data portability and backup evidence
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added an administrator-only portable backup workspace and API with mandatory
+  Bearer/current-password reauthentication.
+- Added tenant-scoped JSON Lines export for the organization and every model in
+  the central tenant registry.
+- Added optional inclusion of referenced local photos, voice notes, recognition
+  evidence, and private machine-knowledge media with normalized storage-root
+  enforcement.
+- Added a versioned `opf-portable-v1` manifest with schema revision, per-table
+  counts and hashes, file hashes, missing-file evidence, and explicit secret
+  exclusions.
+- Excluded user password hashes, registered-device secrets, external API key
+  hashes, invitation tokens, and domain verification secrets.
+- Streamed archives without retaining another plaintext server copy and added a
+  configurable 512 MB uncompressed-content boundary.
+- Added durable archive SHA-256, size, record/file/missing counts, requester,
+  generation time, and secret-free audit evidence.
+- Added Alembic revision `20260806_0036` with non-negative count, checksum,
+  format, tenant, requester, index, foreign-key, and guarded-downgrade controls.
+- Documented the format and kept restore as a separate staged validation,
+  approval, dry-run, application, and rollback workflow.
+
+Verification:
+
+- Tenant isolation, secret redaction, media inclusion, archive/entry checksums,
+  administrator role, password reauthentication, evidence, and audit target
+  tests: 3 passed.
+- Backend: all 130 tests passed.
+- Fresh base-to-`0036` and empty `0036 -> 0035 -> 0036` migration paths passed
+  on SQLite; configured export evidence correctly refused downgrade.
+- Frontend: ESLint, TypeScript, and Next.js 16.2.12 production build passed for
+  all 33 static routes.
+- Python dependency consistency and full/production npm audits passed with 0
+  known vulnerabilities; the lockfile was refreshed for patched
+  `brace-expansion` and `js-yaml` development dependencies.

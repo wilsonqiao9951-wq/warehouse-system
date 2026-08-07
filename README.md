@@ -21,6 +21,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Verified customer domains, automatic host-based login branding, and domain-gated sender identity configuration
 - Provider-neutral signed subscription events, ordered idempotent billing evidence, and durable lifecycle notices
 - Tenant and platform commercial usage reports with password-confirmed, audited CSV export
+- Tenant-isolated portable ZIP backups with secret redaction, media manifests, and durable SHA-256 evidence
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
 - Manager/administrator replenishment approval with rejection evidence before warehouse picking
 - Reserved picking stock with separate shipment OUTBOUND and receipt INBOUND inventory movements
@@ -102,6 +103,7 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 - `POST /api/machine-knowledge/{id}/media` stores validated field photos/videos outside the public upload mount; `GET /api/machine-knowledge/media/{entry_id}` enforces tenant, role, profile, and publication state.
 - `GET /api/work-orders/{id}/service-intelligence` returns read-only, tenant-scoped fault metrics, ranked published exact-model guidance, and explained similar completed jobs. See [`docs/SERVICE_INTELLIGENCE.md`](docs/SERVICE_INTELLIGENCE.md).
 - `POST /api/external/v1/work-orders` accepts API-key-authenticated, idempotent AppSheet/REST work-order intake. Administrators manage credentials and mappings under `/api/integrations`; see [`docs/EXTERNAL_INTEGRATIONS.md`](docs/EXTERNAL_INTEGRATIONS.md).
+- `POST /api/organization/data-exports` creates a password-confirmed tenant backup ZIP with JSONL records, referenced local evidence files, secret redaction, and a checksum manifest; see [`docs/CUSTOMER_DATA_EXPORTS.md`](docs/CUSTOMER_DATA_EXPORTS.md).
 - `POST /api/work-order-parts` is still available for backward compatibility but marked deprecated.
 - `GET /api/inventory/replenishment-requests` returns the role-scoped replenishment queue and server-calculated action capabilities.
 - `POST /api/inventory/replenishment-requests` creates a manual vehicle request with a required business reason and client-generated idempotency key.
@@ -164,7 +166,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260729_0031` (audited offline configured-form conflict resolution).
+- Current schema head: `20260806_0036` (customer data export integrity evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

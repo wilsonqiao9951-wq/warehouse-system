@@ -17,6 +17,7 @@ import {
   Organization,
   OrganizationBillingOverview,
   OrganizationCommercialReport,
+  OrganizationDataExport,
   OrganizationBranding,
   OrganizationSettings,
   OrganizationDomain,
@@ -86,12 +87,12 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000/
 const OFFLINE_QUEUE_KEY = "opf_offline_queue";
 const CLAIM_VERSIONS_KEY = "opf_claim_versions";
 
-async function downloadAuthenticatedCsv(
+async function downloadAuthenticatedFile(
   path: string,
   payload: object,
   fallbackFilename: string
 ): Promise<void> {
-  if (typeof window === "undefined") throw new Error("CSV export requires a browser.");
+  if (typeof window === "undefined") throw new Error("File export requires a browser.");
   const token = window.localStorage.getItem("opf_access_token");
   const response = await fetch(`${API_BASE}${path}`, {
     method: "POST",
@@ -103,7 +104,7 @@ async function downloadAuthenticatedCsv(
     cache: "no-store"
   });
   if (!response.ok) {
-    let detail = `Unable to export report (${response.status})`;
+    let detail = `Unable to export file (${response.status})`;
     try {
       const body = await response.json() as { detail?: string };
       if (body.detail) detail = body.detail;
@@ -1018,10 +1019,18 @@ export const api = {
   getOrganizationCommercialReport: (months = 12) =>
     request<OrganizationCommercialReport>(`/organization/commercial-report?months=${months}`),
   downloadOrganizationCommercialReport: (months: number, accountPassword: string) =>
-    downloadAuthenticatedCsv(
+    downloadAuthenticatedFile(
       "/organization/commercial-report/export",
       { months, account_password: accountPassword },
       "openpartsflow-commercial-usage.csv"
+    ),
+  listOrganizationDataExports: () =>
+    request<OrganizationDataExport[]>("/organization/data-exports"),
+  downloadOrganizationDataExport: (includeFiles: boolean, accountPassword: string) =>
+    downloadAuthenticatedFile(
+      "/organization/data-exports",
+      { include_files: includeFiles, account_password: accountPassword },
+      "openpartsflow-backup.zip"
     ),
   acknowledgeSubscriptionNotice: (noticeId: number, expectedVersion: number) =>
     request<SubscriptionNotice>(`/organization/billing/notices/${noticeId}/acknowledge`, {
@@ -1065,7 +1074,7 @@ export const api = {
       `/platform/commercial-report${periodStart ? `?period_start=${encodeURIComponent(periodStart)}` : ""}`
     ),
   downloadPlatformCommercialReport: (periodStart: string, accountPassword: string) =>
-    downloadAuthenticatedCsv(
+    downloadAuthenticatedFile(
       "/platform/commercial-report/export",
       { period_start: periodStart, account_password: accountPassword },
       `openpartsflow-platform-commercial-${periodStart}.csv`

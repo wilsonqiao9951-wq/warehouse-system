@@ -549,6 +549,26 @@ class BillingReconciliationRead(BaseModel):
     notices_resolved: int = Field(ge=0)
 
 
+class OrganizationDataExportRequest(BaseModel):
+    include_files: bool = True
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class OrganizationDataExportRead(BaseModel):
+    id: int
+    organization_id: int
+    requested_by: int | None = None
+    format_version: Literal["opf-portable-v1"]
+    sha256: str = Field(min_length=64, max_length=64)
+    size_bytes: int = Field(ge=0)
+    record_count: int = Field(ge=0)
+    file_count: int = Field(ge=0)
+    missing_file_count: int = Field(ge=0)
+    include_files: bool
+    table_counts: dict[str, int]
+    generated_at: datetime
+
+
 class CommercialUsagePeriodRead(BaseModel):
     period_start: date
     ai_requests: int = Field(ge=0)

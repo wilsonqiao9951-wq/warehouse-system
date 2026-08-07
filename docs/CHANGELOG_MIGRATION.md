@@ -513,3 +513,23 @@ Verification: commercial report and affected billing suites passed; all 127
 backend tests passed; ESLint and the Next.js 16.2.12 production build passed for
 all 32 static routes; Python dependency consistency passed; production npm
 audit reported 0 vulnerabilities.
+
+## 20260806_0036 - Customer data export integrity evidence
+
+- Adds tenant-owned evidence for each generated portable backup, including the
+  format version, archive SHA-256, size, record/file/missing counts, per-table
+  counts, requester, and generation time.
+- Adds administrator-only, current-password-confirmed ZIP generation with
+  tenant JSONL data, checksum manifest, and optional referenced local media.
+- Excludes password, device, external API key, invitation, and DNS challenge
+  authentication material from every archive.
+- Streams the archive to the requester without retaining a second plaintext
+  server copy and records a secret-free audit event.
+- Refuses downgrade while export integrity evidence exists.
+
+Verification: targeted export/isolation/reauthentication tests passed; fresh
+base-to-`0036` and empty `0036 -> 0035 -> 0036` migration paths passed on SQLite;
+all 130 backend tests passed; configured-evidence downgrade refusal passed;
+ESLint, TypeScript, and the Next.js 16.2.12
+production build passed for all 33 static routes; Python dependency consistency
+and full/production npm audits reported 0 known vulnerabilities.

@@ -111,6 +111,64 @@ class OrganizationUsagePeriod(Base):
     organization = relationship("Organization")
 
 
+class OrganizationDataExport(Base):
+    __tablename__ = "organization_data_exports"
+    __table_args__ = (
+        CheckConstraint(
+            "format_version = 'opf-portable-v1'",
+            name="ck_organization_data_export_format",
+        ),
+        CheckConstraint(
+            "size_bytes >= 0 AND record_count >= 0 AND file_count >= 0 "
+            "AND missing_file_count >= 0",
+            name="ck_organization_data_export_counts_non_negative",
+        ),
+        CheckConstraint(
+            "length(sha256) = 64",
+            name="ck_organization_data_export_sha256",
+        ),
+        Index(
+            "ix_organization_data_export_org_generated",
+            "organization_id",
+            "generated_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    requested_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+        index=True,
+    )
+    format_version: Mapped[str] = mapped_column(
+        String(32),
+        default="opf-portable-v1",
+        nullable=False,
+    )
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    record_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    missing_file_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    include_files: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    table_counts_json: Mapped[str] = mapped_column(Text, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    organization = relationship("Organization")
+    requester = relationship("User")
+
+
 class OrganizationDomain(Base):
     __tablename__ = "organization_domains"
     __table_args__ = (

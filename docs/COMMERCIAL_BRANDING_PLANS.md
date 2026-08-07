@@ -186,7 +186,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260806_0035` before starting the updated application:
+Apply migration `20260806_0036` before starting the updated application:
 
 ```bash
 alembic upgrade head
@@ -195,14 +195,15 @@ alembic upgrade head
 Revision `0032` assigns existing organizations the Professional defaults and
 active subscription state. Revision `0033` creates the monthly usage ledger.
 Revision `0034` adds verified customer domains. Revision `0035` adds provider
-bindings, ordered lifecycle events, and durable subscription notices.
+bindings, ordered lifecycle events, and durable subscription notices. Revision
+`0036` adds customer data export integrity evidence.
 Downgrades are refused when the corresponding customer evidence exists.
 
 ## Next Phase 9 batches
 
 - Provider-specific checkout, invoice, tax, refund, and restricted customer
   billing-recovery portal integration
-- Customer data export and backup/restore evidence
+- Controlled restore validation, dry-run, approval, and application evidence
 - MFA and account recovery for platform and organization administrators
 
 Verified hostname ownership, automatic custom-host login branding, and the
@@ -214,3 +215,7 @@ notices are documented in [`BILLING_LIFECYCLE.md`](BILLING_LIFECYCLE.md).
 
 Tenant/platform usage reports and audited CSV rules are documented in
 [`COMMERCIAL_REPORTING.md`](COMMERCIAL_REPORTING.md).
+
+Tenant-isolated portable backups, secret exclusions, checksum evidence, and the
+controlled restore boundary are documented in
+[`CUSTOMER_DATA_EXPORTS.md`](CUSTOMER_DATA_EXPORTS.md).

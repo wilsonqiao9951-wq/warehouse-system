@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     billing_webhook_secret: str = ""
     billing_webhook_tolerance_seconds: int = 300
     billing_webhook_max_bytes: int = 65536
+    data_export_public_files_root: str = "uploads"
+    data_export_private_files_root: str = "private_uploads"
+    max_data_export_bytes: int = 512 * 1024 * 1024
     # Comma-separated browser origins for CORS (e.g. Cloudflare Tunnel https://xxx.trycloudflare.com)
     cors_extra_origins: str = ""
 

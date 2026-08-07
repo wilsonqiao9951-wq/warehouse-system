@@ -282,3 +282,15 @@ All reads and writes are tenant-scoped. Optional source work orders must already
 Provider events never authorize user actions and do not bypass tenant filters.
 They may update only the documented commercial lifecycle fields and retain no
 raw payload or payment-method data.
+
+## Customer data backups
+
+| Operation | Engineer | Manager | Org admin | Platform admin |
+|---|---:|---:|---:|---:|
+| List organization export evidence | Deny | Deny | Allow | Home tenant only |
+| Generate and download portable backup | Deny | Deny | Allow, current-password reauthentication | Home tenant only |
+
+Exports use the same tenant model registry as application reads. Authentication
+hashes, API key hashes, invitation tokens, device secrets, and DNS verification
+secrets are excluded. The archive contains sensitive business and customer data
+and is streamed only to the authenticated requester.
