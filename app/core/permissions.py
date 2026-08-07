@@ -10,6 +10,7 @@ AUDIT_READ = "audit.read"
 AUDIT_EXPORT = "audit.export"
 REPORTS_READ = "reports.read"
 REPORTS_EXPORT = "reports.export"
+AGENT_USE = "agent.use"
 INTEGRATIONS_READ = "integrations.read"
 INTEGRATIONS_MANAGE = "integrations.manage"
 
@@ -55,6 +56,13 @@ PERMISSIONS = (
         "Export operational analytics",
         "Create password-confirmed work-order analytics CSV exports.",
         frozenset({UserRole.ADMIN}),
+        True,
+    ),
+    PermissionDefinition(
+        AGENT_USE,
+        "Use enterprise operations agent",
+        "Run read-only, evidence-grounded operational analysis.",
+        frozenset({UserRole.ADMIN, UserRole.MANAGER}),
         True,
     ),
     PermissionDefinition(

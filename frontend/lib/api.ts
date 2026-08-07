@@ -49,6 +49,10 @@ import {
   InventoryRegionSummary,
   CrossRegionTransfer,
   EnterpriseAnalytics,
+  EnterpriseAgentIntent,
+  EnterpriseAgentOptions,
+  EnterpriseAgentResponse,
+  EnterpriseAgentRun,
   ReplenishmentRequest,
   VehicleReturnRequest,
   InventoryCount,
@@ -1683,6 +1687,19 @@ export const api = {
     { ...filters, account_password: accountPassword },
     `openpartsflow-operations-${filters.from_date}-${filters.to_date}.csv`
   ),
+  getEnterpriseAgentOptions: () => request<EnterpriseAgentOptions>("/agent/options"),
+  listEnterpriseAgentRuns: (limit = 20) => request<EnterpriseAgentRun[]>(`/agent/runs?limit=${limit}`),
+  runEnterpriseAgent: (payload: {
+    question: string;
+    intent?: EnterpriseAgentIntent;
+    from_date?: string;
+    to_date?: string;
+    engineer_id?: number;
+    job_type?: string;
+  }) => request<EnterpriseAgentResponse>("/agent/operations", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
   getWorkOrderServiceContext: (workOrderId: number, historyLimit = 5) =>
     request<WorkOrderServiceContext>(`/work-orders/${workOrderId}/service-context?history_limit=${historyLimit}`),
   getWorkOrderServiceIntelligence: (workOrderId: number) =>

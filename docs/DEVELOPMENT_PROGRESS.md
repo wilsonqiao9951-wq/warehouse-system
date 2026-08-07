@@ -1211,3 +1211,48 @@ Verification:
   npm audits reported 0 known vulnerabilities.
 - Alembic model comparison reported only the documented pre-existing drift and
   no missing analytics index or other new `0044` operation.
+
+## 2026-08-07 - Phase 9 enterprise operations Agent
+
+Status: implemented, locally migrated, and verified.
+
+Delivered:
+
+- Added a bounded English/Chinese intent resolver for daily brief, backlog,
+  service quality, inventory readiness, and integration delivery health.
+- Reused the reconciled analytics model and added server-owned backlog,
+  inventory, replenishment, and outbound-delivery evidence tools.
+- Added prioritized findings with metric values, units, source tables,
+  definitions, human next steps, confidence, and explicit interpretation
+  limitations.
+- Enforced a hard read-only Agent contract: no work-order, inventory,
+  integration, retry, approval, or custody mutation tool is exposed.
+- Added effective `agent.use`, AI monthly allowance charging, tenant isolation,
+  no-store responses, and a non-metered filter-options endpoint.
+- Added immutable run evidence and matching audit evidence that retain the
+  question SHA-256 digest and length but never raw question or response text.
+- Added a management workspace with presets, shared filters, guardrails,
+  evidence tables, existing-workflow links, and digest-only recent run history.
+- Added Alembic revision `20260807_0045` and protected backup/restore and legacy-
+  adoption head compatibility.
+
+Verification completed so far:
+
+- Three new tests prove evidence reconciliation, read-only business state,
+  tenant isolation, raw-question non-retention, audit/tool trace, AI quota,
+  validation-before-charge, intent classification, role defaults, delegation,
+  and explicit deny behavior.
+- Agent, analytics, and enterprise access-policy regression suites passed (10
+  tests); frontend TypeScript passed and ESLint has no errors.
+- Backend: all 161 tests passed, including complete migration history, legacy
+  adoption, backup/restore, RBAC, tenant isolation, billing/AI quotas, work-
+  order ownership, device authentication, inventory custody, analytics, and
+  Agent guardrails.
+- Fresh base-to-`0045` plus `0045 -> 0044 -> 0045` downgrade/upgrade rehearsal
+  passed on SQLite; the configured local database reports `0045` head.
+- Frontend ESLint and TypeScript passed; the Next.js 16.2.12 production build
+  passed for all 38 static routes.
+- Python compilation and dependency consistency passed; full and production
+  npm audits reported 0 known vulnerabilities.
+- Alembic model comparison reported only the documented pre-existing drift and
+  no missing Agent table, Agent index, or other new `0045` operation.

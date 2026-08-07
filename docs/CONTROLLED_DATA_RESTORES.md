@@ -36,8 +36,8 @@ or `0038` restores remain supported.
 
 The validator rejects:
 
-- unsupported format or database schema revisions (`0036` through `0039`
-  archives are compatible with the `0039` restore workflow);
+- unsupported format or database schema revisions (the explicit compatibility
+  map accepts portable revisions `0036` through the current `0045` workflow);
 - an organization id or slug that differs from the signed-in tenant;
 - missing, duplicate, absolute, parent-relative, backslash, symbolic-link, or
   encrypted ZIP entries;
@@ -69,7 +69,8 @@ Eligible tables:
 Authentication, devices, invitations, domains, billing, usage, external
 credentials, work-order execution/custody, inventory ledgers, approval
 workflows, synchronization logs, imports, export/restore evidence, and audit
-history are validation-only.
+history are validation-only. Enterprise Agent run evidence is also validation-
+only and cannot be rewritten by a restore.
 
 A missing eligible row is included in the create plan only when:
 

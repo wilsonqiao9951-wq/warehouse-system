@@ -47,6 +47,9 @@ never be restored or shared as customer business data:
 The manifest records every excluded table/column. Work-order signatures,
 customer contacts, operational notes, costs, and other business records remain
 in the archive, so the ZIP must be handled as sensitive customer data.
+Enterprise Agent run evidence is included, but it contains only the question
+digest/length, bounded filters, tool names, counts, status, and timing because
+the raw question and generated response are never stored.
 
 ## Integrity evidence
 

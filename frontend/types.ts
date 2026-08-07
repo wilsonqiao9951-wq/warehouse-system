@@ -665,6 +665,81 @@ export interface EnterpriseAnalytics {
   };
 }
 
+export type EnterpriseAgentIntent =
+  | "daily_brief"
+  | "backlog_risk"
+  | "service_quality"
+  | "inventory_risk"
+  | "integration_health";
+
+export interface EnterpriseAgentEvidence {
+  code: string;
+  label: string;
+  value: number | string;
+  unit: string;
+  source: string;
+  definition: string;
+}
+
+export interface EnterpriseAgentFinding {
+  code: string;
+  severity: "info" | "warning" | "critical";
+  title: string;
+  summary: string;
+  recommendation: string;
+  evidence: EnterpriseAgentEvidence[];
+  links: string[];
+}
+
+export interface EnterpriseAgentResponse {
+  run_id: number;
+  generated_at: string;
+  mode: "deterministic_evidence";
+  intent: EnterpriseAgentIntent;
+  summary: string;
+  priority: "normal" | "warning" | "critical";
+  confidence: number;
+  filters: {
+    from_date: string;
+    to_date: string;
+    engineer_id?: number | null;
+    job_type?: string | null;
+    engineers: Array<{ value: string; label: string }>;
+    job_types: Array<{ value: string; label: string }>;
+  };
+  findings: EnterpriseAgentFinding[];
+  tools_used: string[];
+  limitations: string[];
+  guardrails: {
+    read_only: boolean;
+    mutations_performed: string[];
+    raw_question_retained: boolean;
+    cross_tenant_access: boolean;
+    external_model_called: boolean;
+  };
+}
+
+export interface EnterpriseAgentRun {
+  id: number;
+  user_id?: number | null;
+  intent: EnterpriseAgentIntent;
+  question_sha256: string;
+  question_length: number;
+  filters: Record<string, string | number | null>;
+  tools_used: string[];
+  finding_count: number;
+  duration_ms: number;
+  status: string;
+  error_code?: string | null;
+  created_at: string;
+}
+
+export interface EnterpriseAgentOptions {
+  intents: Array<{ value: EnterpriseAgentIntent; label: string }>;
+  engineers: Array<{ value: string; label: string }>;
+  job_types: Array<{ value: string; label: string }>;
+}
+
 export interface StorageLocation {
   id: number;
   warehouse_id: number;

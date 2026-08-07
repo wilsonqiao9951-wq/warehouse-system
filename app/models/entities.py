@@ -1809,6 +1809,65 @@ class AuditLog(Base):
     organization = relationship("Organization")
 
 
+class EnterpriseAgentRun(Base):
+    __tablename__ = "enterprise_agent_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "intent IN ('daily_brief', 'backlog_risk', 'service_quality', "
+            "'inventory_risk', 'integration_health')",
+            name="ck_enterprise_agent_runs_intent",
+        ),
+        CheckConstraint(
+            "status IN ('completed', 'failed')",
+            name="ck_enterprise_agent_runs_status",
+        ),
+        CheckConstraint(
+            "question_length >= 0 AND finding_count >= 0 AND duration_ms >= 0",
+            name="ck_enterprise_agent_runs_counts_non_negative",
+        ),
+        CheckConstraint(
+            "length(question_sha256) = 64",
+            name="ck_enterprise_agent_runs_question_sha256",
+        ),
+        Index(
+            "ix_enterprise_agent_runs_org_created",
+            "organization_id",
+            "created_at",
+        ),
+        Index(
+            "ix_enterprise_agent_runs_org_user_created",
+            "organization_id",
+            "user_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    intent: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    question_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    question_length: Mapped[int] = mapped_column(Integer, nullable=False)
+    filters_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    tools_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    finding_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="completed", nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    organization = relationship("Organization")
+    user = relationship("User")
+
+
 class InventoryNotification(Base):
     __tablename__ = "inventory_notifications"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
