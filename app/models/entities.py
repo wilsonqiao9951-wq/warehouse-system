@@ -555,6 +555,47 @@ class User(Base):
     organization = relationship("Organization")
 
 
+class UserPermissionGrant(Base):
+    __tablename__ = "user_permission_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            "permission_code",
+            name="uq_user_permission_grants_org_user_code",
+        ),
+        CheckConstraint(
+            "effect IN ('allow', 'deny')",
+            name="ck_user_permission_grants_effect",
+        ),
+        Index(
+            "ix_user_permission_grants_org_user",
+            "organization_id",
+            "user_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    permission_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    effect: Mapped[str] = mapped_column(String(10), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    granted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    user = relationship("User", foreign_keys=[user_id])
+    granted_by = relationship("User", foreign_keys=[granted_by_id])
+    organization = relationship("Organization")
+
+
 class Warehouse(Base):
     __tablename__ = "warehouses"
     __table_args__ = (

@@ -17,11 +17,13 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.operations import operations_monitor
+from app.core.permissions import REPORTS_READ, USERS_READ
 from app.core.rbac import (
     Actor,
     get_current_actor,
     require_bound_device,
     require_platform_admin,
+    require_permission,
     require_roles,
     require_work_order_execution_scope,
     require_work_order_owner_scope,
@@ -1392,7 +1394,7 @@ def list_users(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, USERS_READ)
     return db.scalars(select(User).order_by(User.id.desc()).offset(skip).limit(limit)).all()
 
 
@@ -5553,7 +5555,7 @@ def list_return_equipments(
 
 @router.get("/work-orders/{work_order_id}/profit", response_model=WorkOrderProfit)
 def work_order_profit(work_order_id: int, db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, REPORTS_READ)
     work_order = db.get(WorkOrder, work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
@@ -6056,7 +6058,7 @@ async def import_parts_excel(
 
 @router.get("/export/work-orders.xlsx")
 def export_work_orders_excel(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, REPORTS_READ)
     rows = db.scalars(select(WorkOrder).order_by(WorkOrder.id.asc())).all()
     wb = Workbook()
     ws = wb.active
@@ -6198,9 +6200,8 @@ def engineer_dashboard(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER)
-    if actor.role == UserRole.ENGINEER and actor.user_id != user_id:
-        raise HTTPException(status_code=403, detail="Technicians can only view their own dashboard")
+    if actor.role != UserRole.ENGINEER or actor.user_id != user_id:
+        require_permission(actor, REPORTS_READ)
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -6235,7 +6236,7 @@ def admin_warehouse_dashboard(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, REPORTS_READ)
     warehouses = db.scalars(select(Warehouse).order_by(Warehouse.id.asc())).all()
     all_balances = get_stock_balances(db)
     total_parts = db.scalar(select(func.count(Part.id))) or 0
@@ -6299,7 +6300,7 @@ def abnormal_usage_report(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, REPORTS_READ)
     work_orders = db.scalars(select(WorkOrder).order_by(WorkOrder.id.asc())).all()
     if not work_orders:
         return []

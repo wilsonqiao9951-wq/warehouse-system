@@ -23,6 +23,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Tenant and platform commercial usage reports with password-confirmed, audited CSV export
 - Tenant-scoped enterprise audit search, activity summaries, and password-confirmed hash-evidenced CSV export
 - Minimal live/ready probes plus platform-only request, worker, integration, billing, and backup operations monitoring
+- Role-compatible enterprise user access policies with explicit allow/deny/inherit overrides and complete audit evidence
 - Tenant-isolated portable ZIP backups with secret redaction, media manifests, and durable SHA-256 evidence
 - Controlled restore rehearsal, safe record/media recovery, exact-plan application, and drift-protected rollback
 - Auditable replenishment custody from warehouse picking through engineer vehicle receipt
@@ -109,8 +110,9 @@ On a clean `main` branch the script first checks GitHub and applies a fast-forwa
 - `POST /api/external/v1/work-orders` accepts API-key-authenticated, idempotent AppSheet/REST work-order intake. Administrators manage credentials and mappings under `/api/integrations`; see [`docs/EXTERNAL_INTEGRATIONS.md`](docs/EXTERNAL_INTEGRATIONS.md).
 - `POST /api/organization/data-exports` creates a password-confirmed tenant backup ZIP with JSONL records, referenced local evidence files, secret redaction, and a checksum manifest; see [`docs/CUSTOMER_DATA_EXPORTS.md`](docs/CUSTOMER_DATA_EXPORTS.md).
 - `POST /api/organization/data-restores/rehearsals` validates a backup and records a dry-run before separate approval, exact-archive application, and rollback; see [`docs/CONTROLLED_DATA_RESTORES.md`](docs/CONTROLLED_DATA_RESTORES.md).
-- `GET /api/audit-logs/search` and `/summary` provide manager/admin tenant-scoped evidence review; administrators can use password-confirmed `POST /api/audit-logs/export` for a formula-safe, SHA-256-recorded CSV. See [`docs/AUDIT_LOGS.md`](docs/AUDIT_LOGS.md).
+- `GET /api/audit-logs/search` and `/summary` require effective `audit.read`; password-confirmed `POST /api/audit-logs/export` requires `audit.export` and returns a formula-safe, SHA-256-recorded CSV. See [`docs/AUDIT_LOGS.md`](docs/AUDIT_LOGS.md).
 - `GET /health/live` and `/health/ready` provide minimal orchestration probes; platform administrators use `GET /api/platform/operations/summary` and `/platform/operations` for live SLA-operability evidence. See [`docs/OPERATIONS_MONITORING.md`](docs/OPERATIONS_MONITORING.md).
+- `GET /api/permissions/me` resolves role defaults and administrator-issued user overrides; the administrator matrix is documented in [`docs/ENTERPRISE_ACCESS_POLICIES.md`](docs/ENTERPRISE_ACCESS_POLICIES.md).
 - `POST /api/work-order-parts` is still available for backward compatibility but marked deprecated.
 - `GET /api/inventory/replenishment-requests` returns the role-scoped replenishment queue and server-calculated action capabilities.
 - `POST /api/inventory/replenishment-requests` creates a manual vehicle request with a required business reason and client-generated idempotency key.
@@ -175,7 +177,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260807_0041` (enterprise audit-log query indexes).
+- Current schema head: `20260807_0042` (enterprise user access policies).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

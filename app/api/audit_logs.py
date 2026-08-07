@@ -14,9 +14,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.rbac import Actor, get_current_actor, require_roles
+from app.core.permissions import AUDIT_EXPORT, AUDIT_READ
+from app.core.rbac import Actor, get_current_actor, require_permission
 from app.core.security import verify_password
-from app.models import AuditLog, User, UserRole
+from app.models import AuditLog, User
 from app.schemas import (
     AuditLogExportRequest,
     AuditLogPageRead,
@@ -144,7 +145,7 @@ def list_audit_logs(
     actor: Actor = Depends(get_current_actor),
 ):
     """Compatibility list retained for existing API consumers."""
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, AUDIT_READ)
     response.headers["Cache-Control"] = "no-store"
     rows = db.scalars(
         select(AuditLog)
@@ -181,7 +182,7 @@ def search_audit_logs(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, AUDIT_READ)
     response.headers["Cache-Control"] = "no-store"
     _require_valid_range(from_at, to_at)
     conditions = _conditions(
@@ -225,7 +226,7 @@ def summarize_audit_logs(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, AUDIT_READ)
     response.headers["Cache-Control"] = "no-store"
     conditions = _conditions(
         actor,
@@ -273,7 +274,7 @@ def export_audit_logs(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN)
+    require_permission(actor, AUDIT_EXPORT)
     _require_account_reauthentication(db, actor, payload.account_password)
     conditions = _conditions(
         actor,

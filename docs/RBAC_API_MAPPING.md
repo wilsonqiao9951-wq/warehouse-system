@@ -1,5 +1,18 @@
 # OpenPartsFlow RBAC API Mapping
 
+## Enterprise permission overrides
+
+Organization roles provide stable defaults for employee-directory, audit,
+reporting, and external-integration capabilities. Administrators may add an
+explicit `allow`, apply an explicit `deny`, or reset a user to `inherit` through
+the tenant-scoped permission matrix. Deny overrides the role default. Admin
+permissions are immutable, and permission administration itself is never
+delegable. All changes require a reason and append an audit event. See
+[`ENTERPRISE_ACCESS_POLICIES.md`](ENTERPRISE_ACCESS_POLICIES.md).
+
+These policy overrides do not weaken work-order ownership, registered-device,
+claim-version, completion-password, inventory-custody, or tenant checks.
+
 ## Work-order access model
 
 OpenPartsFlow separates visibility, field execution, and management. Frontend capability flags are a usability aid only; every rule is enforced again by the API.
@@ -82,9 +95,9 @@ Structured learning fields (`fault_type`, `error_code`, `environment_info`, `fin
 
 Claim, release, execution, approval, rejection, and completion actions record the actor, role, authentication method, device record, claim version, server timestamp, and action-specific metadata. Passwords and device secrets are never included.
 
-Managers and administrators may search and summarize their organization's audit events through `GET /api/audit-logs/search` and `GET /api/audit-logs/summary`. The tenant condition is explicit in each query in addition to the session-wide tenant filter. Other operational roles are denied.
+The `audit.read` effective permission controls search and summaries; it defaults to managers and administrators. The tenant condition is explicit in each query in addition to the session-wide tenant filter.
 
-Only administrators may call `POST /api/audit-logs/export`. A Bearer-authenticated administrator must re-enter the current account password. The CSV uses the active filters, hardens spreadsheet-formula cells, returns a SHA-256 digest and row count, and then appends an `audit_log_exported` event containing the digest and filters. The password is discarded after verification and never enters the CSV, response metadata, or audit event. See [`AUDIT_LOGS.md`](AUDIT_LOGS.md).
+The `audit.export` permission defaults to administrators and controls `POST /api/audit-logs/export`. A Bearer-authenticated caller must re-enter the current account password. The CSV uses the active filters, hardens spreadsheet-formula cells, returns a SHA-256 digest and row count, and then appends an `audit_log_exported` event containing the digest and filters. The password is discarded after verification and never enters the CSV, response metadata, or audit event. See [`AUDIT_LOGS.md`](AUDIT_LOGS.md).
 
 ## Platform operations monitoring
 
@@ -125,7 +138,7 @@ not yet exist.
 See [Commercial usage reporting](COMMERCIAL_REPORTING.md) for the response and
 export contract.
 
-## External integration access model
+## External integration role defaults
 
 | Operation | Engineer | Manager | Admin | External API key |
 | --- | --- | --- | --- | --- |
@@ -138,6 +151,10 @@ export contract.
 | Claim/start/complete/use parts/change inventory | Existing role rules | Existing role rules | Existing role rules | Deny |
 
 External keys establish the owning organization before any source link, log, or work-order query occurs. Only the key hash is stored. The raw key appears once at creation or rotation, and a deactivated or rotated key returns `401`.
+
+`integrations.read` and `integrations.manage` user overrides can intentionally
+change the human-user defaults in the table. API keys cannot receive these
+permissions, and every integration endpoint continues to apply tenant scope.
 
 `POST /api/external/v1/work-orders` requires a unique `X-Idempotency-Key`. Successful replay is read-only, changed payload reuse returns `409`, and failed events can retry with an incremented attempt count. Allowed field mappings are limited to administrative intake data and `open`/`scheduled` status.
 

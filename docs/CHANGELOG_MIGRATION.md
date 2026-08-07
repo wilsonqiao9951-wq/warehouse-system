@@ -644,3 +644,15 @@ role boundaries, password verification, CSV hardening, and digest evidence
 tests passed; fresh migration through `0041` and legacy-adoption regression
 tests passed; all 144 backend tests passed; ESLint, TypeScript, and the Next.js
 production build passed for all 34 static routes.
+
+## 20260807_0042 - Enterprise user access policies
+
+- Adds tenant-scoped `user_permission_grants` with one `allow` or `deny`
+  override per user and permission code.
+- Adds tenant/user lookup indexes, an effect constraint, administrator actor
+  attribution, mandatory business reason, and timestamps.
+- Keeps role defaults compatible while adding explicit-deny priority and
+  `inherit` reset by deleting the override.
+- Adds an administrator permission matrix, effective-policy navigation, and
+  enforced employee, audit, report, and integration permission boundaries.
+- Updates the protected legacy-adoption head verification through `0042`.
