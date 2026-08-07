@@ -212,7 +212,7 @@ export interface OrganizationDomain {
   updated_at: string;
 }
 
-export type BillingProvider = "manual" | "generic";
+export type BillingProvider = "manual" | "generic" | "stripe";
 export type BillingEventType =
   | "trial.started"
   | "subscription.activated"
@@ -298,6 +298,26 @@ export interface OrganizationBillingOverview {
   trial_ends_at?: string | null;
   account?: BillingAccount | null;
   notices: SubscriptionNotice[];
+  stripe_enabled: boolean;
+  stripe_checkout_plans: PlanCode[];
+  stripe_portal_available: boolean;
+}
+
+export interface StripeRedirectSession {
+  operation_id: number;
+  status: "pending" | "succeeded" | "failed";
+  external_object_id?: string | null;
+  url?: string | null;
+  expires_at?: string | null;
+  replayed: boolean;
+}
+
+export interface StripeRefundResult {
+  operation_id: number;
+  status: "pending" | "succeeded" | "failed";
+  external_object_id?: string | null;
+  amount_minor?: number | null;
+  replayed: boolean;
 }
 
 export interface CommercialUsagePeriod {

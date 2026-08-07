@@ -719,3 +719,26 @@ passed; fresh base-to-`0045` and `0045 -> 0044 -> 0045` migration rehearsals
 passed on SQLite; ESLint, TypeScript, and the Next.js production build passed
 for all 38 static routes; dependency checks and both npm audits passed with 0
 known vulnerabilities.
+
+## 20260807_0046 - Stripe commercial billing
+
+- Adds server-owned Stripe Checkout plan prices and redirect URLs, short-lived
+  customer portal sessions, administrator reauthentication, and platform-only
+  refunds that verify the PaymentIntent belongs to the selected tenant.
+- Adds raw-request-body Stripe signature verification, timestamp tolerance,
+  bounded payloads, ordered subscription lifecycle mapping, and tenant binding
+  from protected Checkout/subscription metadata.
+- Adds durable request digests, Stripe idempotency keys, safe operation results,
+  event receipts, lifecycle evidence, and audit records without storing secrets,
+  card data, redirect capabilities, raw provider responses, or business notes.
+- Adds the organization subscription controls and platform Stripe binding mode,
+  with provider-neutral manual and generic billing compatibility retained.
+- Keeps the new payment and webhook evidence protected from controlled customer
+  restore while extending portable-schema compatibility through `0046`.
+
+Verification: four Stripe contract, signature, tenant, refund, idempotency,
+collision, redirect, audit, and evidence tests passed; all 181 backend tests
+passed after dependency security upgrades; fresh base-to-`0046` and
+`0046 -> 0045 -> 0046` migration rehearsals passed on SQLite; ESLint,
+TypeScript, and the Next.js production build passed for all 38 static routes;
+Python and both npm dependency audits reported 0 known vulnerabilities.

@@ -47,6 +47,8 @@ export default function SettingsPage() {
   const [domainInput, setDomainInput] = useState("");
   const [domainPassword, setDomainPassword] = useState("");
   const [domainBusy, setDomainBusy] = useState(false);
+  const [billingPassword, setBillingPassword] = useState("");
+  const [billingBusy, setBillingBusy] = useState(false);
   const [emailIdentity, setEmailIdentity] = useState({
     from_name: "",
     local_part: "dispatch",
@@ -99,6 +101,32 @@ export default function SettingsPage() {
       await refreshBilling();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to acknowledge subscription notice.");
+    }
+  };
+
+  const openStripeCheckout = async (planCode: "starter" | "professional" | "enterprise") => {
+    try {
+      setBillingBusy(true);
+      setError("");
+      const session = await api.createStripeCheckout(planCode, crypto.randomUUID(), billingPassword);
+      if (!session.url) throw new Error("Checkout session was already used. Please try again.");
+      window.location.assign(session.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to start Stripe checkout.");
+      setBillingBusy(false);
+    }
+  };
+
+  const openStripePortal = async () => {
+    try {
+      setBillingBusy(true);
+      setError("");
+      const session = await api.createStripePortal(crypto.randomUUID(), billingPassword);
+      if (!session.url) throw new Error("Portal session was already used. Please try again.");
+      window.location.assign(session.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to open the Stripe billing portal.");
+      setBillingBusy(false);
     }
   };
 
@@ -338,6 +366,41 @@ export default function SettingsPage() {
               Lifecycle notices are generated from trial dates and verified provider events. Payment methods and card data are never stored here.
             </div>
           </div>
+          {billing?.stripe_enabled && (
+            <div className="card" style={{ marginTop: 16 }}>
+              <h4 style={{ marginTop: 0 }}>Secure subscription management</h4>
+              <p className="muted">
+                Confirm your administrator password before leaving for Stripe. OpenPartsFlow never stores card or payment-method data.
+              </p>
+              <label>
+                Administrator password
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  minLength={10}
+                  value={billingPassword}
+                  onChange={(event) => setBillingPassword(event.target.value)}
+                  required
+                />
+              </label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 12 }}>
+                {billing.stripe_portal_available ? (
+                  <button type="button" onClick={() => void openStripePortal()} disabled={billingBusy || billingPassword.length < 10}>
+                    {billingBusy ? "Opening…" : "Manage billing in Stripe"}
+                  </button>
+                ) : billing.stripe_checkout_plans.map((plan) => (
+                  <button
+                    type="button"
+                    key={plan}
+                    onClick={() => void openStripeCheckout(plan)}
+                    disabled={billingBusy || billingPassword.length < 10}
+                  >
+                    {billingBusy ? "Opening…" : `Choose ${plan}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
             {billing?.notices.length ? billing.notices.slice(0, 8).map((item) => (
               <div className="notice" key={item.id}>

@@ -32,6 +32,8 @@ import {
   PlanCode,
   SubscriptionStatus,
   SubscriptionNotice,
+  StripeRedirectSession,
+  StripeRefundResult,
   UserPermissionMatrix,
   PilotChecklist,
   Part,
@@ -1052,6 +1054,32 @@ export const api = {
     }),
   getOrganizationBilling: () =>
     request<OrganizationBillingOverview>("/organization/billing"),
+  createStripeCheckout: (planCode: PlanCode, clientRequestId: string, accountPassword: string) =>
+    request<StripeRedirectSession>("/organization/billing/stripe/checkout", {
+      method: "POST",
+      body: JSON.stringify({
+        target_plan_code: planCode,
+        client_request_id: clientRequestId,
+        account_password: accountPassword
+      })
+    }),
+  createStripePortal: (clientRequestId: string, accountPassword: string) =>
+    request<StripeRedirectSession>("/organization/billing/stripe/portal", {
+      method: "POST",
+      body: JSON.stringify({ client_request_id: clientRequestId, account_password: accountPassword })
+    }),
+  createStripeRefund: (payload: {
+    organization_id: number;
+    payment_intent_id: string;
+    amount_minor?: number | null;
+    reason: "duplicate" | "fraudulent" | "requested_by_customer";
+    business_reason: string;
+    client_request_id: string;
+    account_password: string;
+  }) => request<StripeRefundResult>("/platform/billing/stripe/refunds", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
   getOrganizationCommercialReport: (months = 12) =>
     request<OrganizationCommercialReport>(`/organization/commercial-report?months=${months}`),
   getAuditLogs: (filters: AuditLogFilters = {}, beforeId?: number, limit = 50) => {
