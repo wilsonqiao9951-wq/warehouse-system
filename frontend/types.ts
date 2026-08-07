@@ -11,6 +11,33 @@ export interface User {
   is_platform_admin: boolean;
 }
 
+export type PermissionEffect = "allow" | "deny" | "inherit";
+
+export interface PermissionDefinition {
+  code: string;
+  name: string;
+  description: string;
+  default_roles: UserRole[];
+  sensitive: boolean;
+}
+
+export interface PermissionOverride {
+  permission_code: string;
+  effect: Exclude<PermissionEffect, "inherit">;
+  reason?: string | null;
+  granted_by_id?: number | null;
+  updated_at: string;
+}
+
+export interface UserPermissionMatrix {
+  user_id: number;
+  role: UserRole;
+  role_permissions: string[];
+  effective_permissions: string[];
+  overrides: PermissionOverride[];
+  definitions: PermissionDefinition[];
+}
+
 export interface AuthToken {
   access_token: string;
   token_type: "bearer";

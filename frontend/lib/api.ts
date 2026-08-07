@@ -2,6 +2,7 @@ import {
   AuditLogFilters,
   AuditLogPage,
   AuditLogSummary,
+  PermissionEffect,
   PlatformOperationsSummary,
   BillingLifecycleEvent,
   BillingProvider,
@@ -31,6 +32,7 @@ import {
   PlanCode,
   SubscriptionStatus,
   SubscriptionNotice,
+  UserPermissionMatrix,
   PilotChecklist,
   Part,
   PartRecognitionCandidate,
@@ -967,6 +969,18 @@ function requestWithOfflineMediaQueue<T>(
 }
 
 export const api = {
+  getMyPermissions: () => request<UserPermissionMatrix>("/permissions/me"),
+  getUserPermissions: (userId: number) =>
+    request<UserPermissionMatrix>(`/users/${userId}/permissions`),
+  setUserPermission: (
+    userId: number,
+    permissionCode: string,
+    effect: PermissionEffect,
+    reason: string
+  ) => request<UserPermissionMatrix>(
+    `/users/${userId}/permissions/${encodeURIComponent(permissionCode)}`,
+    { method: "PUT", body: JSON.stringify({ effect, reason }) }
+  ),
   login: (email: string, password: string) => {
     const device = ensureDeviceCredentials();
     const form = new URLSearchParams({ username: email, password });

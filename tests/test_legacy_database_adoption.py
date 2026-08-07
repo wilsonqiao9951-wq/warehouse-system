@@ -113,7 +113,7 @@ def test_legacy_adoption_dry_run_is_read_only_and_validates_derivations(tmp_path
     report = adopt_legacy_sqlite_database(database, project_root=PROJECT_ROOT)
 
     assert report.status == "validated"
-    assert report.head_revision == "20260807_0041"
+    assert report.head_revision == "20260807_0042"
     assert report.source_row_count >= 10
     assert report.backup_database is None
     assert report.report_file is None
@@ -151,7 +151,7 @@ def test_legacy_adoption_apply_preserves_data_backup_and_audit_report(tmp_path):
 
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [
-            ("20260807_0041",)
+            ("20260807_0042",)
         ]
         assert connection.execute(
             "SELECT ticket_number, wo_number, outlet_name, description, "

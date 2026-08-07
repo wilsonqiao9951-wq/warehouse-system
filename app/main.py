@@ -16,6 +16,7 @@ from app.api.data_exports import router as data_exports_router
 from app.api.data_restores import router as data_restores_router
 from app.api.audit_logs import router as audit_logs_router
 from app.api.operations import router as operations_router
+from app.api.permissions import router as permissions_router
 from app.core.config import settings
 from app.core.database import SessionLocal, ensure_schema_ready, get_db
 from app.core.logging import setup_logging
@@ -131,6 +132,7 @@ app.include_router(data_restores_router, prefix="/api")
 app.include_router(audit_logs_router, prefix="/api")
 app.include_router(integrations_router, prefix="/api")
 app.include_router(work_order_forms_router, prefix="/api")
+app.include_router(permissions_router, prefix="/api")
 app.include_router(operations_router)
 app.include_router(pages_router)
 uploads_dir = Path("uploads")

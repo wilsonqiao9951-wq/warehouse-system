@@ -19,7 +19,10 @@ Supported provider labels are:
 
 The raw API key is returned only on creation or rotation. OpenPartsFlow stores a SHA-256 hash and a short lookup prefix, never the usable key. Rotating a key invalidates the previous key immediately. Deactivating an integration rejects every webhook call.
 
-Managers may view integrations, mappings, and sync logs. Only administrators may create, edit, deactivate, or rotate credentials.
+`integrations.read` defaults to managers and administrators;
+`integrations.manage` defaults to administrators. A tenant administrator can
+explicitly allow or deny either capability for a non-administrator. Tenant
+scope, one-time secret display, and audit requirements are unchanged.
 
 Management endpoints:
 

@@ -33,6 +33,44 @@ class UserRead(UserBase):
         from_attributes = True
 
 
+class PermissionDefinitionRead(BaseModel):
+    code: str
+    name: str
+    description: str
+    default_roles: list[UserRole]
+    sensitive: bool
+
+
+class PermissionOverrideRead(BaseModel):
+    permission_code: str
+    effect: Literal["allow", "deny"]
+    reason: str | None = None
+    granted_by_id: int | None = None
+    updated_at: datetime
+
+
+class UserPermissionMatrixRead(BaseModel):
+    user_id: int
+    role: UserRole
+    role_permissions: list[str]
+    effective_permissions: list[str]
+    overrides: list[PermissionOverrideRead]
+    definitions: list[PermissionDefinitionRead]
+
+
+class PermissionOverrideUpdate(BaseModel):
+    effect: Literal["allow", "deny", "inherit"]
+    reason: str = Field(min_length=3, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("reason must contain at least 3 non-whitespace characters")
+        return normalized
+
+
 class PasswordSet(BaseModel):
     password: str = Field(min_length=10, max_length=128)
 

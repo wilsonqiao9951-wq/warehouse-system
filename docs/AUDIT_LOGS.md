@@ -1,17 +1,22 @@
 # Enterprise Audit Logs
 
 OpenPartsFlow records tenant-owned operational evidence in `audit_logs`.
-Managers and administrators can review evidence; only an administrator who
-re-verifies the current account password can export it.
+`audit.read` defaults to managers and administrators. `audit.export` defaults
+to administrators and also requires current-account password verification.
+Administrators can explicitly allow or deny these capabilities for a
+non-administrator through the enterprise access policy matrix.
 
 ## Access boundaries
 
-| Operation | Manager | Administrator | Other roles |
+| Operation | Manager default | Administrator | Other-role default |
 | --- | --- | --- | --- |
 | Legacy list | Allow | Allow | Deny |
 | Search and cursor pagination | Allow | Allow | Deny |
 | 30-day summary | Allow | Allow | Deny |
 | CSV export | Deny | Password-confirmed Bearer session | Deny |
+
+An explicit user override may change a non-administrator default in this table.
+Password verification, tenant scope, row limits, and audit evidence still apply.
 
 Every query includes the actor's `organization_id` explicitly. The normal
 SQLAlchemy tenant-session filter remains active as a second boundary. User
@@ -90,7 +95,7 @@ entity investigations bounded as the evidence table grows.
 
 After deployment:
 
-1. run `python -m scripts.prepare_database` and confirm head `20260807_0041`;
+1. run `python -m scripts.prepare_database` and confirm the current Alembic head;
 2. sign in as a manager and confirm search/summary work but export is absent;
 3. sign in as an administrator and verify an incorrect password is rejected;
 4. export a narrow time range and compare the file SHA-256 with the response;

@@ -10,7 +10,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.rbac import Actor, get_current_actor, require_roles
+from app.core.permissions import INTEGRATIONS_MANAGE, INTEGRATIONS_READ
+from app.core.rbac import Actor, get_current_actor, require_permission
 from app.models import (
     AuditLog,
     ExternalIntegration,
@@ -18,7 +19,6 @@ from app.models import (
     ExternalWorkOrderLink,
     Organization,
     Part,
-    UserRole,
     Warehouse,
     WorkOrder,
 )
@@ -123,7 +123,7 @@ def list_integrations(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, INTEGRATIONS_READ)
     rows = db.scalars(
         select(ExternalIntegration).order_by(
             ExternalIntegration.is_active.desc(),
@@ -143,7 +143,7 @@ def create_integration(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN)
+    require_permission(actor, INTEGRATIONS_MANAGE)
     mapping = validate_field_mapping(payload.field_mapping)
     webhook_url = validate_webhook_url(payload.webhook_url)
     subscribed_events = validate_subscribed_events(payload.subscribed_events)
@@ -193,7 +193,7 @@ def update_integration(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN)
+    require_permission(actor, INTEGRATIONS_MANAGE)
     integration = _integration_or_404(db, integration_id)
     if integration.version != payload.expected_version:
         raise HTTPException(status_code=409, detail="Integration version is stale")
@@ -265,7 +265,7 @@ def rotate_integration_key(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN)
+    require_permission(actor, INTEGRATIONS_MANAGE)
     integration = _integration_or_404(db, integration_id)
     if integration.version != payload.expected_version:
         raise HTTPException(status_code=409, detail="Integration version is stale")
@@ -309,7 +309,7 @@ def list_integration_sync_logs(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
+    require_permission(actor, INTEGRATIONS_READ)
     _integration_or_404(db, integration_id)
     stmt = select(ExternalSyncLog).where(
         ExternalSyncLog.integration_id == integration_id
@@ -335,7 +335,7 @@ def retry_integration_delivery(
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
-    require_roles(actor, UserRole.ADMIN)
+    require_permission(actor, INTEGRATIONS_MANAGE)
     _integration_or_404(db, integration_id)
     log = db.get(ExternalSyncLog, log_id)
     if (

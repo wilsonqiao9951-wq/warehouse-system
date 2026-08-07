@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, with_loader_criteria
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.permissions import effective_permission_codes
 from app.core.security import decode_access_token
 from app.services.commercial import require_subscription_access
 from app.models import (
@@ -47,6 +48,7 @@ from app.models import (
     User,
     UserDevice,
     UserInvitation,
+    UserPermissionGrant,
     UserRole,
     Warehouse,
     WorkOrder,
@@ -103,6 +105,7 @@ TENANT_MODELS = (
     VehicleReturnRequest,
     ImportBatch,
     UserInvitation,
+    UserPermissionGrant,
     WorkOrderVoiceNote,
 )
 
@@ -152,6 +155,11 @@ class Actor:
     device_record_id: int | None = None
     device_verified: bool = False
     claim_version: int | None = None
+    permission_overrides: dict[str, bool] | None = None
+
+    @property
+    def permissions(self) -> set[str]:
+        return effective_permission_codes(self.role, self.permission_overrides)
 
 
 def get_current_actor(
@@ -163,7 +171,14 @@ def get_current_actor(
 ) -> Actor:
     if not settings.rbac_enforce:
         db.info["organization_id"] = 1
-        return Actor(user_id=None, role=UserRole.ADMIN, organization_id=1, is_platform_admin=True, auth_method="test")
+        return Actor(
+            user_id=None,
+            role=UserRole.ADMIN,
+            organization_id=1,
+            is_platform_admin=True,
+            auth_method="test",
+            permission_overrides={},
+        )
 
     token_organization_id: int | None = None
     token_device_id: str | None = None
@@ -202,6 +217,15 @@ def get_current_actor(
         platform_admin=user.is_platform_admin,
     )
     db.info["organization_id"] = user.organization_id
+    permission_overrides = {
+        row.permission_code: row.effect == "allow"
+        for row in db.scalars(
+            select(UserPermissionGrant).where(
+                UserPermissionGrant.organization_id == user.organization_id,
+                UserPermissionGrant.user_id == user.id,
+            )
+        ).all()
+    }
     device = None
     device_verified = False
     if token_device_id:
@@ -226,6 +250,7 @@ def get_current_actor(
         device_record_id=device.id if device else None,
         device_verified=device_verified,
         claim_version=x_claim_version,
+        permission_overrides=permission_overrides,
     )
 
 
@@ -239,6 +264,14 @@ def require_roles(actor: Actor, *roles: UserRole) -> None:
 def require_platform_admin(actor: Actor) -> None:
     if not actor.is_platform_admin:
         raise HTTPException(status_code=403, detail="Platform administrator access required")
+
+
+def require_permission(actor: Actor, permission_code: str) -> None:
+    if permission_code not in actor.permissions:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Permission required: {permission_code}",
+        )
 
 
 def require_work_order_scope(db: Session, actor: Actor, work_order_id: int) -> None:

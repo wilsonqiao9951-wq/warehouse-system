@@ -1091,3 +1091,40 @@ Verification:
 - Backend: all 147 tests passed.
 - Frontend ESLint and TypeScript passed; Next.js production build passed for
   all 35 static routes.
+
+## 2026-08-07 - Phase 9 enterprise access policies
+
+Status: implemented, locally migrated, and verified.
+
+Delivered:
+
+- Added an allowlisted permission catalog for employee-directory, audit,
+  reporting, and external-integration capabilities.
+- Added compatible role defaults plus per-user `allow`, `deny`, and `inherit`
+  resolution; explicit deny wins while administrator access remains immutable.
+- Added tenant-scoped permission read and administrator management APIs with a
+  mandatory reason and `change_user_permission` audit evidence.
+- Applied effective permissions to employee reads, tenant audit reads/exports,
+  operational reports, work-order profit/export, and integration read/manage
+  endpoints without changing work-order ownership or custody controls.
+- Added an administrator permission matrix to Employees and effective-policy
+  navigation for Employees, Reports, Audit Logs, and Integrations.
+- Added Alembic revision `20260807_0042`, upgraded the configured local
+  database from `0041`, and documented resolution, endpoints, isolation, and
+  deployment rules.
+
+Verification:
+
+- Role defaults, explicit allow, deny priority, inherit reset, audit evidence,
+  delegated read/manage boundaries, immutable administrators, unknown codes,
+  and cross-tenant isolation passed in 3 new tests.
+- Related RBAC, enterprise audit, and external integration regressions passed;
+  12 targeted backend tests passed.
+- Backend: all 150 tests passed, including full migration history, legacy
+  adoption, backup/restore, concurrency, RBAC, and custody coverage.
+- Fresh base-to-`0042` plus `0042 -> 0041 -> 0042` downgrade/upgrade rehearsal
+  passed on SQLite.
+- Frontend ESLint and TypeScript checks passed; the Next.js 16.2.12 production
+  build passed for all 35 static routes.
+- Python compilation and dependency consistency passed; full and production
+  npm audits reported 0 known vulnerabilities.

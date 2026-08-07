@@ -11,6 +11,7 @@ type NavLink = {
   roles: string[];
   platformOnly?: boolean;
   exact?: boolean;
+  permission?: string;
 };
 
 const links: NavLink[] = [
@@ -24,16 +25,16 @@ const links: NavLink[] = [
   { href: "/inventory-counts", label: "Inventory Counts", roles: ["warehouse", "manager", "admin"] },
   { href: "/knowledge-base", label: "Service Knowledge", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/part-observation", label: "Photo Memory", roles: ["warehouse", "manager", "admin", "engineer"] },
-  { href: "/employees", label: "Employees", roles: ["manager", "admin"] },
-  { href: "/reports", label: "Reports", roles: ["manager", "admin"] },
-  { href: "/audit-logs", label: "Audit Logs", roles: ["manager", "admin"] },
+  { href: "/employees", label: "Employees", roles: ["manager", "admin"], permission: "users.read" },
+  { href: "/reports", label: "Reports", roles: ["manager", "admin"], permission: "reports.read" },
+  { href: "/audit-logs", label: "Audit Logs", roles: ["manager", "admin"], permission: "audit.read" },
   { href: "/backups", label: "Backups", roles: ["admin"] },
   { href: "/pilot-checklist", label: "Pilot Checklist", roles: ["manager", "admin"] },
   { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
   { href: "/work-order-templates", label: "Job Forms", roles: ["manager", "admin"] },
   { href: "/form-actions", label: "Form Actions", roles: ["warehouse", "manager", "admin"] },
   { href: "/sync-conflicts", label: "Sync Conflicts", roles: ["admin"] },
-  { href: "/integrations", label: "Integrations", roles: ["manager", "admin"] },
+  { href: "/integrations", label: "Integrations", roles: ["manager", "admin"], permission: "integrations.read" },
   { href: "/platform", label: "Customers", roles: ["admin"], platformOnly: true, exact: true },
   { href: "/platform/operations", label: "Operations", roles: ["admin"], platformOnly: true },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },
@@ -60,6 +61,7 @@ export default function Nav() {
   const [role, setRole] = useState("admin");
   const [authenticated, setAuthenticated] = useState(false);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [permissions, setPermissions] = useState<string[] | null>(null);
 
   useEffect(() => {
     const saved = window.localStorage.getItem("opf_role");
@@ -72,11 +74,12 @@ export default function Nav() {
         setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
         return;
       }
-      api.getMe()
-        .then((user) => {
+      Promise.all([api.getMe(), api.getMyPermissions()])
+        .then(([user, permissionMatrix]) => {
           setAuthenticated(true);
           setRole(user.role);
           setIsPlatformAdmin(user.is_platform_admin);
+          setPermissions(permissionMatrix.effective_permissions);
           window.localStorage.setItem("opf_role", user.role);
           window.localStorage.setItem("opf_user_id", String(user.id));
         })
@@ -108,13 +111,18 @@ export default function Nav() {
   const visibleLinks = useMemo(() => {
     if (!authenticated) return [];
     const items = links.filter(
-      (link) => link.roles.includes(role) && (!link.platformOnly || isPlatformAdmin)
+      (link) => (
+        (link.permission && permissions
+          ? permissions.includes(link.permission)
+          : link.roles.includes(role))
+        && (!link.platformOnly || isPlatformAdmin)
+      )
     );
     if (role === "engineer") {
       return sortEngineerLinks(items);
     }
     return items;
-  }, [authenticated, isPlatformAdmin, role]);
+  }, [authenticated, isPlatformAdmin, permissions, role]);
 
   return (
     <>
