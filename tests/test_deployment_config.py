@@ -73,6 +73,11 @@ def test_safe_production_configuration_and_cors_are_accepted():
             "storage roots must be distinct",
         ),
         ({"billing_webhook_secret": "change-me"}, "BILLING_WEBHOOK_SECRET"),
+        ({"worker_lease_seconds": 20}, "WORKER_LEASE_SECONDS"),
+        (
+            {"worker_lease_seconds": 90, "worker_lease_heartbeat_seconds": 31},
+            "WORKER_LEASE_HEARTBEAT_SECONDS",
+        ),
     ],
 )
 def test_unsafe_deployment_configuration_fails_closed(overrides, message):

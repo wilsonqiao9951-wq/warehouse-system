@@ -22,6 +22,7 @@ from app.models import (
     OrganizationDataRestore,
     SubscriptionNotice,
     User,
+    WorkerLease,
 )
 from app.schemas import (
     OperationsStaleDeliveryRecovery,
@@ -123,6 +124,18 @@ def platform_operations_summary(
         window_seconds=settings.operations_request_window_seconds,
         now=now,
     )
+    leases = {
+        row.name: row
+        for row in db.scalars(select(WorkerLease)).all()
+    }
+    for worker in snapshot["workers"]:
+        lease = leases.get(worker["name"])
+        worker.update(
+            lease_generation=lease.generation if lease else None,
+            lease_expires_at=utc_iso(lease.lease_expires_at) if lease else None,
+            next_run_at=utc_iso(lease.next_run_at) if lease else None,
+            run_started_at=utc_iso(lease.run_started_at) if lease else None,
+        )
 
     pending_conditions = (
         ExternalSyncLog.direction == "outbound",

@@ -173,7 +173,7 @@ export interface OperationsRequestMetrics {
 export interface OperationsWorker {
   name: string;
   enabled: boolean;
-  status: "disabled" | "starting" | "ok" | "error" | "stale";
+  status: "disabled" | "starting" | "standby" | "ok" | "error" | "stale";
   interval_seconds: number;
   grace_seconds: number;
   last_started_at?: string | null;
@@ -181,6 +181,11 @@ export interface OperationsWorker {
   last_error_at?: string | null;
   last_error_type?: string | null;
   last_result_count?: number | null;
+  last_standby_at?: string | null;
+  lease_generation?: number | null;
+  lease_expires_at?: string | null;
+  next_run_at?: string | null;
+  run_started_at?: string | null;
 }
 
 export interface OperationsAlert {

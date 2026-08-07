@@ -291,6 +291,7 @@ def process_due_deliveries(
     session_factory,
     *,
     limit: int = 50,
+    heartbeat: Callable[[], None] | None = None,
 ) -> int:
     now = datetime.utcnow()
     with session_factory() as scan_db:
@@ -313,6 +314,8 @@ def process_due_deliveries(
 
     processed = 0
     for log_id in ids:
+        if heartbeat:
+            heartbeat()
         try:
             with session_factory() as db:
                 log = db.get(ExternalSyncLog, log_id)
@@ -323,4 +326,6 @@ def process_due_deliveries(
                 processed += 1
         except Exception:
             logger.exception("Unexpected outbound webhook delivery failure", extra={"log_id": log_id})
+        if heartbeat:
+            heartbeat()
     return processed

@@ -12,6 +12,7 @@ from app.models import (
     Organization,
     SubscriptionNotice,
     User,
+    WorkerLease,
 )
 
 
@@ -64,6 +65,15 @@ def test_operations_monitor_tracks_requests_worker_errors_and_staleness():
     assert delivery["status"] == "ok"
     assert delivery["last_result_count"] == 4
     assert delivery["last_error_type"] is None
+
+    monitor.worker_standby(
+        "integration_delivery",
+        at=base + timedelta(seconds=64),
+    )
+    standby = monitor.snapshot(window_seconds=30, now=base + timedelta(seconds=65))
+    delivery = next(row for row in standby["workers"] if row["name"] == "integration_delivery")
+    assert delivery["status"] == "standby"
+    assert delivery["last_standby_at"].endswith("Z")
 
 
 def test_health_probes_and_platform_summary_report_real_operational_risks(client):
@@ -152,6 +162,17 @@ def test_health_probes_and_platform_summary_report_real_operational_risks(client
                 ),
             ]
         )
+        db.add(
+            WorkerLease(
+                name="integration_delivery",
+                owner_id="private-host:1234:secret-instance",
+                generation=3,
+                acquired_at=now,
+                heartbeat_at=now,
+                lease_expires_at=now + timedelta(seconds=90),
+                next_run_at=now + timedelta(seconds=30),
+            )
+        )
         db.commit()
 
     for index in range(20):
@@ -176,6 +197,14 @@ def test_health_probes_and_platform_summary_report_real_operational_risks(client
     assert payload["data_protection"]["active_organizations"] == 2
     assert payload["data_protection"]["organizations_without_recent_backup"] == 2
     assert payload["requests"]["server_errors"] >= 2
+    delivery_worker = next(
+        row for row in payload["workers"]
+        if row["name"] == "integration_delivery"
+    )
+    assert delivery_worker["lease_generation"] == 3
+    assert delivery_worker["lease_expires_at"]
+    assert delivery_worker["next_run_at"]
+    assert "private-host" not in summary.text
     alert_codes = {row["code"] for row in payload["alerts"]}
     assert {
         "outbound_delivery_due",

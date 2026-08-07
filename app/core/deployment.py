@@ -207,6 +207,15 @@ def validate_deployment_settings(config: Settings = settings) -> None:
         if config.stripe_request_timeout_seconds < 1 or config.stripe_request_timeout_seconds > 60:
             errors.append("STRIPE_REQUEST_TIMEOUT_SECONDS must be between 1 and 60")
 
+    if not 30 <= config.worker_lease_seconds <= 3600:
+        errors.append("WORKER_LEASE_SECONDS must be between 30 and 3600")
+    if not 1 <= config.worker_lease_heartbeat_seconds <= 300:
+        errors.append("WORKER_LEASE_HEARTBEAT_SECONDS must be between 1 and 300")
+    elif config.worker_lease_heartbeat_seconds * 3 > config.worker_lease_seconds:
+        errors.append(
+            "WORKER_LEASE_HEARTBEAT_SECONDS must be no more than one third of WORKER_LEASE_SECONDS"
+        )
+
     if errors:
         formatted = "\n".join(f"- {error}" for error in errors)
         raise DeploymentConfigurationError(

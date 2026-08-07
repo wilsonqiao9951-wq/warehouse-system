@@ -324,6 +324,48 @@ class OrganizationDataRestore(Base):
     matched_export = relationship("OrganizationDataExport")
 
 
+class WorkerLease(Base):
+    __tablename__ = "worker_leases"
+    __table_args__ = (
+        CheckConstraint(
+            "length(trim(name)) > 0 AND length(trim(owner_id)) > 0",
+            name="ck_worker_leases_identity_nonblank",
+        ),
+        CheckConstraint(
+            "generation >= 1",
+            name="ck_worker_leases_generation_positive",
+        ),
+        CheckConstraint(
+            "lease_expires_at >= heartbeat_at",
+            name="ck_worker_leases_expiration_after_heartbeat",
+        ),
+        CheckConstraint(
+            "last_result_count IS NULL OR last_result_count >= 0",
+            name="ck_worker_leases_result_non_negative",
+        ),
+        Index("ix_worker_leases_expiration", "lease_expires_at"),
+        Index("ix_worker_leases_next_run", "next_run_at"),
+    )
+
+    name: Mapped[str] = mapped_column(String(80), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    acquired_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    heartbeat_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    lease_expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    run_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error_type: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    last_result_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class OrganizationDomain(Base):
     __tablename__ = "organization_domains"
     __table_args__ = (

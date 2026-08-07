@@ -87,6 +87,7 @@ jobs:
       - run: alembic check
       - run: python -c "from sqlalchemy import create_engine, text; from app.core.config import settings; from app.services.legacy_database_adoption import current_schema_head; assert create_engine(settings.database_url).connect().scalar(text('SELECT version_num FROM alembic_version')) == current_schema_head()"
       - run: python -m scripts.verify_postgres_rls
+      - run: python -m scripts.verify_worker_leases
       - run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
         env:
           DATABASE_URL: postgresql+psycopg://openpartsflow_app:ci-app-postgres-password@db:5432/openpartsflow

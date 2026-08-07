@@ -254,10 +254,25 @@ def reconcile_billing_lifecycle(
     session_factory: Callable[[], Session],
     *,
     now: datetime | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> BillingReconciliationStats:
+    if heartbeat:
+        heartbeat()
     with session_factory() as db:
-        stats = reconcile_all_billing(db, now=now)
+        # SQLite serializes the commercial write transaction across the whole
+        # database, so a second heartbeat connection cannot write concurrently.
+        # Deployable environments use PostgreSQL and renew between organizations.
+        transaction_heartbeat = (
+            heartbeat if db.get_bind().dialect.name != "sqlite" else None
+        )
+        stats = reconcile_all_billing(
+            db,
+            now=now,
+            heartbeat=transaction_heartbeat,
+        )
         db.commit()
+    if heartbeat:
+        heartbeat()
     return stats
 
 
@@ -265,6 +280,7 @@ def reconcile_all_billing(
     db: Session,
     *,
     now: datetime | None = None,
+    heartbeat: Callable[[], None] | None = None,
 ) -> BillingReconciliationStats:
     checked_at = now or utcnow_naive()
     total_created = 0
@@ -280,6 +296,8 @@ def reconcile_all_billing(
         for row in db.scalars(select(OrganizationBillingAccount)).all()
     }
     for organization in organizations:
+        if heartbeat:
+            heartbeat()
         stats = reconcile_organization_billing(
             db,
             organization,

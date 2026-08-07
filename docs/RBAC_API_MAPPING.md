@@ -110,6 +110,13 @@ The `audit.export` permission defaults to administrators and controls `POST /api
 
 `GET /api/platform/operations/summary` requires `is_platform_admin=true`, not merely the customer `admin` role. The endpoint deliberately removes the tenant session scope only after that platform check, then aggregates actionable counts across integration delivery, billing notices, backups, and restore conflicts. Customer administrators, managers, engineers, warehouse users, assistants, API keys, and unauthenticated callers are denied. Detailed worker exception messages are not retained or returned; only the exception class is exposed to the platform operator. See [`OPERATIONS_MONITORING.md`](OPERATIONS_MONITORING.md).
 
+Background scheduler ownership is elected through the platform-global database
+lease table. The platform summary exposes generation, expiration, current-run,
+and next-run evidence but never the opaque host/process owner identifier.
+Non-owner API replicas report healthy `standby`; every lease mutation requires
+the exact owner plus generation fencing token. See
+[`WORKER_LEASES.md`](WORKER_LEASES.md).
+
 ## Automated acceptance coverage
 
 - Same-organization engineers all see the pool; cross-tenant data remains isolated.

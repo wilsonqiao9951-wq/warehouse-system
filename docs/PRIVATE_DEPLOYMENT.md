@@ -147,10 +147,15 @@ docker compose --env-file .env.production -f docker-compose.production.yml run -
 docker compose --env-file .env.production -f docker-compose.production.yml up -d --remove-orphans
 ```
 
-Never reuse a release tag for different code. The current application contains
-in-process integration and billing schedulers, so this topology intentionally
-runs one API replica. Horizontal API scaling first requires moving scheduled
-workers to separately leased worker processes.
+Never reuse a release tag for different code. Integration and billing schedulers
+use shared PostgreSQL leases, generation fencing, heartbeats, and a durable
+next-run schedule, so replicated API processes do not run the same scheduler
+cycle concurrently. See [`WORKER_LEASES.md`](WORKER_LEASES.md).
+
+The reference Compose topology still runs one API replica because it is a
+single-host package with local named media volumes and one bundled proxy. Scale
+API instances only behind an orchestrator/load balancer that provides the same
+PostgreSQL database and shared durable media storage to every replica.
 
 ## Backup and restore controls
 
@@ -190,4 +195,6 @@ For suspected compromise:
   encryption belong to the customer infrastructure layer.
 - Compose provides single-host availability, not multi-host failover.
 - Named volumes are persistent but are not backups.
-- Object storage and external worker leasing are future scale-out changes.
+- Multi-host deployments require shared object/media storage and an external
+  load balancer/orchestrator; database worker leases solve scheduler election,
+  not storage replication or host failover by themselves.
