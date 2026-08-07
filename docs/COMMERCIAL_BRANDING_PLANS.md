@@ -175,6 +175,13 @@ Platform updates use the same optimistic `settings_version`. Trial dates receive
 with a timezone are normalized to naive UTC before database comparison and
 storage.
 
+Enterprise organizations may also be pinned to the current
+`DEPLOYMENT_REGION`. Setting or clearing the region requires the platform
+administrator's account password, increments `settings_version`, and creates a
+dedicated audit event. A pinned organization cannot be downgraded to another
+plan until the residency assignment is explicitly cleared. See
+[`DATA_RESIDENCY.md`](DATA_RESIDENCY.md).
+
 ## Audit and isolation
 
 - Branding mutation is restricted to the authenticated organization
@@ -192,7 +199,7 @@ storage.
 
 ## Deployment
 
-Apply migration `20260807_0054` before starting the updated application:
+Apply migration `20260807_0055` before starting the updated application:
 
 ```bash
 alembic upgrade head
@@ -217,6 +224,8 @@ migration credential from the restricted `NOBYPASSRLS` application credential.
 Revision `0054` reconciles the database/model schema contract, makes governed
 knowledge timestamps non-null, and changes warehouse name uniqueness from
 global to organization-scoped.
+Revision `0055` adds Enterprise organization residency assignment and evidence,
+plus a guarded downgrade that refuses to remove an active residency policy.
 
 ## Phase 9 deployment defense
 

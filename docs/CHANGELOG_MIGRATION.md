@@ -886,3 +886,24 @@ TypeScript, and the Next.js 16.2.12 production build passed for all 40 static
 routes; Python and npm dependency audits reported 0 known vulnerabilities;
 production configuration, Compose configuration, and API/web image builds
 passed.
+
+## 20260807_0055 - Enterprise data residency controls
+
+- Added a required normalized `DEPLOYMENT_REGION` for staging and production,
+  plus a pre-worker database guard that refuses startup when any pinned
+  organization belongs to another region.
+- Added Enterprise-only organization residency assignment with optimistic
+  versioning, current-password confirmation, enforcement timestamp, platform
+  status projection, and dedicated tenant-scoped audit evidence.
+- Blocked mismatched password/MFA login, existing Cookie/Bearer sessions,
+  invitations, external API keys, and public branding without weakening the
+  platform recovery boundary.
+- Added platform create/edit controls, customer read-only status, deployment
+  documentation, controlled-restore compatibility through `0055`, and a guarded
+  downgrade that refuses to erase active residency evidence.
+
+Verification: all 239 backend tests passed; fresh SQLite and PostgreSQL 16
+base-to-`0055`, `0055 -> 0054 -> 0055`, zero-drift checks, downgrade refusal,
+production readiness, and post-cycle RLS checks passed; frontend ESLint,
+TypeScript, and the Next.js 16.2.12 production build passed for all 40 static
+routes; Python and npm dependency audits reported 0 known vulnerabilities.

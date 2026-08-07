@@ -21,7 +21,12 @@ from app.api.regions import router as regions_router
 from app.api.analytics import router as analytics_router
 from app.api.enterprise_agent import router as enterprise_agent_router
 from app.core.config import settings
-from app.core.database import SessionLocal, ensure_schema_ready, get_db
+from app.core.database import (
+    SessionLocal,
+    ensure_data_residency_ready,
+    ensure_schema_ready,
+    get_db,
+)
 from app.core.deployment import cors_allowed_origins, validate_deployment_settings
 from app.core.logging import setup_logging
 from app.core.middleware import ErrorHandlingMiddleware
@@ -48,6 +53,7 @@ async def lifespan(app_instance: FastAPI):
     if not testing:
         validate_deployment_settings()
         ensure_schema_ready()
+        ensure_data_residency_ready()
         from app.services.legacy_database_adoption import current_schema_head
 
         app_instance.state.schema_revision = current_schema_head()

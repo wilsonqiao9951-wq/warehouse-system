@@ -14,6 +14,7 @@ from app.core.deployment import (
 def deployment_settings(**overrides) -> Settings:
     values = {
         "app_env": "production",
+        "deployment_region": "us-east-1",
         "app_debug": False,
         "database_url": "postgresql+psycopg://openpartsflow:strong-db-secret@db:5432/openpartsflow",
         "jwt_secret_key": "a-production-jwt-secret-with-40-characters",
@@ -46,6 +47,8 @@ def test_safe_production_configuration_and_cors_are_accepted():
     ("overrides", "message"),
     [
         ({"app_debug": True}, "APP_DEBUG"),
+        ({"deployment_region": "local"}, "DEPLOYMENT_REGION"),
+        ({"deployment_region": "US East 1"}, "DEPLOYMENT_REGION"),
         ({"jwt_secret_key": "CHANGE_ME_GENERATE_AT_LEAST_32_RANDOM_CHARACTERS"}, "JWT_SECRET_KEY"),
         ({"jwt_algorithm": "none"}, "JWT_ALGORITHM"),
         ({"login_rate_limit_window_seconds": 30}, "LOGIN_RATE_LIMIT_WINDOW_SECONDS"),

@@ -379,6 +379,18 @@ def process_billing_webhook_event(
             status_code=422,
             detail="This billing event type cannot change the commercial plan",
         )
+    if (
+        payload.plan_code
+        and payload.plan_code != "enterprise"
+        and organization.data_residency_region is not None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Clear the organization's data residency assignment before "
+                "changing away from the Enterprise plan"
+            ),
+        )
     if payload.occurred_at > received + timedelta(
         seconds=max(30, settings.billing_webhook_tolerance_seconds)
     ):

@@ -27,6 +27,9 @@ def test_production_compose_keeps_data_private_and_migrations_one_shot():
     assert services["api"]["environment"]["DATABASE_URL"].startswith(
         "${DATABASE_URL:"
     )
+    assert services["api"]["environment"]["DEPLOYMENT_REGION"].startswith(
+        "${DEPLOYMENT_REGION:"
+    )
     assert (
         services["migrate"]["environment"]["DATABASE_URL"]
         != services["api"]["environment"]["DATABASE_URL"]

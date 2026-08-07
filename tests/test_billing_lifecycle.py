@@ -57,6 +57,66 @@ def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
+def test_billing_cannot_downgrade_a_residency_pinned_enterprise(client):
+    original_secret = settings.billing_webhook_secret
+    original_region = settings.deployment_region
+    try:
+        settings.billing_webhook_secret = (
+            "billing-residency-secret-with-at-least-32-characters"
+        )
+        settings.deployment_region = "us-east-1"
+        with client.app.state.testing_session_local() as db:
+            organization = db.get(Organization, 1)
+            assert organization is not None
+            organization.plan_code = "enterprise"
+            organization.data_residency_region = "us-east-1"
+            organization.data_residency_enforced_at = datetime.utcnow()
+            db.commit()
+
+        bound = client.put(
+            "/api/platform/billing/accounts/1",
+            json={
+                "expected_version": 0,
+                "provider": "generic",
+                "external_customer_id": "customer_residency_1",
+                "external_subscription_id": "subscription_residency_1",
+            },
+        )
+        assert bound.status_code == 200, bound.text
+
+        occurred = datetime.now(timezone.utc).replace(microsecond=0)
+        downgrade = _post_event(
+            client,
+            {
+                "event_id": "event-residency-downgrade",
+                "event_type": "subscription.renewed",
+                "occurred_at": occurred.isoformat(),
+                "external_customer_id": "customer_residency_1",
+                "external_subscription_id": "subscription_residency_1",
+                "plan_code": "professional",
+                "current_period_start": occurred.isoformat(),
+                "current_period_end": (occurred + timedelta(days=30)).isoformat(),
+            },
+        )
+        assert downgrade.status_code == 422
+        assert "Clear the organization's data residency" in downgrade.json()["detail"]
+
+        with client.app.state.testing_session_local() as db:
+            organization = db.get(Organization, 1)
+            assert organization is not None
+            assert organization.plan_code == "enterprise"
+            assert organization.data_residency_region == "us-east-1"
+            assert db.scalar(
+                select(BillingLifecycleEvent.id).where(
+                    BillingLifecycleEvent.external_event_id
+                    == "event-residency-downgrade"
+                )
+            ) is None
+    finally:
+        settings.billing_webhook_secret = original_secret
+        settings.deployment_region = original_region
+
+
 def test_signed_billing_events_are_idempotent_ordered_and_audited(client):
     original_secret = settings.billing_webhook_secret
     original_max_bytes = settings.billing_webhook_max_bytes

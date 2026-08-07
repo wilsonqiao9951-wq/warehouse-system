@@ -136,3 +136,28 @@ def ensure_schema_ready(bind: Engine = engine) -> None:
             f"Database schema is not current (found {found}; expected "
             f"{expected_head}). {action}"
         )
+
+
+def ensure_data_residency_ready(bind: Engine = engine) -> None:
+    """Refuse a deployable runtime whose database belongs to another region."""
+
+    if settings.app_env.strip().lower() not in {"production", "staging"}:
+        return
+    from app.core.data_residency import normalize_region_code
+
+    deployment_region = normalize_region_code(settings.deployment_region)
+    with bind.connect() as connection:
+        mismatch = connection.scalar(
+            text(
+                "SELECT id FROM organizations "
+                "WHERE data_residency_region IS NOT NULL "
+                "AND data_residency_region <> :deployment_region LIMIT 1"
+            ),
+            {"deployment_region": deployment_region},
+        )
+    if mismatch is not None:
+        raise DatabaseSchemaError(
+            "Database data-residency assignments do not match "
+            f"DEPLOYMENT_REGION={deployment_region}. Keep this deployment "
+            "offline until the region setting or controlled data migration is corrected."
+        )

@@ -6,6 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.core.data_residency import residency_block_reason
 from app.models import Organization, OrganizationUsagePeriod, User, UserInvitation, Warehouse
 
 
@@ -77,6 +79,12 @@ def require_subscription_access(
     if organization is None:
         raise HTTPException(status_code=403, detail="Organization is unavailable")
     reason = subscription_block_reason(organization)
+    if reason:
+        raise HTTPException(status_code=403, detail=reason)
+    reason = residency_block_reason(
+        organization.data_residency_region,
+        settings.deployment_region,
+    )
     if reason:
         raise HTTPException(status_code=403, detail=reason)
 

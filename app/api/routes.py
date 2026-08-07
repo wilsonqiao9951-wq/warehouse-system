@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db, set_platform_database_scope
 from app.core.config import settings
+from app.core.data_residency import residency_block_reason, residency_status
 from app.core.operations import operations_monitor
 from app.core.permissions import REPORTS_READ, USERS_READ
 from app.core.rbac import (
@@ -1501,6 +1502,13 @@ def _organization_settings_read(
         max_vehicle_warehouses=organization.max_vehicle_warehouses,
         ai_monthly_limit=organization.ai_monthly_limit,
         api_monthly_limit=organization.api_monthly_limit,
+        data_residency_region=organization.data_residency_region,
+        data_residency_enforced_at=organization.data_residency_enforced_at,
+        deployment_region=settings.deployment_region,
+        data_residency_status=residency_status(
+            organization.data_residency_region,
+            settings.deployment_region,
+        ),
         settings_version=organization.settings_version,
         **usage,
     )
@@ -1546,6 +1554,27 @@ def _organization_read(db: Session, organization: Organization) -> OrganizationR
         email_sender_address=email_sender_address,
         created_at=organization.created_at,
     )
+
+
+def _validate_residency_assignment(
+    data_residency_region: str | None,
+    plan_code: str,
+) -> None:
+    if data_residency_region is None:
+        return
+    if plan_code != "enterprise":
+        raise HTTPException(
+            status_code=422,
+            detail="Data residency is available only on the Enterprise plan",
+        )
+    if residency_status(data_residency_region, settings.deployment_region) != "compliant":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Data residency can be assigned only to this deployment's "
+                f"region ({settings.deployment_region})"
+            ),
+        )
 
 
 def _platform_audit(
@@ -1646,6 +1675,11 @@ def public_organization_branding(
     )
     if not organization:
         raise HTTPException(status_code=404, detail="Organization not found")
+    if residency_block_reason(
+        organization.data_residency_region,
+        settings.deployment_region,
+    ):
+        raise HTTPException(status_code=404, detail="Organization not found")
     return _organization_branding_read(organization)
 
 
@@ -1675,6 +1709,11 @@ def public_organization_branding_by_domain(
         )
     )
     if not organization:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    if residency_block_reason(
+        organization.data_residency_region,
+        settings.deployment_region,
+    ):
         raise HTTPException(status_code=404, detail="Organization not found")
     return _organization_branding_read(organization)
 
@@ -2034,7 +2073,18 @@ def create_organization(
     if db.scalar(select(User.id).where(func.lower(User.email) == email)):
         raise HTTPException(status_code=409, detail="Administrator email already exists")
 
-    organization = Organization(name=payload.name.strip(), slug=slug)
+    _validate_residency_assignment(
+        payload.data_residency_region,
+        payload.plan_code,
+    )
+    organization = Organization(
+        name=payload.name.strip(),
+        slug=slug,
+        data_residency_region=payload.data_residency_region,
+        data_residency_enforced_at=(
+            datetime.utcnow() if payload.data_residency_region else None
+        ),
+    )
     apply_plan_defaults(organization, payload.plan_code)
     if payload.trial_days:
         organization.subscription_status = "trialing"
@@ -2067,6 +2117,8 @@ def create_organization(
             "subscription_status": organization.subscription_status,
             "trial_ends_at": organization.trial_ends_at,
             "administrator_user_id": administrator.id,
+            "data_residency_region": organization.data_residency_region,
+            "data_residency_enforced_at": organization.data_residency_enforced_at,
         },
     )
     db.commit()
@@ -2089,8 +2141,20 @@ def update_organization(
             status_code=409,
             detail="Organization settings changed; refresh before saving.",
         )
-    fields = payload.model_fields_set - {"expected_version"}
+    fields = payload.model_fields_set - {"expected_version", "account_password"}
+    residency_changed = "data_residency_region" in fields
+    if residency_changed:
+        _require_account_reauthentication(db, actor, payload.account_password)
+    target_plan = payload.plan_code or organization.plan_code
+    target_residency = (
+        payload.data_residency_region
+        if residency_changed
+        else organization.data_residency_region
+    )
+    _validate_residency_assignment(target_residency, target_plan)
     audit_fields = set(fields)
+    if residency_changed:
+        audit_fields.add("data_residency_enforced_at")
     if payload.plan_code is not None:
         audit_fields.update(PLAN_DEFAULTS[payload.plan_code])
     before = {
@@ -2099,8 +2163,16 @@ def update_organization(
     }
     if payload.plan_code is not None:
         apply_plan_defaults(organization, payload.plan_code)
-    for field_name in fields - {"plan_code"}:
+    for field_name in fields - {"plan_code", "data_residency_region"}:
         setattr(organization, field_name, getattr(payload, field_name))
+    if (
+        residency_changed
+        and payload.data_residency_region != organization.data_residency_region
+    ):
+        organization.data_residency_region = payload.data_residency_region
+        organization.data_residency_enforced_at = (
+            datetime.utcnow() if payload.data_residency_region else None
+        )
     if (
         organization.subscription_status == "trialing"
         and (
@@ -2118,7 +2190,11 @@ def update_organization(
         db,
         actor,
         organization,
-        "organization_subscription_updated",
+        (
+            "organization_data_residency_updated"
+            if residency_changed
+            else "organization_subscription_updated"
+        ),
         {
             "changed_fields": sorted(audit_fields),
             "before": before,

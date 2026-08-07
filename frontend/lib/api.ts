@@ -1400,6 +1400,7 @@ export const api = {
     admin_password: string;
     plan_code: PlanCode;
     trial_days: number;
+    data_residency_region?: string | null;
   }) => request<Organization>("/platform/organizations", { method: "POST", body: JSON.stringify(payload) }),
   updateOrganization: (
     organizationId: number,
@@ -1414,6 +1415,8 @@ export const api = {
       max_vehicle_warehouses?: number | null;
       ai_monthly_limit?: number | null;
       api_monthly_limit?: number | null;
+      data_residency_region?: string | null;
+      account_password?: string;
     }
   ) =>
     request<Organization>(`/platform/organizations/${organizationId}`, {

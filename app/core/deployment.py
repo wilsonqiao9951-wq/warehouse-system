@@ -7,6 +7,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 from app.core.config import Settings, settings
+from app.core.data_residency import normalize_region_code
 
 
 DEPLOYMENT_ENVIRONMENTS = {"production", "staging"}
@@ -84,6 +85,16 @@ def validate_deployment_settings(config: Settings = settings) -> None:
         return
 
     errors: list[str] = []
+    try:
+        deployment_region = normalize_region_code(config.deployment_region)
+    except ValueError:
+        deployment_region = None
+    if deployment_region is None or deployment_region == "local":
+        errors.append(
+            "DEPLOYMENT_REGION must be a non-local normalized region code"
+        )
+    elif deployment_region != config.deployment_region:
+        errors.append("DEPLOYMENT_REGION must already be lowercase and normalized")
     if config.app_debug:
         errors.append("APP_DEBUG must be false")
     if len(config.jwt_secret_key) < 32 or _is_placeholder(config.jwt_secret_key):

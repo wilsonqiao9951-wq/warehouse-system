@@ -50,7 +50,8 @@ const emptyForm = {
   admin_email: "",
   admin_password: "",
   plan_code: "professional" as PlanCode,
-  trial_days: 14
+  trial_days: 14,
+  data_residency_region: ""
 };
 
 type CommercialEdit = {
@@ -64,6 +65,9 @@ type CommercialEdit = {
   max_vehicle_warehouses: string;
   ai_monthly_limit: string;
   api_monthly_limit: string;
+  data_residency_region: string;
+  original_data_residency_region: string;
+  account_password: string;
 };
 
 type BillingEdit = {
@@ -182,7 +186,10 @@ export default function PlatformPage() {
       max_warehouses: organization.max_warehouses?.toString() || "",
       max_vehicle_warehouses: organization.max_vehicle_warehouses?.toString() || "",
       ai_monthly_limit: organization.ai_monthly_limit?.toString() || "",
-      api_monthly_limit: organization.api_monthly_limit?.toString() || ""
+      api_monthly_limit: organization.api_monthly_limit?.toString() || "",
+      data_residency_region: organization.data_residency_region || "",
+      original_data_residency_region: organization.data_residency_region || "",
+      account_password: ""
     });
     setError("");
     setMessage("");
@@ -313,6 +320,8 @@ export default function PlatformPage() {
       const trialEnd = edit.trial_ends_at
         ? new Date(edit.trial_ends_at).toISOString()
         : null;
+      const residencyRegion = edit.data_residency_region.trim().toLowerCase() || null;
+      const originalResidencyRegion = edit.original_data_residency_region || null;
       await api.updateOrganization(edit.organization_id, {
         expected_version: edit.expected_version,
         plan_code: edit.plan_code,
@@ -322,7 +331,11 @@ export default function PlatformPage() {
         max_warehouses: optionalLimit(edit.max_warehouses),
         max_vehicle_warehouses: optionalLimit(edit.max_vehicle_warehouses),
         ai_monthly_limit: optionalLimit(edit.ai_monthly_limit),
-        api_monthly_limit: optionalLimit(edit.api_monthly_limit)
+        api_monthly_limit: optionalLimit(edit.api_monthly_limit),
+        ...(residencyRegion !== originalResidencyRegion ? {
+          data_residency_region: residencyRegion,
+          account_password: edit.account_password
+        } : {})
       });
       window.dispatchEvent(new Event("opf-organization-branding"));
       setMessage("Commercial plan and capacity controls saved.");
@@ -347,11 +360,29 @@ export default function PlatformPage() {
             <input placeholder="Administrator name" value={form.admin_name} onChange={(e) => setForm({ ...form, admin_name: e.target.value })} required />
             <input type="email" placeholder="Administrator email" value={form.admin_email} onChange={(e) => setForm({ ...form, admin_email: e.target.value })} required />
             <input type="password" minLength={10} placeholder="Initial password" value={form.admin_password} onChange={(e) => setForm({ ...form, admin_password: e.target.value })} required />
-            <select value={form.plan_code} onChange={(e) => setForm({ ...form, plan_code: e.target.value as PlanCode })}>
+            <select value={form.plan_code} onChange={(e) => {
+              const plan_code = e.target.value as PlanCode;
+              setForm({
+                ...form,
+                plan_code,
+                data_residency_region: plan_code === "enterprise" ? form.data_residency_region : ""
+              });
+            }}>
               <option value="starter">Starter</option>
               <option value="professional">Professional</option>
               <option value="enterprise">Enterprise</option>
             </select>
+            <label>
+              Data residency region
+              <input
+                placeholder="us-east-1"
+                pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+                maxLength={64}
+                disabled={form.plan_code !== "enterprise"}
+                value={form.data_residency_region}
+                onChange={(event) => setForm({ ...form, data_residency_region: event.target.value.toLowerCase() })}
+              />
+            </label>
             <label>
               Trial days
               <input type="number" min={0} max={90} value={form.trial_days} onChange={(e) => setForm({ ...form, trial_days: Number(e.target.value) })} />
@@ -375,7 +406,12 @@ export default function PlatformPage() {
                   value={edit.plan_code}
                   onChange={(event) => {
                     const plan_code = event.target.value as PlanCode;
-                    setEdit({ ...edit, plan_code, ...planDefaults[plan_code] });
+                    setEdit({
+                      ...edit,
+                      plan_code,
+                      data_residency_region: plan_code === "enterprise" ? edit.data_residency_region : "",
+                      ...planDefaults[plan_code]
+                    });
                   }}
                 >
                   <option value="starter">Starter</option>
@@ -413,6 +449,29 @@ export default function PlatformPage() {
               <label>Vehicle inventory limit<input type="number" min={1} value={edit.max_vehicle_warehouses} onChange={(event) => setEdit({ ...edit, max_vehicle_warehouses: event.target.value })} /></label>
               <label>AI monthly limit<input type="number" min={0} value={edit.ai_monthly_limit} onChange={(event) => setEdit({ ...edit, ai_monthly_limit: event.target.value })} /></label>
               <label>API monthly limit<input type="number" min={0} value={edit.api_monthly_limit} onChange={(event) => setEdit({ ...edit, api_monthly_limit: event.target.value })} /></label>
+              <label>
+                Data residency region
+                <input
+                  placeholder="us-east-1"
+                  pattern="[a-z0-9]+(?:-[a-z0-9]+)*"
+                  maxLength={64}
+                  disabled={edit.plan_code !== "enterprise"}
+                  value={edit.data_residency_region}
+                  onChange={(event) => setEdit({ ...edit, data_residency_region: event.target.value.toLowerCase() })}
+                />
+              </label>
+              {edit.data_residency_region !== edit.original_data_residency_region && (
+                <label>
+                  Confirm account password
+                  <input
+                    type="password"
+                    minLength={10}
+                    value={edit.account_password}
+                    onChange={(event) => setEdit({ ...edit, account_password: event.target.value })}
+                    required
+                  />
+                </label>
+              )}
             </div>
             <div className="two-col">
               <button type="submit" disabled={busy}>{busy ? "Saving…" : "Save commercial controls"}</button>
@@ -624,6 +683,9 @@ export default function PlatformPage() {
                     <div className="muted">Warehouses {organization.active_warehouses}/{organization.max_warehouses ?? "∞"} · Vans {organization.active_vehicle_warehouses}/{organization.max_vehicle_warehouses ?? "∞"}</div>
                     <div className="muted">AI {usageLabel(organization.ai_monthly_used, organization.ai_monthly_limit)} · API {usageLabel(organization.api_monthly_used, organization.api_monthly_limit)}</div>
                     <div className="muted">Period {organization.usage_period_start}</div>
+                    <div className="muted">
+                      Residency {organization.data_residency_region || "not pinned"} · {organization.data_residency_status}
+                    </div>
                   </td>
                   <td>{organization.total_work_orders}</td>
                   <td>
