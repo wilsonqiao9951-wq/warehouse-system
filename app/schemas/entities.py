@@ -3,7 +3,7 @@ import base64
 import binascii
 import json
 from urllib.parse import urlsplit
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models.entities import TransactionType, UserRole
@@ -346,7 +346,7 @@ class OrganizationDomainRead(BaseModel):
 
 class BillingAccountUpsert(BaseModel):
     expected_version: int = Field(default=0, ge=0)
-    provider: Literal["manual", "generic"]
+    provider: Literal["manual", "generic", "stripe"]
     external_customer_id: str | None = Field(default=None, min_length=1, max_length=200)
     external_subscription_id: str | None = Field(default=None, min_length=1, max_length=200)
     current_period_start: datetime | None = None
@@ -378,6 +378,12 @@ class BillingAccountUpsert(BaseModel):
             raise ValueError("Manual billing cannot include provider references")
         if self.provider == "generic" and not all(references):
             raise ValueError("Generic billing requires customer and subscription references")
+        if (
+            self.provider == "stripe"
+            and self.external_subscription_id
+            and not self.external_customer_id
+        ):
+            raise ValueError("A Stripe subscription requires a customer reference")
         if (self.current_period_start is None) != (self.current_period_end is None):
             raise ValueError("Billing period start and end must be supplied together")
         if (
@@ -475,7 +481,7 @@ class BillingWebhookEvent(BaseModel):
 class BillingAccountRead(BaseModel):
     id: int
     organization_id: int
-    provider: Literal["manual", "generic"]
+    provider: Literal["manual", "generic", "stripe"]
     external_customer_id: str | None = None
     external_subscription_id: str | None = None
     current_period_start: datetime | None = None
@@ -566,6 +572,9 @@ class OrganizationBillingOverviewRead(BaseModel):
     trial_ends_at: datetime | None = None
     account: BillingAccountRead | None = None
     notices: list[SubscriptionNoticeRead]
+    stripe_enabled: bool = False
+    stripe_checkout_plans: list[Literal["starter", "professional", "enterprise"]] = []
+    stripe_portal_available: bool = False
 
 
 class SubscriptionNoticeAcknowledge(BaseModel):
@@ -573,12 +582,82 @@ class SubscriptionNoticeAcknowledge(BaseModel):
 
 
 class BillingWebhookResponse(BaseModel):
-    event_id: int
+    event_id: int | None = None
     external_event_id: str
-    processing_status: Literal["applied", "ignored_stale"]
+    processing_status: Literal["applied", "ignored_stale", "bound", "ignored"]
     duplicate: bool
-    subscription_status: str
-    plan_code: str
+    subscription_status: str | None = None
+    plan_code: str | None = None
+
+
+StripeRequestId = Annotated[
+    str,
+    Field(min_length=8, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,99}$"),
+]
+
+
+class StripeCheckoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_plan_code: Literal["starter", "professional", "enterprise"]
+    client_request_id: StripeRequestId
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class StripePortalSessionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    client_request_id: StripeRequestId
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class StripeRefundRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    organization_id: int = Field(ge=1)
+    payment_intent_id: str = Field(
+        min_length=4,
+        max_length=200,
+        pattern=r"^pi_[A-Za-z0-9_]+$",
+    )
+    amount_minor: int | None = Field(default=None, ge=1)
+    reason: Literal["duplicate", "fraudulent", "requested_by_customer"]
+    business_reason: str = Field(min_length=10, max_length=1000)
+    client_request_id: StripeRequestId
+    account_password: str | None = Field(default=None, min_length=10, max_length=128)
+
+
+class StripeRedirectSessionRead(BaseModel):
+    operation_id: int
+    status: Literal["pending", "succeeded", "failed"]
+    external_object_id: str | None = None
+    url: str | None = None
+    expires_at: datetime | None = None
+    replayed: bool = False
+
+
+class StripeRefundRead(BaseModel):
+    operation_id: int
+    status: Literal["pending", "succeeded", "failed"]
+    external_object_id: str | None = None
+    amount_minor: int | None = None
+    replayed: bool = False
+
+
+class StripeBillingOperationRead(BaseModel):
+    id: int
+    organization_id: int
+    requested_by: int | None = None
+    client_request_id: str
+    operation_type: Literal["checkout", "portal", "refund"]
+    status: Literal["pending", "succeeded", "failed"]
+    target_plan_code: Literal["starter", "professional", "enterprise"] | None = None
+    amount_minor: int | None = None
+    external_object_id: str | None = None
+    external_request_id: str | None = None
+    failure_code: str | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BillingReconciliationRead(BaseModel):

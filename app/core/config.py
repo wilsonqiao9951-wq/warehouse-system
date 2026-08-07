@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     billing_webhook_secret: str = ""
     billing_webhook_tolerance_seconds: int = 300
     billing_webhook_max_bytes: int = 65536
+    stripe_billing_enabled: bool = False
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_api_base_url: str = "https://api.stripe.com"
+    stripe_api_version: str = "2026-02-25.clover"
+    stripe_request_timeout_seconds: int = 15
+    stripe_price_starter: str = ""
+    stripe_price_professional: str = ""
+    stripe_price_enterprise: str = ""
+    stripe_automatic_tax_enabled: bool = True
+    stripe_tax_id_collection_enabled: bool = True
     data_export_public_files_root: str = "uploads"
     data_export_private_files_root: str = "private_uploads"
     max_data_export_bytes: int = 512 * 1024 * 1024

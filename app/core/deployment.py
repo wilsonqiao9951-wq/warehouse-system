@@ -126,6 +126,33 @@ def validate_deployment_settings(config: Settings = settings) -> None:
     ):
         errors.append("BILLING_WEBHOOK_SECRET must be empty or a non-placeholder secret of at least 32 characters")
 
+    if config.stripe_billing_enabled:
+        if (
+            len(config.stripe_secret_key) < 24
+            or not config.stripe_secret_key.startswith("sk_")
+            or _is_placeholder(config.stripe_secret_key)
+        ):
+            errors.append("STRIPE_SECRET_KEY must be a non-placeholder server secret when Stripe billing is enabled")
+        if (
+            len(config.stripe_webhook_secret) < 24
+            or not config.stripe_webhook_secret.startswith("whsec_")
+            or _is_placeholder(config.stripe_webhook_secret)
+        ):
+            errors.append("STRIPE_WEBHOOK_SECRET must be a non-placeholder endpoint secret when Stripe billing is enabled")
+        configured_prices = (
+            config.stripe_price_starter,
+            config.stripe_price_professional,
+            config.stripe_price_enterprise,
+        )
+        if not any(value.strip() for value in configured_prices):
+            errors.append("At least one STRIPE_PRICE_* value is required when Stripe billing is enabled")
+        if any(value and not value.startswith("price_") for value in configured_prices):
+            errors.append("Every configured STRIPE_PRICE_* value must be a Stripe Price identifier")
+        if config.stripe_api_base_url.rstrip("/") != "https://api.stripe.com":
+            errors.append("STRIPE_API_BASE_URL must be https://api.stripe.com in staging or production")
+        if config.stripe_request_timeout_seconds < 1 or config.stripe_request_timeout_seconds > 60:
+            errors.append("STRIPE_REQUEST_TIMEOUT_SECONDS must be between 1 and 60")
+
     if errors:
         formatted = "\n".join(f"- {error}" for error in errors)
         raise DeploymentConfigurationError(

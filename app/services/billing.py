@@ -311,13 +311,17 @@ def process_billing_webhook_event(
     body: bytes,
     *,
     received_at: datetime | None = None,
+    provider: str = "generic",
+    account_id: int | None = None,
 ) -> tuple[BillingLifecycleEvent, Organization, bool]:
+    if provider not in {"generic", "stripe"}:
+        raise ValueError("Unsupported billing provider")
     received = received_at or utcnow_naive()
     payload_digest = billing_payload_sha256(body)
     begin_commercial_write(db)
     existing = db.scalar(
         select(BillingLifecycleEvent).where(
-            BillingLifecycleEvent.provider == "generic",
+            BillingLifecycleEvent.provider == provider,
             BillingLifecycleEvent.external_event_id == payload.event_id,
         )
     )
@@ -332,13 +336,17 @@ def process_billing_webhook_event(
             raise HTTPException(status_code=404, detail="Billing organization not found")
         return existing, organization, True
 
-    account_ref = db.scalar(
-        select(OrganizationBillingAccount).where(
-            OrganizationBillingAccount.provider == "generic",
+    account_query = select(OrganizationBillingAccount).where(
+        OrganizationBillingAccount.provider == provider
+    )
+    if account_id is not None:
+        account_query = account_query.where(OrganizationBillingAccount.id == account_id)
+    else:
+        account_query = account_query.where(
             OrganizationBillingAccount.external_customer_id == payload.external_customer_id,
             OrganizationBillingAccount.external_subscription_id == payload.external_subscription_id,
         )
-    )
+    account_ref = db.scalar(account_query)
     if not account_ref:
         raise HTTPException(status_code=404, detail="Billing subscription not found")
     organization = lock_organization(db, account_ref.organization_id)
@@ -349,8 +357,15 @@ def process_billing_webhook_event(
     )
     if (
         not account
-        or account.external_customer_id != payload.external_customer_id
-        or account.external_subscription_id != payload.external_subscription_id
+        or account.provider != provider
+        or (
+            account.external_customer_id is not None
+            and account.external_customer_id != payload.external_customer_id
+        )
+        or (
+            account.external_subscription_id is not None
+            and account.external_subscription_id != payload.external_subscription_id
+        )
     ):
         raise HTTPException(status_code=409, detail="Billing account changed during processing")
 
@@ -379,6 +394,11 @@ def process_billing_webhook_event(
             status_code=422,
             detail="A scheduled cancellation requires a billing period end",
         )
+
+    if account.external_customer_id is None:
+        account.external_customer_id = payload.external_customer_id
+    if account.external_subscription_id is None:
+        account.external_subscription_id = payload.external_subscription_id
 
     before_status = organization.subscription_status
     before_plan = organization.plan_code
@@ -440,7 +460,7 @@ def process_billing_webhook_event(
     event = BillingLifecycleEvent(
         organization_id=organization.id,
         billing_account_id=account.id,
-        provider="generic",
+        provider=provider,
         external_event_id=payload.event_id,
         event_type=payload.event_type,
         processing_status=processing_status,
@@ -468,7 +488,7 @@ def process_billing_webhook_event(
             entity_id=event.id,
             metadata_json=json.dumps(
                 {
-                    "provider": "generic",
+                    "provider": provider,
                     "external_event_id": payload.event_id,
                     "event_type": payload.event_type,
                     "processing_status": processing_status,

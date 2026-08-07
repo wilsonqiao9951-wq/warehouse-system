@@ -20,6 +20,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Durable UTC monthly AI/API usage metering with plan limits, atomic concurrency enforcement, and idempotent external charging
 - Verified customer domains, automatic host-based login branding, and domain-gated sender identity configuration
 - Provider-neutral signed subscription events, ordered idempotent billing evidence, and durable lifecycle notices
+- Stripe Checkout, customer portal, tenant-verified refunds, raw-body signed webhooks, and durable request/event idempotency evidence
 - Tenant and platform commercial usage reports with password-confirmed, audited CSV export
 - Tenant-scoped enterprise audit search, activity summaries, and password-confirmed hash-evidenced CSV export
 - Minimal live/ready probes plus platform-only request, worker, integration, billing, and backup operations monitoring
@@ -203,7 +204,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260807_0045` (enterprise Agent run evidence).
+- Current schema head: `20260807_0046` (Stripe billing operations and webhook evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

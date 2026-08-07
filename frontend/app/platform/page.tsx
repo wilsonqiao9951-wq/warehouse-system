@@ -106,6 +106,14 @@ export default function PlatformPage() {
   const [form, setForm] = useState(emptyForm);
   const [edit, setEdit] = useState<CommercialEdit | null>(null);
   const [billingEdit, setBillingEdit] = useState<BillingEdit | null>(null);
+  const [refundForm, setRefundForm] = useState({
+    organization_id: "",
+    payment_intent_id: "",
+    amount_minor: "",
+    reason: "requested_by_customer" as "duplicate" | "fraudulent" | "requested_by_customer",
+    business_reason: "",
+    account_password: ""
+  });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -204,12 +212,12 @@ export default function PlatformPage() {
     try {
       setBusy(true);
       setError("");
-      const generic = billingEdit.provider === "generic";
+      const external = billingEdit.provider !== "manual";
       await api.putPlatformBillingAccount(billingEdit.organization_id, {
         expected_version: billingEdit.expected_version,
         provider: billingEdit.provider,
-        external_customer_id: generic ? billingEdit.external_customer_id.trim() : null,
-        external_subscription_id: generic ? billingEdit.external_subscription_id.trim() : null,
+        external_customer_id: external ? billingEdit.external_customer_id.trim() || null : null,
+        external_subscription_id: external ? billingEdit.external_subscription_id.trim() || null : null,
         current_period_start: billingEdit.current_period_start ? new Date(billingEdit.current_period_start).toISOString() : null,
         current_period_end: billingEdit.current_period_end ? new Date(billingEdit.current_period_end).toISOString() : null,
         grace_ends_at: billingEdit.grace_ends_at ? new Date(billingEdit.grace_ends_at).toISOString() : null,
@@ -235,6 +243,36 @@ export default function PlatformPage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to reconcile billing lifecycle.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createRefund = async (event: FormEvent) => {
+    event.preventDefault();
+    try {
+      setBusy(true);
+      setError("");
+      const result = await api.createStripeRefund({
+        organization_id: Number(refundForm.organization_id),
+        payment_intent_id: refundForm.payment_intent_id.trim(),
+        amount_minor: refundForm.amount_minor ? Number(refundForm.amount_minor) : null,
+        reason: refundForm.reason,
+        business_reason: refundForm.business_reason.trim(),
+        client_request_id: crypto.randomUUID(),
+        account_password: refundForm.account_password
+      });
+      setMessage(`Stripe refund recorded: ${result.external_object_id || `operation ${result.operation_id}`}.`);
+      setRefundForm((current) => ({
+        ...current,
+        payment_intent_id: "",
+        amount_minor: "",
+        business_reason: "",
+        account_password: ""
+      }));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create Stripe refund.");
     } finally {
       setBusy(false);
     }
@@ -388,7 +426,7 @@ export default function PlatformPage() {
         <section className="card">
           <h2>Billing lifecycle binding</h2>
           <p className="muted">
-            Manual mode keeps lifecycle control inside OpenPartsFlow. Generic mode accepts only signed, timestamped events matching both external references. No card or payment-method data is stored.
+            Manual mode keeps lifecycle control inside OpenPartsFlow. Generic and Stripe modes accept signed, timestamped provider events with tenant-bound references. No card or payment-method data is stored.
           </p>
           <form onSubmit={saveBilling} style={{ display: "grid", gap: 12 }}>
             <div className="two-col">
@@ -408,6 +446,7 @@ export default function PlatformPage() {
                 >
                   <option value="manual">Manual</option>
                   <option value="generic">Signed generic webhook</option>
+                  <option value="stripe">Stripe Billing</option>
                 </select>
               </label>
               <label>
@@ -468,6 +507,86 @@ export default function PlatformPage() {
           </form>
         </section>
       )}
+
+      <section className="card">
+        <h2>Stripe refund</h2>
+        <p className="muted">
+          Refunds require platform administrator reauthentication. The server retrieves the PaymentIntent and verifies its Stripe customer belongs to the selected company before issuing the refund.
+        </p>
+        <form onSubmit={createRefund} style={{ display: "grid", gap: 12 }}>
+          <div className="two-col">
+            <label>
+              Company
+              <select
+                value={refundForm.organization_id}
+                onChange={(event) => setRefundForm({ ...refundForm, organization_id: event.target.value })}
+                required
+              >
+                <option value="">Select company</option>
+                {organizations.map((organization) => (
+                  <option value={organization.id} key={organization.id}>{organization.name}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Stripe PaymentIntent
+              <input
+                value={refundForm.payment_intent_id}
+                onChange={(event) => setRefundForm({ ...refundForm, payment_intent_id: event.target.value })}
+                placeholder="pi_..."
+                pattern="pi_[A-Za-z0-9_]+"
+                required
+              />
+            </label>
+            <label>
+              Amount in minor units (blank for full refund)
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={refundForm.amount_minor}
+                onChange={(event) => setRefundForm({ ...refundForm, amount_minor: event.target.value })}
+              />
+            </label>
+            <label>
+              Stripe reason
+              <select
+                value={refundForm.reason}
+                onChange={(event) => setRefundForm({
+                  ...refundForm,
+                  reason: event.target.value as typeof refundForm.reason
+                })}
+              >
+                <option value="requested_by_customer">Requested by customer</option>
+                <option value="duplicate">Duplicate</option>
+                <option value="fraudulent">Fraudulent</option>
+              </select>
+            </label>
+            <label>
+              Business reason
+              <textarea
+                minLength={10}
+                maxLength={1000}
+                value={refundForm.business_reason}
+                onChange={(event) => setRefundForm({ ...refundForm, business_reason: event.target.value })}
+                required
+              />
+            </label>
+            <label>
+              Confirm platform administrator password
+              <input
+                type="password"
+                minLength={10}
+                autoComplete="current-password"
+                value={refundForm.account_password}
+                onChange={(event) => setRefundForm({ ...refundForm, account_password: event.target.value })}
+                required
+              />
+            </label>
+          </div>
+          <button type="submit" disabled={busy}>{busy ? "Processing…" : "Issue verified refund"}</button>
+        </form>
+      </section>
 
       <section className="card">
         <div className="two-col" style={{ alignItems: "center" }}>

@@ -1310,3 +1310,16 @@ Verification completed so far:
   npm audits reported 0 known vulnerabilities.
 - Alembic model comparison reported only the documented pre-existing drift and
   no missing Agent table, Agent index, or other new `0045` operation.
+## 2026-08-07 - Stripe commercial billing adapter
+
+- Added server-controlled Stripe Checkout and customer portal sessions with
+  administrator password confirmation and tenant-scoped request idempotency.
+- Added platform-only refunds with PaymentIntent customer ownership validation.
+- Added raw-body webhook signatures, bounded payloads, durable replay/collision
+  evidence, out-of-order tenant binding, and provider-neutral lifecycle mapping.
+- Added Stripe controls to organization settings, Stripe provider binding to
+  platform billing operations, production validation, migration `0046`, and an
+  operator runbook in `docs/STRIPE_BILLING.md`.
+- Upgraded FastAPI, Starlette, python-multipart, and pytest to remove all known
+  dependency advisories; 181 backend tests, the reversible migration rehearsal,
+  frontend lint/build, and Python/npm security scans passed.

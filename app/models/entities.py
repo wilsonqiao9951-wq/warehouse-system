@@ -340,14 +340,16 @@ class OrganizationBillingAccount(Base):
             name="uq_billing_account_provider_subscription",
         ),
         CheckConstraint(
-            "provider IN ('manual', 'generic')",
+            "provider IN ('manual', 'generic', 'stripe')",
             name="ck_billing_account_provider",
         ),
         CheckConstraint(
             "(provider = 'manual' AND external_customer_id IS NULL "
             "AND external_subscription_id IS NULL) OR "
             "(provider = 'generic' AND external_customer_id IS NOT NULL "
-            "AND external_subscription_id IS NOT NULL)",
+            "AND external_subscription_id IS NOT NULL) OR "
+            "(provider = 'stripe' AND (external_subscription_id IS NULL "
+            "OR external_customer_id IS NOT NULL))",
             name="ck_billing_account_provider_refs",
         ),
         CheckConstraint(
@@ -403,7 +405,7 @@ class BillingLifecycleEvent(Base):
             name="ck_billing_event_processing_status",
         ),
         CheckConstraint(
-            "provider = 'generic'",
+            "provider IN ('generic', 'stripe')",
             name="ck_billing_event_provider",
         ),
         CheckConstraint(
@@ -469,6 +471,109 @@ class BillingLifecycleEvent(Base):
 
     organization = relationship("Organization")
     billing_account = relationship("OrganizationBillingAccount")
+
+
+class StripeBillingOperation(Base):
+    __tablename__ = "stripe_billing_operations"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "client_request_id",
+            name="uq_stripe_billing_operation_org_request",
+        ),
+        CheckConstraint(
+            "operation_type IN ('checkout', 'portal', 'refund')",
+            name="ck_stripe_billing_operation_type",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'succeeded', 'failed')",
+            name="ck_stripe_billing_operation_status",
+        ),
+        CheckConstraint(
+            "target_plan_code IS NULL OR target_plan_code IN "
+            "('starter', 'professional', 'enterprise')",
+            name="ck_stripe_billing_operation_plan",
+        ),
+        CheckConstraint(
+            "amount_minor IS NULL OR amount_minor > 0",
+            name="ck_stripe_billing_operation_amount_positive",
+        ),
+        CheckConstraint(
+            "length(request_sha256) = 64",
+            name="ck_stripe_billing_operation_request_hash",
+        ),
+        Index(
+            "ix_stripe_billing_operation_org_created",
+            "organization_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    billing_account_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organization_billing_accounts.id"),
+        nullable=True,
+        index=True,
+    )
+    requested_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=True,
+        index=True,
+    )
+    client_request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    operation_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_plan_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    amount_minor: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    external_object_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    external_request_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    organization = relationship("Organization")
+    billing_account = relationship("OrganizationBillingAccount")
+    requester = relationship("User")
+
+
+class StripeWebhookReceipt(Base):
+    __tablename__ = "stripe_webhook_receipts"
+    __table_args__ = (
+        UniqueConstraint("external_event_id", name="uq_stripe_webhook_receipt_event"),
+        CheckConstraint(
+            "processing_status IN ('bound', 'ignored')",
+            name="ck_stripe_webhook_receipt_status",
+        ),
+        CheckConstraint(
+            "length(payload_sha256) = 64",
+            name="ck_stripe_webhook_receipt_payload_hash",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    external_event_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    processing_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    organization = relationship("Organization")
 
 
 class SubscriptionNotice(Base):

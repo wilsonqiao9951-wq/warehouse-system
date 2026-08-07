@@ -70,3 +70,32 @@ def test_development_keeps_local_origins_and_does_not_require_production_secrets
     validate_deployment_settings(config)
 
     assert set(LOCAL_CORS_ORIGINS).issubset(cors_allowed_origins(config))
+
+
+def test_stripe_production_configuration_is_fail_closed():
+    safe = deployment_settings(
+        stripe_billing_enabled=True,
+        stripe_secret_key="sk_live_secure_server_key_for_tests",
+        stripe_webhook_secret="whsec_secure_endpoint_secret_for_tests",
+        stripe_price_professional="price_professional_live",
+    )
+    validate_deployment_settings(safe)
+
+    with pytest.raises(DeploymentConfigurationError, match="STRIPE_SECRET_KEY"):
+        validate_deployment_settings(
+            deployment_settings(
+                stripe_billing_enabled=True,
+                stripe_secret_key="pk_live_public_key_is_not_a_secret",
+                stripe_webhook_secret="whsec_secure_endpoint_secret_for_tests",
+                stripe_price_professional="price_professional_live",
+            )
+        )
+    with pytest.raises(DeploymentConfigurationError, match="STRIPE_PRICE"):
+        validate_deployment_settings(
+            deployment_settings(
+                stripe_billing_enabled=True,
+                stripe_secret_key="sk_live_secure_server_key_for_tests",
+                stripe_webhook_secret="whsec_secure_endpoint_secret_for_tests",
+                stripe_price_professional="prod_not_a_stripe_price",
+            )
+        )
