@@ -138,13 +138,15 @@ export default function PlatformOperationsPage() {
             <h3>Background workers</h3>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Worker</th><th>Status</th><th>Last success</th><th>Last result</th><th>Last error</th></tr></thead>
+                <thead><tr><th>Worker</th><th>Status</th><th>Lease</th><th>Next run</th><th>Last success / standby</th><th>Last result</th><th>Last error</th></tr></thead>
                 <tbody>
                   {data.workers.map((worker) => (
                     <tr key={worker.name}>
                       <td><code>{worker.name}</code></td>
                       <td>{worker.status}</td>
-                      <td>{formatTimestamp(worker.last_success_at)}</td>
+                      <td>{worker.lease_generation ? `#${worker.lease_generation} until ${formatTimestamp(worker.lease_expires_at)}` : "-"}</td>
+                      <td>{worker.run_started_at ? `Running since ${formatTimestamp(worker.run_started_at)}` : formatTimestamp(worker.next_run_at)}</td>
+                      <td>{formatTimestamp(worker.status === "standby" ? worker.last_standby_at : worker.last_success_at)}</td>
                       <td>{worker.last_result_count ?? "-"}</td>
                       <td>{worker.last_error_type || "-"}</td>
                     </tr>

@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     custom_domain_verification_cooldown_seconds: int = 30
     billing_reconciliation_enabled: bool = True
     billing_reconciliation_poll_seconds: int = 3600
+    worker_lease_seconds: int = 90
+    worker_lease_heartbeat_seconds: int = 10
     billing_notice_window_days: int = 7
     billing_webhook_secret: str = ""
     billing_webhook_tolerance_seconds: int = 300

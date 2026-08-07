@@ -907,3 +907,26 @@ base-to-`0055`, `0055 -> 0054 -> 0055`, zero-drift checks, downgrade refusal,
 production readiness, and post-cycle RLS checks passed; frontend ESLint,
 TypeScript, and the Next.js 16.2.12 production build passed for all 40 static
 routes; Python and npm dependency audits reported 0 known vulnerabilities.
+
+## 20260807_0056 - Multi-instance background worker leases
+
+- Added one shared database scheduler row per integration/billing worker with
+  atomic election, renewable expiration, durable next-run timing, and safe
+  operational evidence.
+- Added monotonically increasing generation fencing so expired owners cannot
+  renew, finish, release, or overwrite a replacement owner's run.
+- Added immediate graceful handoff, automatic abandoned-run recovery after
+  expiration, long-cycle heartbeats, and shutdown protection for worker threads
+  that Python cannot cancel safely.
+- Added healthy replica `standby` state and platform-only lease generation,
+  expiration, current-run, and next-run visibility without host identity.
+- Added deployable timing validation, configuration templates, controlled
+  restore compatibility through `0056`, and a multi-instance operations
+  runbook.
+
+Verification: all 246 backend tests passed; fresh SQLite and PostgreSQL 16
+base-to-`0056`, `0056 -> 0055 -> 0056`, zero-drift, RLS, eight-way election,
+restricted-role access, expiration takeover, and stale-generation fencing
+passed; frontend ESLint, TypeScript, and the Next.js production build passed for
+all 40 static routes; Python and npm dependency audits found no vulnerabilities;
+production Compose configuration and API/web image builds passed.

@@ -25,6 +25,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Tenant and platform commercial usage reports with password-confirmed, audited CSV export
 - Tenant-scoped enterprise audit search, activity summaries, and password-confirmed hash-evidenced CSV export
 - Minimal live/ready probes plus platform-only request, worker, integration, billing, and backup operations monitoring
+- Database-elected background schedulers with generation fencing, heartbeat takeover, and multi-replica standby visibility
 - Role-compatible enterprise user access policies with explicit allow/deny/inherit overrides and complete audit evidence
 - Tenant-scoped enterprise operations analytics with reconciled KPIs, quality coverage, regional stock, and audited CSV export
 - Read-only enterprise operations Agent with bounded intents, source-defined evidence, quota control, and privacy-preserving run audit

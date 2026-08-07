@@ -2831,7 +2831,7 @@ class OperationsRequestMetricsRead(BaseModel):
 class OperationsWorkerRead(BaseModel):
     name: str
     enabled: bool
-    status: Literal["disabled", "starting", "ok", "error", "stale"]
+    status: Literal["disabled", "starting", "standby", "ok", "error", "stale"]
     interval_seconds: int = Field(ge=1)
     grace_seconds: int = Field(ge=1)
     last_started_at: datetime | None = None
@@ -2839,6 +2839,11 @@ class OperationsWorkerRead(BaseModel):
     last_error_at: datetime | None = None
     last_error_type: str | None = None
     last_result_count: int | None = Field(default=None, ge=0)
+    last_standby_at: datetime | None = None
+    lease_generation: int | None = Field(default=None, ge=1)
+    lease_expires_at: datetime | None = None
+    next_run_at: datetime | None = None
+    run_started_at: datetime | None = None
 
 
 class OperationsQueueRead(BaseModel):

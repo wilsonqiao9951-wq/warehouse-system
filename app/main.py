@@ -1,7 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager
 import logging
+import os
 from pathlib import Path
+import socket
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,9 +38,78 @@ from app.models import *  # noqa: F401,F403
 from app.schemas import RootInfo
 from app.services.integration_delivery import process_due_deliveries
 from app.services.billing import reconcile_billing_lifecycle
+from app.services.worker_leases import (
+    DatabaseWorkerLease,
+    run_leased_worker_cycle,
+)
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+def _worker_owner_id() -> str:
+    return f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex}"
+
+
+async def _leased_worker_loop(
+    *,
+    name: str,
+    owner_id: str,
+    interval_seconds: int,
+    initial_delay_seconds: int,
+    task,
+    failure_message: str,
+) -> None:
+    lease = DatabaseWorkerLease(
+        SessionLocal,
+        name=name,
+        owner_id=owner_id,
+        lease_seconds=settings.worker_lease_seconds,
+    )
+    cycle_in_flight = False
+    try:
+        while True:
+            cycle_in_flight = True
+            try:
+                outcome = await asyncio.to_thread(
+                    run_leased_worker_cycle,
+                    lease,
+                    interval_seconds=max(1, interval_seconds),
+                    initial_delay_seconds=max(0, initial_delay_seconds),
+                    task=task,
+                    on_started=lambda: operations_monitor.worker_started(name),
+                )
+            except asyncio.CancelledError:
+                # asyncio cannot stop a running thread. Leave the fenced lease
+                # in place so another replica cannot overlap the final cycle;
+                # it expires automatically if that thread cannot finish.
+                raise
+            except Exception as exc:
+                cycle_in_flight = False
+                operations_monitor.worker_failed(name, exc)
+                logger.exception(failure_message)
+            else:
+                cycle_in_flight = False
+                if outcome.state == "standby":
+                    operations_monitor.worker_standby(name)
+                elif outcome.state == "completed":
+                    operations_monitor.worker_succeeded(
+                        name,
+                        result_count=outcome.result_count,
+                    )
+            await asyncio.sleep(
+                max(
+                    1,
+                    min(
+                        settings.worker_lease_heartbeat_seconds,
+                        max(1, settings.worker_lease_seconds // 3),
+                        max(1, interval_seconds),
+                    ),
+                )
+            )
+    finally:
+        if not cycle_in_flight:
+            await asyncio.to_thread(lease.release)
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -66,40 +138,36 @@ async def lifespan(app_instance: FastAPI):
         settings.integration_delivery_enabled
         and not testing
     ):
-        async def delivery_loop() -> None:
-            while True:
-                await asyncio.sleep(max(5, settings.integration_delivery_poll_seconds))
-                operations_monitor.worker_started("integration_delivery")
-                try:
-                    processed = await asyncio.to_thread(process_due_deliveries, SessionLocal)
-                    operations_monitor.worker_succeeded(
-                        "integration_delivery",
-                        result_count=processed,
-                    )
-                except Exception as exc:
-                    operations_monitor.worker_failed("integration_delivery", exc)
-                    logger.exception("Integration delivery worker failed")
-
-        delivery_task = asyncio.create_task(delivery_loop())
+        delivery_task = asyncio.create_task(
+            _leased_worker_loop(
+                name="integration_delivery",
+                owner_id=_worker_owner_id(),
+                interval_seconds=max(5, settings.integration_delivery_poll_seconds),
+                initial_delay_seconds=max(5, settings.integration_delivery_poll_seconds),
+                task=lambda heartbeat: process_due_deliveries(
+                    SessionLocal,
+                    heartbeat=heartbeat,
+                ),
+                failure_message="Integration delivery worker failed",
+            )
+        )
     if (
         settings.billing_reconciliation_enabled
         and not testing
     ):
-        async def billing_loop() -> None:
-            while True:
-                operations_monitor.worker_started("billing_reconciliation")
-                try:
-                    stats = await asyncio.to_thread(reconcile_billing_lifecycle, SessionLocal)
-                    operations_monitor.worker_succeeded(
-                        "billing_reconciliation",
-                        result_count=stats.organizations_checked,
-                    )
-                except Exception as exc:
-                    operations_monitor.worker_failed("billing_reconciliation", exc)
-                    logger.exception("Billing lifecycle reconciliation failed")
-                await asyncio.sleep(max(60, settings.billing_reconciliation_poll_seconds))
-
-        billing_task = asyncio.create_task(billing_loop())
+        billing_task = asyncio.create_task(
+            _leased_worker_loop(
+                name="billing_reconciliation",
+                owner_id=_worker_owner_id(),
+                interval_seconds=max(60, settings.billing_reconciliation_poll_seconds),
+                initial_delay_seconds=0,
+                task=lambda heartbeat: reconcile_billing_lifecycle(
+                    SessionLocal,
+                    heartbeat=heartbeat,
+                ).organizations_checked,
+                failure_message="Billing lifecycle reconciliation failed",
+            )
+        )
     try:
         yield
     finally:

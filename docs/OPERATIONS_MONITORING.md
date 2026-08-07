@@ -51,6 +51,7 @@ success, error class, result count, and timestamp. A worker is:
 - `starting` before its first successful cycle;
 - `ok` after a recent successful cycle;
 - `error` when its latest cycle failed;
+- `standby` when another live API replica owns the shared database lease;
 - `stale` after three configured intervals without success, with a minimum
   60-second grace period;
 - `disabled` when its feature is disabled.
@@ -59,10 +60,12 @@ Exception messages are logged server-side with the normal request/operation
 context but are not stored in runtime state or returned to the UI. The console
 shows only the exception class.
 
-Runtime request and worker evidence is intentionally process-local and resets
-on restart. For contractual SLA history, an external monitoring system must
-poll the probes and store time-series results. In a multi-process deployment,
-collect each instance separately and aggregate outside OpenPartsFlow.
+Runtime request evidence and local worker status are process-local and reset on
+restart. Scheduler generation, expiration, current run, next run, and safe
+completion evidence are stored in PostgreSQL and shown to platform
+administrators without the owner identifier. For contractual SLA history, an
+external monitoring system must still poll every replica and store time-series
+results. See [`WORKER_LEASES.md`](WORKER_LEASES.md).
 
 ## Platform operations summary
 
@@ -74,6 +77,7 @@ The summary includes:
 - database latency and active schema revision;
 - process uptime and bounded request metrics;
 - both background-worker states;
+- shared scheduler generation, expiration, current-run, and next-run evidence;
 - pending, due, failed, and stale-processing outbound deliveries;
 - open critical subscription notices;
 - active organizations without a recent portable backup;
@@ -128,6 +132,8 @@ Operational procedure:
 | `OPERATIONS_BACKUP_WARNING_DAYS` | 7 | Age after which an active customer backup is overdue |
 | `OPERATIONS_STALE_PROCESSING_MINUTES` | 10 | Outbound delivery processing-age alert |
 | `OPERATIONS_SLOW_REQUEST_MS` | 1000 | p95 latency warning threshold |
+| `WORKER_LEASE_SECONDS` | 90 | Expired-owner failover boundary |
+| `WORKER_LEASE_HEARTBEAT_SECONDS` | 10 | Lease renewal/election cadence |
 
 A request error-rate alert requires at least 20 samples and a 5xx rate of at
 least 5%. A latency alert requires at least five samples. Counts above zero
@@ -142,8 +148,9 @@ backups, and restore conflicts.
    to use `/health/live`.
 3. Poll both endpoints from outside the application host and retain history.
 4. Sign in as the platform administrator and open `/platform/operations`.
-5. Confirm enabled workers move from `starting` to `ok` within their grace
-   period.
+5. Confirm one enabled worker moves from `starting` to `ok`; replicated
+   non-owner processes should move to healthy `standby`. Stop the owner in a
+   rehearsal and verify the lease generation increments after takeover.
 6. Create a test outbound delivery, confirm the due count changes, then deliver
    or retry it and confirm recovery. In a non-production rehearsal, interrupt a
    worker attempt, wait beyond the stale cutoff, and exercise the protected

@@ -34,6 +34,7 @@ class _WorkerState:
     last_error_at: datetime | None = None
     last_error_type: str | None = None
     last_result_count: int | None = None
+    last_standby_at: datetime | None = None
 
 
 class OperationsMonitor:
@@ -116,6 +117,12 @@ class OperationsMonitor:
                 worker.last_error_at = at or utcnow_naive()
                 worker.last_error_type = type(error).__name__
 
+    def worker_standby(self, name: str, *, at: datetime | None = None) -> None:
+        with self._lock:
+            worker = self._workers.get(name)
+            if worker and worker.enabled:
+                worker.last_standby_at = at or utcnow_naive()
+
     def snapshot(
         self,
         *,
@@ -146,8 +153,21 @@ class OperationsMonitor:
         worker_rows = []
         for name, state in workers.items():
             grace_seconds = max(60, state.interval_seconds * 3)
+            recent_standby = bool(
+                state.last_standby_at
+                and (checked_at - state.last_standby_at).total_seconds()
+                <= grace_seconds
+            )
             if not state.enabled:
                 status = "disabled"
+            elif recent_standby and (
+                state.last_success_at is None
+                or state.last_standby_at > state.last_success_at
+            ) and (
+                state.last_error_at is None
+                or state.last_standby_at > state.last_error_at
+            ):
+                status = "standby"
             elif state.last_success_at is None:
                 if (checked_at - started_at).total_seconds() > grace_seconds:
                     status = "stale"
@@ -173,6 +193,7 @@ class OperationsMonitor:
                     "last_error_at": utc_iso(state.last_error_at),
                     "last_error_type": state.last_error_type,
                     "last_result_count": state.last_result_count,
+                    "last_standby_at": utc_iso(state.last_standby_at),
                 }
             )
 

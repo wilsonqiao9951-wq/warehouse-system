@@ -8,6 +8,16 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_ci_verifies_postgres_worker_lease_election_and_schema_drift():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "alembic check" in workflow
+    assert "python -m scripts.verify_postgres_rls" in workflow
+    assert "python -m scripts.verify_worker_leases" in workflow
+
+
 def test_production_compose_keeps_data_private_and_migrations_one_shot():
     compose = yaml.safe_load((ROOT / "docker-compose.production.yml").read_text(encoding="utf-8"))
     services = compose["services"]

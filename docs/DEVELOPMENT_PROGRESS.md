@@ -6,6 +6,49 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-07 - Phase 9 multi-instance worker leases
+
+Status: implemented and locally verified.
+
+Delivered:
+
+- Added a platform-global database lease and shared schedule for integration
+  delivery and billing reconciliation.
+- Added atomic acquisition, heartbeat renewal, graceful release, expired-owner
+  takeover, and monotonically increasing generation fencing so stale processes
+  cannot publish late results.
+- Preserved delivery compare-and-set/idempotency and billing row locks as
+  defense-in-depth behind scheduler election.
+- Added safe shutdown behavior for non-cancellable Python worker threads and
+  bounded heartbeat callbacks during long delivery/billing cycles.
+- Added healthy `standby` monitoring plus platform-only shared generation,
+  expiration, current-run, and next-run evidence without host identifiers.
+- Added fail-closed production timing validation, migration `0056`, controlled
+  restore compatibility, and the operator runbook in `docs/WORKER_LEASES.md`.
+
+Verification:
+
+- Worker competition, renewal, release, schedule preservation, stale-owner
+  fencing, expired takeover, error handling, and four-replica SQLite contention
+  tests passed.
+- Operations, deployment, billing, and external-integration target suite passed
+  (48 tests).
+- Fresh SQLite base-to-`0056` migration and `alembic check` passed with no model
+  drift.
+- All 246 backend tests passed; frontend ESLint, TypeScript, and the Next.js
+  production build passed for all 40 static routes.
+- PostgreSQL 16 base-to-`0056`, `0056 -> 0055 -> 0056`, zero-drift, RLS, eight-way
+  election, shared scheduling, expiration takeover, and stale-generation fencing
+  passed under both owner and restricted runtime credentials.
+- Python dependency consistency, requirement/full-environment vulnerability
+  audits, full/production npm audits, production Compose configuration, and
+  API/web image builds passed with no known dependency vulnerabilities.
+- Backed up the local `0055` database as
+  `openpartsflow.pre-0056-20260807-164519.db` (SHA-256
+  `B0A929FF03BA7D051DBB5F8E0EDD6213C02C8DEE8C035A6133F00347708A03DC`)
+  before upgrading the configured database to `0056` head and confirming zero
+  drift.
+
 ## 2026-08-07 - Phase 9 Enterprise data residency controls
 
 Status: implemented and locally verified.
