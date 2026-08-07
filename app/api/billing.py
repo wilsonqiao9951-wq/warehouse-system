@@ -213,8 +213,8 @@ def _require_account_reauthentication(
 ) -> None:
     if actor.auth_method == "test":
         return
-    if actor.auth_method != "bearer" or actor.user_id is None:
-        raise HTTPException(status_code=401, detail="Bearer authentication required")
+    if actor.auth_method not in {"bearer", "cookie"} or actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Authenticated session required")
     user = db.get(User, actor.user_id)
     if not password or not user or not verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Account password verification failed")

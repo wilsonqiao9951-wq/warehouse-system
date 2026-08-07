@@ -372,7 +372,7 @@ def _can_edit_form(actor: Actor, work_order: WorkOrder) -> bool:
         return True
     return bool(
         actor.role == UserRole.ENGINEER
-        and actor.auth_method == "bearer"
+        and actor.auth_method in {"bearer", "cookie"}
         and actor.device_verified
         and work_order.claimed_by_id == actor.user_id
         and work_order.claimed_device_id == actor.device_record_id

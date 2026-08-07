@@ -1438,11 +1438,12 @@ Delivered:
 - Migrated the same-origin HTTPS frontend automatically, including JSON operations, offline replay, uploads, exports, private recognition images, and knowledge media.
 - Preserved registered-device proof and claim-generation enforcement for engineer Cookie sessions.
 - Added CSRF-protected logout and Cookie expiry after logout, password-confirmed session revocation, and MFA authentication-version rotation.
+- Removed residual Bearer-only checks from password-confirmed commercial operations, engineer form editability, and governed visual-recognition actions so the production Cookie session works across the complete application.
 - Updated private-deployment build controls, production configuration examples, authentication/RBAC/custody documentation, and commercial hardening status.
 
 Verification:
 
 - Cookie flags/body secrecy, safe reads, missing/wrong/cross-session CSRF rejection, Bearer precedence, logout, revocation, engineer device binding, invalid mode, production host prefix, and MFA Cookie completion tests passed.
-- All 217 backend tests passed across authentication, tenant isolation, work-order ownership, inventory custody, billing, backup/restore, AI, and offline workflows.
+- All 218 backend tests passed across authentication, tenant isolation, work-order ownership, inventory custody, billing, backup/restore, AI, and offline workflows.
 - Frontend ESLint, TypeScript, and the Next.js 16.2.12 production build passed for all 40 static routes.
 - Python dependency consistency, requirement/full-environment vulnerability audits, full/production npm audits, production configuration, Compose contract/configuration, and API/web image builds passed with no known dependency vulnerabilities.

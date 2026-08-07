@@ -266,3 +266,17 @@ def test_mfa_completion_can_issue_a_cookie_session(client):
         assert client.get("/api/auth/me").status_code == 200
     finally:
         settings.mfa_encryption_keys = original_key
+
+
+def test_password_confirmed_sensitive_operation_accepts_cookie_session(client):
+    _create_admin(client, "cookie-export-admin@example.com")
+    login = _cookie_login(client, "cookie-export-admin@example.com")
+
+    exported = client.post(
+        "/api/audit-logs/export",
+        json={"account_password": PASSWORD},
+        headers={"X-CSRF-Token": login.json()["csrf_token"]},
+    )
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert exported.headers["x-content-sha256"]
