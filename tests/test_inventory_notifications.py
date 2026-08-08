@@ -9,7 +9,24 @@ def test_part_usage_notifies_warehouse_when_stock_reaches_threshold(client):
     notices = client.get("/api/inventory/notifications")
     assert notices.status_code == 200
     assert notices.json()[0]["part_id"] == part["id"]
-    notification_id = notices.json()[0]["id"]
-    acknowledged = client.patch(f"/api/inventory/notifications/{notification_id}?status=acknowledged")
+    notice = notices.json()[0]
+    assert notice["observed_quantity"] == 2
+    assert notice["effective_threshold_quantity"] == 2
+    notification_id = notice["id"]
+    acknowledged = client.post(
+        f"/api/inventory/notifications/{notification_id}/actions",
+        json={
+            "action": "acknowledge",
+            "expected_version": notice["version"],
+            "note": "Warehouse team reviewing",
+        },
+    )
     assert acknowledged.status_code == 200
     assert acknowledged.json()["status"] == "acknowledged"
+    assert acknowledged.json()["acknowledged_at"] is not None
+    assert acknowledged.json()["acknowledgement_note"] == "Warehouse team reviewing"
+
+    deprecated = client.patch(
+        f"/api/inventory/notifications/{notification_id}?status=resolved"
+    )
+    assert deprecated.status_code == 410

@@ -54,6 +54,8 @@ import {
   InventoryLocationScan,
   InventoryLocationLabel,
   InventoryNotification,
+  StockThresholdRule,
+  LowStockEvaluation,
   InventoryRegion,
   InventoryRegionSummary,
   CrossRegionTransfer,
@@ -1977,8 +1979,37 @@ export const api = {
     request<InventoryLocationScan>("/inventory/location-scan", { method: "POST", body: JSON.stringify(payload) }),
   listInventoryLocationLabels: (warehouseId: number) =>
     request<InventoryLocationLabel[]>(`/inventory/location-labels?warehouse_id=${warehouseId}`),
-  listInventoryNotifications: () => request<InventoryNotification[]>("/inventory/notifications"),
-  updateInventoryNotification: (id: number, status: string) => request<InventoryNotification>(`/inventory/notifications/${id}?status=${status}`, { method: "PATCH" }),
+  listInventoryNotifications: (status: "active" | "open" | "acknowledged" | "resolved" | "all" = "active") =>
+    request<InventoryNotification[]>(`/inventory/notifications?status=${status}&limit=500`),
+  actOnInventoryNotification: (
+    id: number,
+    payload: {
+      action: "acknowledge" | "resolve";
+      expected_version: number;
+      note?: string;
+      reason?: string;
+    }
+  ) => request<InventoryNotification>(`/inventory/notifications/${id}/actions`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
+  listStockThresholdRules: () =>
+    request<StockThresholdRule[]>("/inventory/stock-threshold-rules?limit=500"),
+  saveStockThresholdRule: (
+    warehouseId: number,
+    partId: number,
+    payload: {
+      threshold_quantity: number;
+      reorder_quantity: number;
+      is_active: boolean;
+      reason: string;
+      expected_version?: number;
+    }
+  ) => request<StockThresholdRule>(`/inventory/stock-threshold-rules/${warehouseId}/${partId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  }),
+  evaluateLowStock: () => request<LowStockEvaluation>("/inventory/low-stock/evaluate", { method: "POST" }),
   createReplenishmentRequest: (id: number, quantity: number, sourceWarehouseId?: number) => request<ReplenishmentRequest>(`/inventory/notifications/${id}/create-request?quantity=${quantity}${sourceWarehouseId ? `&source_warehouse_id=${sourceWarehouseId}` : ""}`, { method: "POST" }),
   createManualReplenishmentRequest: (payload: {
     part_id: number;

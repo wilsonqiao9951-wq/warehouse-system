@@ -174,11 +174,15 @@ export default function WarehouseTasksPage() {
     [warehouses]
   );
 
-  const acknowledge = async (id: number) => {
-    setBusy(`notification-${id}`);
+  const acknowledge = async (item: InventoryNotification) => {
+    setBusy(`notification-${item.id}`);
     setMessage("");
     try {
-      await api.updateInventoryNotification(id, "acknowledged");
+      await api.actOnInventoryNotification(item.id, {
+        action: "acknowledge",
+        expected_version: item.version,
+        note: "Acknowledged from warehouse task queue"
+      });
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Unable to acknowledge alert.");
@@ -191,7 +195,8 @@ export default function WarehouseTasksPage() {
     setBusy(`notification-${id}`);
     setMessage("");
     try {
-      const quantity = Math.max(1, requestQuantities[id] || 1);
+      const notification = notifications.find((item) => item.id === id);
+      const quantity = Math.max(1, requestQuantities[id] || notification?.reorder_quantity || 1);
       await api.createReplenishmentRequest(id, quantity);
       setMessage(`Replenishment request created for ${quantity} item${quantity === 1 ? "" : "s"}.`);
       await refresh();
@@ -492,7 +497,13 @@ export default function WarehouseTasksPage() {
       </section>
 
       <section className="card">
-        <h3>Low-stock alerts</h3>
+        <div className="section-heading-row">
+          <div>
+            <h3 style={{ margin: 0 }}>Low-stock alerts</h3>
+            <p className="muted" style={{ margin: "4px 0 0" }}>Every action is versioned and attributed to the signed-in account.</p>
+          </div>
+          <a className="nav-item" href="/low-stock-rules">Rules & history</a>
+        </div>
         {notifications.length === 0 ? (
           <div className="empty-state">No open warehouse alerts.</div>
         ) : (
@@ -501,15 +512,20 @@ export default function WarehouseTasksPage() {
               const notificationBusy = busy === `notification-${item.id}`;
               return (
                 <div className="job-card" key={item.id}>
-                  <strong>Part #{item.part_id}</strong>
-                  <div className="muted">Warehouse #{item.warehouse_id} · Work order {item.work_order_id || "—"}</div>
+                  <strong>{item.part_number || `Part #${item.part_id}`} · {item.part_name || "Unnamed part"}</strong>
+                  <div className="muted">{item.warehouse_name || `Warehouse #${item.warehouse_id}`} · Work order {item.work_order_id || "—"}</div>
                   <p style={{ margin: "8px 0" }}>{item.message}</p>
+                  <div className="muted">
+                    Trigger {item.observed_quantity ?? "—"} · current {item.current_quantity} · threshold {item.effective_threshold_quantity}
+                    {item.threshold_source === "override" ? " (override)" : " (part default)"}
+                  </div>
+                  <div className="muted">Status {item.status} · version {item.version}</div>
                   <label className="field-label" htmlFor={`request-quantity-${item.id}`}>Request quantity</label>
                   <input
                     id={`request-quantity-${item.id}`}
                     type="number"
                     min={1}
-                    value={requestQuantities[item.id] || 1}
+                    value={requestQuantities[item.id] || item.reorder_quantity || 1}
                     onChange={(event) => setRequestQuantities((current) => ({
                       ...current,
                       [item.id]: Math.max(1, Number(event.target.value) || 1)
@@ -519,9 +535,11 @@ export default function WarehouseTasksPage() {
                     <button type="button" disabled={notificationBusy} onClick={() => void createRequest(item.id)}>
                       {notificationBusy ? "Working…" : "Create request"}
                     </button>
-                    <button type="button" disabled={notificationBusy} onClick={() => void acknowledge(item.id)}>
-                      Acknowledge
-                    </button>
+                    {item.can_acknowledge && (
+                      <button type="button" disabled={notificationBusy} onClick={() => void acknowledge(item)}>
+                        Acknowledge
+                      </button>
+                    )}
                   </div>
                 </div>
               );

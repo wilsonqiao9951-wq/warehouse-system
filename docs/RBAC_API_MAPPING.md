@@ -235,6 +235,13 @@ permissions, and every integration endpoint continues to apply tenant scope.
 
 ## Replenishment custody access model
 
+Low-stock rule and alert controls are documented in
+[`LOW_STOCK_RULES.md`](LOW_STOCK_RULES.md). Managers and administrators govern
+warehouse/part thresholds; warehouse users have read/evaluate access. All three
+roles may acknowledge or resolve alerts through the versioned action endpoint,
+but resolution is refused until stock recovery or linked replenishment
+completion is verified. Engineers and assistants are denied these controls.
+
 The replenishment workflow separates request supervision, physical warehouse custody, and vehicle receipt. Response capability flags drive the UI, but the API independently validates role, current status, workflow version, target vehicle owner, device, and password.
 
 | Operation | Other engineer | Target vehicle engineer | Manager | Admin | Warehouse |
@@ -285,7 +292,9 @@ The receipt password is discarded after verification and never written to the re
 - `shipped → received` creates one linked destination `INBOUND` transaction and records the engineer/device.
 - `received → completed` closes the custody task and resolves its originating alert without moving stock again.
 - Cancellation is allowed only before shipment (`requested` or `picking`) and requires a reason.
-- Cancellation resolves its originating notification; it does not reopen the alert and create a duplicate request loop.
+- Rejection or cancellation resolves its originating notification, then
+  re-evaluates physical stock. Continued shortage creates one fresh actionable
+  alert without reusing the terminal request or creating duplicate active work.
 - Unique request/stage and transaction-link constraints prevent retries from posting duplicate shipment or receipt movements.
 
 The audit actions include `replenishment_requested`, `replenishment_approve`, `replenishment_reject`, `replenishment_start_picking`, `replenishment_ship`, `replenishment_receive`, `replenishment_complete`, `replenishment_cancel`, and `replenishment_reconciled`.

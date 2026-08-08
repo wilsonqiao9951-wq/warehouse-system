@@ -1041,8 +1041,69 @@ export interface InventoryScanResult {
 }
 
 export interface InventoryNotification {
-  id: number; part_id: number; warehouse_id: number; work_order_id?: number | null;
-  notification_type: string; message: string; status: string; created_at: string;
+  id: number;
+  organization_id: number;
+  part_id: number;
+  part_number?: string | null;
+  part_name?: string | null;
+  warehouse_id: number;
+  warehouse_name?: string | null;
+  work_order_id?: number | null;
+  notification_type: string;
+  message: string;
+  status: "open" | "acknowledged" | "resolved";
+  threshold_rule_id?: number | null;
+  threshold_quantity: number;
+  effective_threshold_quantity: number;
+  reorder_quantity: number;
+  threshold_source: "override" | "part_default";
+  observed_quantity?: number | null;
+  current_quantity: number;
+  recovered: boolean;
+  version: number;
+  acknowledged_by?: number | null;
+  acknowledged_by_name?: string | null;
+  acknowledged_at?: string | null;
+  acknowledgement_note?: string | null;
+  resolved_by?: number | null;
+  resolved_by_name?: string | null;
+  resolved_at?: string | null;
+  resolution_reason?: string | null;
+  linked_replenishment_id?: number | null;
+  linked_replenishment_status?: string | null;
+  can_acknowledge: boolean;
+  can_resolve: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface StockThresholdRule {
+  id: number;
+  organization_id: number;
+  warehouse_id: number;
+  warehouse_name: string;
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  threshold_quantity: number;
+  reorder_quantity: number;
+  is_active: boolean;
+  reason: string;
+  version: number;
+  created_by?: number | null;
+  created_by_name?: string | null;
+  updated_by?: number | null;
+  updated_by_name?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LowStockEvaluation {
+  scanned: number;
+  below_threshold: number;
+  created: number;
+  already_active: number;
+  recovered_active: number;
 }
 
 export interface ReplenishmentRequest {
@@ -1998,6 +2059,9 @@ export interface LowStockAlert {
   warehouse_name: string;
   quantity: number;
   min_stock: number;
+  reorder_quantity: number;
+  threshold_source: "override" | "part_default";
+  threshold_rule_id?: number | null;
 }
 
 export interface AbnormalUsageRow {
