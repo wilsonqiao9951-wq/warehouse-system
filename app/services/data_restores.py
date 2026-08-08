@@ -52,6 +52,7 @@ RESTORABLE_TABLES = {
     "part_machine_associations",
     "parts",
     "storage_locations",
+    "stock_threshold_rules",
     "warehouses",
     "work_order_form_fields",
     "work_order_form_templates",
@@ -63,6 +64,7 @@ CREATE_TABLE_ORDER = (
     "warehouses",
     "storage_locations",
     "parts",
+    "stock_threshold_rules",
     "part_machine_associations",
     "completion_policies",
     "work_order_form_templates",
@@ -424,6 +426,10 @@ RESTORE_SCHEMA_COMPATIBILITY["20260807_0060"] = {
 RESTORE_SCHEMA_COMPATIBILITY["20260807_0061"] = {
     *RESTORE_SCHEMA_COMPATIBILITY["20260807_0060"],
     "20260807_0061",
+}
+RESTORE_SCHEMA_COMPATIBILITY["20260807_0062"] = {
+    *RESTORE_SCHEMA_COMPATIBILITY["20260807_0061"],
+    "20260807_0062",
 }
 
 RESTORE_OPTIONAL_COLUMNS = {

@@ -250,6 +250,14 @@ from app.services.commercial import (
 from app.services.recommendations import build_part_recommendations
 from app.services.service_intelligence import build_service_intelligence
 from app.services.profit_snapshots import capture_profit_snapshot
+from app.services.low_stock import (
+    ACTIVE_ALERT_STATUSES,
+    effective_stock_threshold,
+    evaluate_inventory_position,
+    inventory_notification_read,
+    reopen_inventory_notification,
+    resolve_inventory_notification,
+)
 from app.services.visual_recognition import (
     VISION_PROMPT_VERSION,
     VisionConfigurationError,
@@ -5730,19 +5738,16 @@ def use_part_for_work_order(
     usage = use_part_on_work_order(db, effective_payload)
     part = db.get(Part, payload.part_id)
     warehouse_quantity = get_stock_quantity(db, payload.part_id, payload.warehouse_id)
-    threshold = max(part.safety_stock, part.min_stock) if part else 0
-    if part and warehouse_quantity <= threshold:
-        existing = db.scalar(select(InventoryNotification).where(
-            InventoryNotification.part_id == part.id,
-            InventoryNotification.warehouse_id == payload.warehouse_id,
-            InventoryNotification.status == "open",
-        ))
-        if not existing:
-            db.add(InventoryNotification(
-                part_id=part.id, warehouse_id=payload.warehouse_id, work_order_id=work_order_id,
-                message=f"{part.part_number} 使用后库存为 {warehouse_quantity}，已达到补货阈值 {threshold}。",
-            ))
     source_warehouse = db.get(Warehouse, payload.warehouse_id)
+    if part and source_warehouse:
+        evaluate_inventory_position(
+            db,
+            actor.organization_id,
+            part=part,
+            warehouse=source_warehouse,
+            quantity=warehouse_quantity,
+            work_order_id=work_order_id,
+        )
     enqueue_work_order_event(
         db,
         work_order,
@@ -5765,10 +5770,28 @@ def use_part_for_work_order(
 
 @router.get("/inventory/notifications", response_model=list[InventoryNotificationRead])
 def inventory_notifications(
-    status: str = "open", db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)
+    response: Response,
+    status: str = Query(default="active", pattern="^(active|open|acknowledged|resolved|all)$"),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
-    return db.scalars(select(InventoryNotification).where(InventoryNotification.status == status).order_by(InventoryNotification.id.desc()).limit(100)).all()
+    response.headers["Cache-Control"] = "no-store"
+    query = select(InventoryNotification).where(
+        InventoryNotification.organization_id == actor.organization_id
+    )
+    if status == "active":
+        query = query.where(InventoryNotification.status.in_(ACTIVE_ALERT_STATUSES))
+    elif status != "all":
+        query = query.where(InventoryNotification.status == status)
+    rows = db.scalars(
+        query.order_by(
+            InventoryNotification.updated_at.desc(),
+            InventoryNotification.id.desc(),
+        ).limit(limit)
+    ).all()
+    return [inventory_notification_read(db, row) for row in rows]
 
 
 @router.patch("/inventory/notifications/{notification_id}", response_model=InventoryNotificationRead)
@@ -5779,22 +5802,10 @@ def update_inventory_notification(
     actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
-    notification = db.get(InventoryNotification, notification_id)
-    if not notification:
-        raise HTTPException(status_code=404, detail="Inventory notification not found")
-    previous_status = notification.status
-    notification.status = status
-    _audit(
-        db,
-        actor,
-        "inventory_notification_status_changed",
-        "inventory_notification",
-        notification.id,
-        {"from_status": previous_status, "to_status": status},
+    raise HTTPException(
+        status_code=410,
+        detail="Use the versioned low-stock notification action endpoint",
     )
-    db.commit()
-    db.refresh(notification)
-    return notification
 
 
 def _replenishment_read_for_actor(
@@ -5903,7 +5914,15 @@ def create_replenishment_request(
     actor: Actor = Depends(get_current_actor),
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
-    notification = db.get(InventoryNotification, notification_id)
+    begin_inventory_write(db)
+    notification = db.scalar(
+        select(InventoryNotification)
+        .where(
+            InventoryNotification.id == notification_id,
+            InventoryNotification.organization_id == actor.organization_id,
+        )
+        .with_for_update()
+    )
     if not notification:
         raise HTTPException(status_code=404, detail="Inventory notification not found")
     existing = db.scalar(
@@ -5911,6 +5930,8 @@ def create_replenishment_request(
     )
     if existing:
         return _replenishment_read_for_actor(db, actor, existing)
+    if notification.status == "resolved":
+        raise HTTPException(status_code=409, detail="A resolved notification cannot create a replenishment request")
     destination = db.get(Warehouse, notification.warehouse_id)
     if not destination:
         raise HTTPException(status_code=404, detail="Destination warehouse not found")
@@ -5930,10 +5951,15 @@ def create_replenishment_request(
         work_order_id=notification.work_order_id,
         requested_by=actor.user_id,
     )
-    notification.status = "acknowledged"
     try:
         db.add(item)
         db.flush()
+        if notification.status == "open":
+            notification.status = "acknowledged"
+            notification.acknowledged_by = actor.user_id
+            notification.acknowledged_at = datetime.utcnow()
+            notification.acknowledgement_note = f"Replenishment request #{item.id} created"
+            notification.version += 1
         _audit(
             db,
             actor,
@@ -6147,13 +6173,27 @@ def reconcile_replenishment_request(
         if item.notification_id:
             notification = db.get(InventoryNotification, item.notification_id)
             if notification:
-                notification.status = "open"
+                active_replacement = db.scalar(
+                    select(InventoryNotification.id).where(
+                        InventoryNotification.organization_id == actor.organization_id,
+                        InventoryNotification.part_id == notification.part_id,
+                        InventoryNotification.warehouse_id == notification.warehouse_id,
+                        InventoryNotification.id != notification.id,
+                        InventoryNotification.status.in_(ACTIVE_ALERT_STATUSES),
+                    )
+                )
+                if active_replacement is None:
+                    reopen_inventory_notification(notification)
     elif item.status != "completed":
         raise HTTPException(status_code=409, detail="accept_historical is only valid for a legacy completed record")
     elif item.notification_id:
         notification = db.get(InventoryNotification, item.notification_id)
         if notification:
-            notification.status = "resolved"
+            resolve_inventory_notification(
+                notification,
+                actor_user_id=actor.user_id,
+                reason=f"Historical replenishment #{item.id} accepted: {reason}",
+            )
 
     previous_version = item.version
     item.requires_reconciliation = False
@@ -6255,7 +6295,23 @@ def act_on_replenishment_request(
         if item.notification_id:
             notification = db.get(InventoryNotification, item.notification_id)
             if notification:
-                notification.status = "resolved"
+                resolve_inventory_notification(
+                    notification,
+                    actor_user_id=actor.user_id,
+                    reason=f"Replenishment #{item.id} rejected: {item.rejection_reason}",
+                )
+                db.flush()
+                destination = db.get(Warehouse, item.destination_warehouse_id)
+                part = db.get(Part, item.part_id)
+                if destination and part:
+                    evaluate_inventory_position(
+                        db,
+                        actor.organization_id,
+                        part=part,
+                        warehouse=destination,
+                        quantity=get_stock_quantity(db, part.id, destination.id),
+                        work_order_id=item.work_order_id,
+                    )
 
     elif payload.action == "start_picking":
         if not warehouse_operator:
@@ -6406,7 +6462,11 @@ def act_on_replenishment_request(
         if item.notification_id:
             notification = db.get(InventoryNotification, item.notification_id)
             if notification:
-                notification.status = "resolved"
+                resolve_inventory_notification(
+                    notification,
+                    actor_user_id=actor.user_id,
+                    reason=f"Replenishment #{item.id} completed and received into destination",
+                )
 
     else:
         if not warehouse_operator:
@@ -6421,7 +6481,23 @@ def act_on_replenishment_request(
         if item.notification_id:
             notification = db.get(InventoryNotification, item.notification_id)
             if notification:
-                notification.status = "resolved"
+                resolve_inventory_notification(
+                    notification,
+                    actor_user_id=actor.user_id,
+                    reason=f"Replenishment #{item.id} cancelled: {item.cancellation_reason}",
+                )
+                db.flush()
+                destination = db.get(Warehouse, item.destination_warehouse_id)
+                part = db.get(Part, item.part_id)
+                if destination and part:
+                    evaluate_inventory_position(
+                        db,
+                        actor.organization_id,
+                        part=part,
+                        warehouse=destination,
+                        quantity=get_stock_quantity(db, part.id, destination.id),
+                        work_order_id=item.work_order_id,
+                    )
 
     if payload.action == "approve":
         item.status = "requested"
@@ -7941,19 +8017,35 @@ def low_stock_alerts(
 ):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER, UserRole.WAREHOUSE)
     rows = get_stock_balances(db)
-    alerts = [
-        LowStockAlert(
-            part_id=row.part_id,
-            part_number=row.part_number,
-            part_name=row.part_name,
-            warehouse_id=row.warehouse_id,
-            warehouse_name=row.warehouse_name,
-            quantity=row.quantity,
-            min_stock=max(row.safety_stock, db.get(Part, row.part_id).min_stock if db.get(Part, row.part_id) else 0),
+    alerts: list[LowStockAlert] = []
+    for row in rows:
+        part = db.get(Part, row.part_id)
+        warehouse = db.get(Warehouse, row.warehouse_id)
+        if not part or not part.is_active or not warehouse or not warehouse.is_active:
+            continue
+        rule, threshold, reorder_quantity = effective_stock_threshold(
+            db,
+            actor.organization_id,
+            part,
+            row.warehouse_id,
+            current_quantity=row.quantity,
         )
-        for row in rows
-        if row.is_low_stock
-    ]
+        if row.quantity > threshold:
+            continue
+        alerts.append(
+            LowStockAlert(
+                part_id=row.part_id,
+                part_number=row.part_number,
+                part_name=row.part_name,
+                warehouse_id=row.warehouse_id,
+                warehouse_name=row.warehouse_name,
+                quantity=row.quantity,
+                min_stock=threshold,
+                reorder_quantity=reorder_quantity,
+                threshold_source="override" if rule else "part_default",
+                threshold_rule_id=rule.id if rule else None,
+            )
+        )
     return alerts[skip : skip + limit]
 
 

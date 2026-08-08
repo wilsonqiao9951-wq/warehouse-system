@@ -296,8 +296,8 @@ After Phase 1 sign-off, release improvements in controlled increments:
 - `Implemented` Role-specific dashboards (manager team vs engineer self, with financial and identity redaction)
 
 5. Low stock alert
-- Rule engine with threshold overrides per warehouse/part
-- Alert acknowledgment and closure workflow
+- `Implemented` Rule engine with threshold overrides per warehouse/part, part-default fallback, bounded scans, and duplicate-active-alert prevention
+- `Implemented` Versioned alert acknowledgment and evidence-gated closure with accountable actors, replenishment linkage, history, and audit logs
 
 6. Abnormal parts usage detection
 - Baseline model by ticket type/machine/store

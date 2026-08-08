@@ -2449,8 +2449,75 @@ class EnterpriseAgentRun(Base):
     user = relationship("User")
 
 
+class StockThresholdRule(Base):
+    __tablename__ = "stock_threshold_rules"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "warehouse_id",
+            "part_id",
+            name="uq_stock_threshold_rule_org_warehouse_part",
+        ),
+        CheckConstraint("threshold_quantity >= 0", name="ck_stock_threshold_rule_threshold_non_negative"),
+        CheckConstraint("reorder_quantity >= 1", name="ck_stock_threshold_rule_reorder_positive"),
+        CheckConstraint("version >= 0", name="ck_stock_threshold_rule_version_non_negative"),
+        Index(
+            "ix_stock_threshold_rule_org_active",
+            "organization_id",
+            "is_active",
+            "warehouse_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False)
+    threshold_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    reorder_quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    organization = relationship("Organization")
+    warehouse = relationship("Warehouse")
+    part = relationship("Part")
+    creator = relationship("User", foreign_keys=[created_by])
+    updater = relationship("User", foreign_keys=[updated_by])
+
+
 class InventoryNotification(Base):
     __tablename__ = "inventory_notifications"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('open', 'acknowledged', 'resolved')",
+            name="ck_inventory_notification_status",
+        ),
+        CheckConstraint("version >= 0", name="ck_inventory_notification_version_non_negative"),
+        Index(
+            "uq_inventory_notification_active_stock",
+            "organization_id",
+            "warehouse_id",
+            "part_id",
+            unique=True,
+            sqlite_where=text("status IN ('open', 'acknowledged')"),
+            postgresql_where=text("status IN ('open', 'acknowledged')"),
+        ),
+        Index(
+            "ix_inventory_notification_org_status_updated",
+            "organization_id",
+            "status",
+            "updated_at",
+        ),
+    )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), default=1, nullable=False, index=True)
     part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False)
@@ -2459,11 +2526,26 @@ class InventoryNotification(Base):
     notification_type: Mapped[str] = mapped_column(String(40), default="replenishment", nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="open", nullable=False)
+    threshold_rule_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_threshold_rules.id", ondelete="SET NULL"), nullable=True
+    )
+    threshold_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    observed_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    acknowledged_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acknowledgement_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    resolved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolution_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     part = relationship("Part")
     warehouse = relationship("Warehouse")
+    threshold_rule = relationship("StockThresholdRule")
+    acknowledger = relationship("User", foreign_keys=[acknowledged_by])
+    resolver = relationship("User", foreign_keys=[resolved_by])
 
 
 class ReplenishmentRequest(Base):

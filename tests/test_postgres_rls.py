@@ -56,11 +56,18 @@ def test_postgres_rls_migration_covers_every_tenant_model():
         "20260807_0061_add_profit_snapshots.py",
         "openpartsflow_profit_snapshot_migration",
     )
+    low_stock_rules = _migration_module(
+        "20260807_0062_add_low_stock_rules.py",
+        "openpartsflow_low_stock_rule_migration",
+    )
     model_tables = {model.__tablename__ for model in TENANT_MODELS}
-    secured_tables = set(baseline.TENANT_TABLES) | {profit_snapshots.TABLE_NAME}
+    secured_tables = set(baseline.TENANT_TABLES) | {
+        profit_snapshots.TABLE_NAME,
+        low_stock_rules.RULE_TABLE,
+    }
     assert secured_tables == model_tables
     assert len(secured_tables) == len(model_tables)
-    for migration in (baseline, profit_snapshots):
+    for migration in (baseline, profit_snapshots, low_stock_rules):
         assert "platform_access" in migration.POLICY_EXPRESSION
         assert "organization_id" in migration.POLICY_EXPRESSION
 

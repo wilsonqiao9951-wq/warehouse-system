@@ -6,9 +6,60 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
-## 2026-08-07 - Employee performance scorecards and role dashboards
+## 2026-08-08 - Governed low-stock threshold rules and alert evidence
 
 Status: implemented; release verification in progress.
+
+Delivered:
+
+- Added tenant warehouse/part threshold and replenishment-quantity overrides
+  with business reason, actor attribution, optimistic versioning, inactive
+  fallback, controlled restore participation, and forced PostgreSQL RLS.
+- Replaced ad-hoc notification writes with a duplicate-safe evaluator used by
+  part consumption, manual scans, rule changes, and failed replenishments.
+- Retained immutable trigger rule/threshold/quantity evidence plus live current
+  threshold, physical quantity, replenishment link, and action capabilities.
+- Enforced `open -> acknowledged -> resolved` with responsible account/time/
+  note evidence, optimistic versions, exact-retry idempotency, and resolution
+  only after stock recovery or completed linked replenishment.
+- Deprecated the arbitrary notification status PATCH with `410`; creating a
+  replenishment now records acknowledgement, while rejection/cancellation
+  re-evaluates continuing shortages into one fresh actionable alert.
+- Added `/low-stock-rules` for manager governance and warehouse operations,
+  active/history evidence, evaluation, acknowledgement, and verified closure;
+  updated `/warehouse-tasks` to use the same versioned contract.
+- Added revision `0062`, documentation, AppSheet parity status, restore/RLS
+  coverage, and threshold-aware low-stock projections.
+
+Verification so far:
+
+- Threshold fallback/override, duplicate suppression, action idempotency,
+  stale versions, recovery gating, actor evidence, role denial, tenant
+  isolation, consumption triggering, and threshold projection passed.
+- Replenishment cancellation and tenant-isolation regressions were updated to
+  the one-active-alert contract and passed; continued shortage after a
+  cancellation creates one fresh alert.
+- All 271 backend tests passed.
+- Frontend ESLint, TypeScript, and Next.js production build passed for all 46
+  static routes.
+- Fresh SQLite base-to-`0062`, `0062 -> 0061 -> 0062`, and Alembic model
+  zero-drift checks passed.
+- Python dependency consistency/vulnerability checks and full/production npm
+  audits passed with no known vulnerabilities; production configuration and
+  Compose topology validation passed. Local Docker Desktop was not running, so
+  the GitHub private-deployment job remains the authoritative image build and
+  PostgreSQL/RLS gate for this batch.
+- Backed up the local `0061` database as
+  `openpartsflow.pre-0062-20260808-194533.db` (1,581,056 bytes; SHA-256
+  `B416C91F1B56DB8D0463480C956D1688C7ABE214E569D4BE7BE74F5B7B08B403`)
+  before upgrading the configured database to `0062` and confirming zero
+  model drift.
+
+## 2026-08-07 - Employee performance scorecards and role dashboards
+
+Status: implemented, locally verified, and published as draft PR #35. GitHub
+CI run 70 passed all backend, frontend, PostgreSQL/RLS, dependency-audit, and
+production-image jobs.
 
 Delivered:
 

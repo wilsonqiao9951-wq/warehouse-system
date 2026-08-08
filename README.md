@@ -50,6 +50,8 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
   region, engineer, and machine-type rankings
 - Role-specific employee performance scorecards with transparent completion,
   throughput, quality-coverage, duration, and parts-efficiency definitions
+- Warehouse/part low-stock threshold overrides with duplicate-safe evaluation,
+  accountable acknowledgement, and recovery-gated closure evidence
 - Validated warehouse → shelf/bin → part scanning with stale-label and cross-warehouse protection
 - Real-time inventory balance
 - Excel export
@@ -232,7 +234,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260807_0061` (persisted work-order profit snapshots).
+- Current schema head: `20260807_0062` (governed low-stock rules and alert evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

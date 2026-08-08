@@ -2074,15 +2074,85 @@ class WorkOrderPartRecommendation(BaseModel):
     reason: str
 
 
+class StockThresholdRuleUpsert(BaseModel):
+    threshold_quantity: int = Field(ge=0, le=1_000_000)
+    reorder_quantity: int = Field(ge=1, le=1_000_000)
+    is_active: bool = True
+    reason: str = Field(min_length=3, max_length=500)
+    expected_version: int | None = Field(default=None, ge=0)
+
+
+class StockThresholdRuleRead(BaseModel):
+    id: int
+    organization_id: int
+    warehouse_id: int
+    warehouse_name: str
+    part_id: int
+    part_number: str
+    part_name: str
+    threshold_quantity: int
+    reorder_quantity: int
+    is_active: bool
+    reason: str
+    version: int
+    created_by: int | None = None
+    created_by_name: str | None = None
+    updated_by: int | None = None
+    updated_by_name: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class InventoryNotificationAction(BaseModel):
+    action: Literal["acknowledge", "resolve"]
+    expected_version: int = Field(ge=0)
+    note: str | None = Field(default=None, max_length=500)
+    reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_evidence(self):
+        if self.note is not None and len(self.note.strip()) < 3:
+            raise ValueError("Acknowledgement note must be at least 3 characters")
+        if self.action == "resolve" and (not self.reason or len(self.reason.strip()) < 3):
+            raise ValueError("Resolution reason must be at least 3 characters")
+        return self
+
+
 class InventoryNotificationRead(BaseModel):
     id: int
+    organization_id: int
     part_id: int
+    part_number: str | None = None
+    part_name: str | None = None
     warehouse_id: int
+    warehouse_name: str | None = None
     work_order_id: int | None = None
     notification_type: str
     message: str
-    status: str
+    status: Literal["open", "acknowledged", "resolved"]
+    threshold_rule_id: int | None = None
+    threshold_quantity: int
+    effective_threshold_quantity: int
+    reorder_quantity: int
+    threshold_source: Literal["override", "part_default"]
+    observed_quantity: int | None = None
+    current_quantity: int
+    recovered: bool
+    version: int
+    acknowledged_by: int | None = None
+    acknowledged_by_name: str | None = None
+    acknowledged_at: datetime | None = None
+    acknowledgement_note: str | None = None
+    resolved_by: int | None = None
+    resolved_by_name: str | None = None
+    resolved_at: datetime | None = None
+    resolution_reason: str | None = None
+    linked_replenishment_id: int | None = None
+    linked_replenishment_status: str | None = None
+    can_acknowledge: bool = False
+    can_resolve: bool = False
     created_at: datetime
+    updated_at: datetime
 
     class Config:
         from_attributes = True
@@ -2367,6 +2437,9 @@ class LowStockAlert(BaseModel):
     warehouse_name: str
     quantity: int
     min_stock: int
+    reorder_quantity: int
+    threshold_source: Literal["override", "part_default"]
+    threshold_rule_id: int | None = None
 
 
 class AbnormalUsageRow(BaseModel):
@@ -2426,6 +2499,14 @@ class QCPictureRead(QCPictureCreate):
 
     class Config:
         from_attributes = True
+
+
+class LowStockEvaluationRead(BaseModel):
+    scanned: int = Field(ge=0)
+    below_threshold: int = Field(ge=0)
+    created: int = Field(ge=0)
+    already_active: int = Field(ge=0)
+    recovered_active: int = Field(ge=0)
 
 
 class ReplenishmentRequestAction(BaseModel):

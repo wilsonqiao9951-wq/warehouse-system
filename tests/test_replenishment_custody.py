@@ -800,7 +800,6 @@ def test_same_notification_creates_only_one_replenishment_request(client):
 def test_cancellation_releases_reserved_stock_for_competing_request(client):
     setup = _standard_setup(client, source_quantity=5)
     first_notification = _create_notification(client, setup["part"]["id"], setup["van_a"]["id"])
-    second_notification = _create_notification(client, setup["part"]["id"], setup["van_a"]["id"])
 
     with _enforced_rbac():
         headers = _headers(client, setup)
@@ -811,13 +810,18 @@ def test_cancellation_releases_reserved_stock_for_competing_request(client):
             quantity=4,
             source_warehouse_id=setup["source"]["id"],
         )
-        second = _create_request(
+        second_response = _manual_request(
             client,
-            second_notification,
             headers["warehouse"],
+            part_id=setup["part"]["id"],
+            destination_warehouse_id=setup["van_a"]["id"],
             quantity=4,
             source_warehouse_id=setup["source"]["id"],
+            reason="Competing source stock reservation",
+            client_request_id="competing-reservation",
         )
+        assert second_response.status_code == 200, second_response.text
+        second = second_response.json()
 
         first_pick = _action(
             client,
@@ -883,6 +887,15 @@ def test_cancellation_releases_reserved_stock_for_competing_request(client):
 
     with client.app.state.testing_session_local() as db:
         assert db.get(InventoryNotification, first_notification).status == "resolved"
+        fresh_alerts = db.scalars(
+            select(InventoryNotification).where(
+                InventoryNotification.part_id == setup["part"]["id"],
+                InventoryNotification.warehouse_id == setup["van_a"]["id"],
+                InventoryNotification.status.in_(("open", "acknowledged")),
+            )
+        ).all()
+        assert len(fresh_alerts) == 1
+        assert fresh_alerts[0].id != first_notification
         assert len(db.scalars(
             select(ReplenishmentRequest).where(ReplenishmentRequest.notification_id == first_notification)
         ).all()) == 1
@@ -1332,7 +1345,7 @@ def test_corrupt_shipment_and_receipt_ledgers_block_receive_and_complete(client)
 def test_replenishment_requests_and_actions_are_tenant_isolated(client):
     setup = _standard_setup(client)
     notification_one = _create_notification(client, setup["part"]["id"], setup["van_a"]["id"])
-    extra_notification_one = _create_notification(client, setup["part"]["id"], setup["van_a"]["id"])
+    extra_notification_one = _create_notification(client, setup["part"]["id"], setup["van_b"]["id"])
 
     with client.app.state.testing_session_local() as db:
         organization_two = Organization(name="Custody Tenant Two", slug="custody-tenant-two")

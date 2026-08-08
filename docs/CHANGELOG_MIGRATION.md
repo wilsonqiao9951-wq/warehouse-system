@@ -1,5 +1,21 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260807_0062 - Governed low-stock rules and alert evidence
+
+- Added one versioned threshold/reorder override per tenant warehouse and part,
+  with business reason and responsible creator/updater evidence.
+- Added immutable trigger threshold/quantity plus accountable acknowledgement
+  and resolution evidence to inventory notifications.
+- Added an active-alert partial unique index so concurrent scans cannot create
+  duplicate open/acknowledged work for the same warehouse and part.
+- Backfilled historical notification thresholds from part defaults and safely
+  resolved duplicate active historical rows before enforcing uniqueness.
+- Added tenant-leading status/time indexes and forced PostgreSQL row-level
+  security for the new rule table.
+- Extends controlled tenant restore compatibility through revision `0062`.
+- Downgrade removes the new rule/evidence contract but does not change inventory
+  transactions, replenishment custody, or work-order parts usage.
+
 ## 20260807_0061 - Persisted completed-work-order profit snapshots
 
 - Added one immutable, fingerprinted tenant record per completed work order,
