@@ -1991,6 +1991,83 @@ class ExternalIntegration(Base):
         back_populates="integration",
         cascade="all, delete-orphan",
     )
+    parity_contract = relationship(
+        "IntegrationParityContract",
+        back_populates="integration",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class IntegrationParityContract(Base):
+    __tablename__ = "integration_parity_contracts"
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id",
+            name="uq_integration_parity_contract_integration",
+        ),
+        CheckConstraint(
+            "readiness_status IN ('draft', 'ready', 'blocked')",
+            name="ck_integration_parity_contract_readiness",
+        ),
+        CheckConstraint(
+            "readiness_score >= 0 AND readiness_score <= 100",
+            name="ck_integration_parity_contract_score",
+        ),
+        CheckConstraint(
+            "length(source_fingerprint) = 64",
+            name="ck_integration_parity_contract_fingerprint",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_integration_parity_contract_version_non_negative",
+        ),
+        Index(
+            "ix_integration_parity_contract_org_readiness",
+            "organization_id",
+            "readiness_status",
+            "updated_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    integration_id: Mapped[int] = mapped_column(
+        ForeignKey("external_integrations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_revision: Mapped[str] = mapped_column(
+        String(160), default="", nullable=False
+    )
+    required_capabilities_json: Mapped[str] = mapped_column(
+        Text, default="[]", nullable=False
+    )
+    covered_capabilities_json: Mapped[str] = mapped_column(
+        Text, default="[]", nullable=False
+    )
+    tables_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    automations_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    gaps_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    readiness_status: Mapped[str] = mapped_column(
+        String(20), default="draft", nullable=False, index=True
+    )
+    readiness_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    validated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    integration = relationship("ExternalIntegration", back_populates="parity_contract")
 
 
 class ExternalWorkOrderLink(Base):

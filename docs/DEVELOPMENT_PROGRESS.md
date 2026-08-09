@@ -6,9 +6,59 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
-## 2026-08-08 - Abnormal part-usage baselines and manager review queue
+## 2026-08-08 - AppSheet and Google Sheets parallel-run contracts
 
 Status: implemented; release verification in progress.
+
+Delivered:
+
+- Audited the existing Phase 6 delivery runtime and confirmed that work-order
+  status, completion, and parts usage already have transactionally queued,
+  signed, idempotent, retryable outbound callbacks.
+- Added one tenant-scoped parity contract per integration for external tables,
+  columns, data types, directions, keys, required flags, notes, Bots, and
+  automations.
+- Added a protected canonical-field allowlist, inventory/recommendation
+  read-only enforcement, duplicate and payload-size bounds, and explicit
+  external-only fields that document customer data without granting access.
+- Added seven-capability coverage assessment for work-order intake/status,
+  inventory/recommendation reads, and status/completion/parts callbacks.
+- Added provider-aware templates, live field-mapping/subscription comparison,
+  readiness score/status, blocking gaps, warnings, stable SHA-256 fingerprint,
+  actor/time evidence, exact retry idempotency, and optimistic versions.
+- Revalidates a saved contract when integration mapping or subscriptions change.
+- Extended `/integrations` with readiness metrics, capability coverage, gap
+  explanations, table summaries, JSON editors, validation/save, and contract
+  download for parallel-run sign-off.
+- Added migration `0064`, forced PostgreSQL RLS, restore-schema compatibility,
+  RBAC/API documentation, and dedicated operating guidance.
+
+Verification so far:
+
+- Contract templates, ready/blocked assessment, exact retries, stale versions,
+  live revalidation, unsafe canonical fields, read-only inventory enforcement,
+  external-only columns, role denial, audit evidence, and tenant isolation pass
+  together with existing external-integration regressions (7 targeted tests).
+- Fresh SQLite base-to-`0064`, `0064 -> 0063 -> 0064`, and Alembic model
+  zero-drift checks passed.
+- All 278 backend tests passed. Frontend ESLint, TypeScript, and Next.js
+  production build passed for all 47 static routes.
+- Python dependency consistency/vulnerability checks and full/production npm
+  audits passed with no known vulnerabilities. Production configuration and
+  Compose topology passed. Local Docker Desktop was not running, so GitHub's
+  private-deployment job is the authoritative PostgreSQL/RLS and image-build
+  gate.
+- Backed up the local `0063` database as
+  `openpartsflow.pre-0064-20260808-204609.db` (1,703,936 bytes; SHA-256
+  `3BFAC5BDF5742C0028D59C638E835B59F92C327965B4EDFF337371EB01968079`)
+  before upgrading the configured database to `0064` and confirming zero
+  model drift.
+
+## 2026-08-08 - Abnormal part-usage baselines and manager review queue
+
+Status: implemented, published as draft PR #37, and verified by GitHub Actions
+run #72. Backend, frontend, private PostgreSQL/RLS, dependency, and production
+API/Web image jobs all passed.
 
 Delivered:
 

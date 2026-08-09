@@ -17,7 +17,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Governed machine service knowledge with published faults, repair steps, tools, cautions, media, and verified field evidence
 - Idempotent knowledge drafts generated from completed jobs plus tenant-protected field photo/video storage
 - Explainable same-model fault analysis, published-guidance ranking, and similar completed-job retrieval on the mobile work-order screen
-- Tenant-scoped AppSheet/REST API keys, configurable inbound work-order mapping, idempotent Webhooks, and synchronization logs
+- Tenant-scoped AppSheet/REST API keys, configurable inbound work-order mapping, idempotent Webhooks, synchronization logs, and fingerprinted AppSheet/Google Sheets parallel-run contracts
 - Durable UTC monthly AI/API usage metering with plan limits, atomic concurrency enforcement, and idempotent external charging
 - Verified customer domains, automatic host-based login branding, and domain-gated sender identity configuration
 - Provider-neutral signed subscription events, ordered idempotent billing evidence, and durable lifecycle notices
@@ -236,7 +236,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260808_0063` (governed abnormal part-usage baselines and manager review evidence).
+- Current schema head: `20260808_0064` (versioned AppSheet/Google Sheets parity contracts and readiness evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

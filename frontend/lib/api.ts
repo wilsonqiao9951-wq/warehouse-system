@@ -13,6 +13,10 @@ import {
   ExternalIntegrationProvider,
   ExternalIntegrationSecret,
   ExternalSyncLog,
+  IntegrationParityAutomation,
+  IntegrationParityCapability,
+  IntegrationParityContract,
+  IntegrationParityTable,
   JobStatus,
   LowStockAlert,
   LocationStockBalance,
@@ -1480,6 +1484,21 @@ export const api = {
       method: "POST",
       body: JSON.stringify({})
     }),
+  getIntegrationParityContract: (integrationId: number) =>
+    request<IntegrationParityContract>(`/integrations/${integrationId}/parity-contract`),
+  saveIntegrationParityContract: (
+    integrationId: number,
+    payload: {
+      expected_version: number;
+      source_revision: string;
+      required_capabilities: IntegrationParityCapability[];
+      tables: IntegrationParityTable[];
+      automations: IntegrationParityAutomation[];
+    }
+  ) => request<IntegrationParityContract>(`/integrations/${integrationId}/parity-contract`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  }),
   previewPartsImport: (file: File) => {
     const form = new FormData();
     form.append("file", file);

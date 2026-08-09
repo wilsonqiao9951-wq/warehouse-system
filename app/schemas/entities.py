@@ -1071,6 +1071,132 @@ class ExternalIntegrationRotate(BaseModel):
     expected_version: int = Field(ge=0)
 
 
+IntegrationParityCapability = Literal[
+    "work_order_intake",
+    "work_order_status_read",
+    "inventory_read",
+    "recommendations_read",
+    "status_callback",
+    "completion_callback",
+    "part_usage_callback",
+]
+IntegrationParityObject = Literal[
+    "work_orders",
+    "part_usage",
+    "inventory",
+    "recommendations",
+]
+IntegrationParityDirection = Literal["inbound", "outbound", "read", "bidirectional"]
+IntegrationParityDataType = Literal[
+    "text",
+    "number",
+    "date",
+    "datetime",
+    "boolean",
+    "enum",
+    "image",
+]
+
+
+class IntegrationParityColumn(BaseModel):
+    external_name: str = Field(min_length=1, max_length=160)
+    canonical_field: str | None = Field(default=None, max_length=160)
+    data_type: IntegrationParityDataType = "text"
+    direction: IntegrationParityDirection = "read"
+    required: bool = False
+    notes: str | None = Field(default=None, max_length=500)
+
+    @field_validator("external_name", "canonical_field", "notes")
+    @classmethod
+    def normalize_parity_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class IntegrationParityTable(BaseModel):
+    external_name: str = Field(min_length=1, max_length=160)
+    canonical_object: IntegrationParityObject
+    key_column: str = Field(min_length=1, max_length=160)
+    description: str | None = Field(default=None, max_length=500)
+    columns: list[IntegrationParityColumn] = Field(min_length=1, max_length=200)
+
+    @field_validator("external_name", "key_column", "description")
+    @classmethod
+    def normalize_parity_table_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
+class IntegrationParityAutomation(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    trigger: Literal["row_added", "row_updated", "scheduled", "webhook"]
+    direction: Literal["inbound", "outbound"]
+    capability: IntegrationParityCapability
+    external_action: str = Field(min_length=1, max_length=500)
+    enabled: bool = True
+
+    @field_validator("name", "external_action")
+    @classmethod
+    def normalize_parity_automation_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Automation text cannot be blank")
+        return cleaned
+
+
+class IntegrationParityContractUpsert(BaseModel):
+    expected_version: int = Field(ge=0)
+    source_revision: str = Field(default="", max_length=160)
+    required_capabilities: list[IntegrationParityCapability] = Field(
+        min_length=1,
+        max_length=7,
+    )
+    tables: list[IntegrationParityTable] = Field(min_length=1, max_length=20)
+    automations: list[IntegrationParityAutomation] = Field(
+        default_factory=list,
+        max_length=50,
+    )
+
+    @field_validator("source_revision")
+    @classmethod
+    def normalize_source_revision(cls, value: str) -> str:
+        return value.strip()
+
+
+class IntegrationParityGapRead(BaseModel):
+    code: str
+    severity: Literal["error", "warning"]
+    capability: IntegrationParityCapability | None = None
+    message: str
+
+
+class IntegrationParityContractRead(BaseModel):
+    id: int | None = None
+    persisted: bool
+    organization_id: int
+    integration_id: int
+    provider: ExternalIntegrationProvider
+    source_revision: str = ""
+    required_capabilities: list[IntegrationParityCapability]
+    covered_capabilities: list[IntegrationParityCapability]
+    tables: list[IntegrationParityTable]
+    automations: list[IntegrationParityAutomation]
+    readiness_status: Literal["draft", "ready", "blocked"]
+    readiness_score: int = Field(ge=0, le=100)
+    gaps: list[IntegrationParityGapRead]
+    source_fingerprint: str
+    version: int = Field(ge=0)
+    created_by: int | None = None
+    updated_by: int | None = None
+    validated_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class ExternalIntegrationRead(BaseModel):
     id: int
     organization_id: int

@@ -647,6 +647,77 @@ export interface ExternalSyncLog {
   updated_at: string;
 }
 
+export type IntegrationParityCapability =
+  | "work_order_intake"
+  | "work_order_status_read"
+  | "inventory_read"
+  | "recommendations_read"
+  | "status_callback"
+  | "completion_callback"
+  | "part_usage_callback";
+
+export type IntegrationParityObject =
+  | "work_orders"
+  | "part_usage"
+  | "inventory"
+  | "recommendations";
+
+export interface IntegrationParityColumn {
+  external_name: string;
+  canonical_field?: string | null;
+  data_type: "text" | "number" | "date" | "datetime" | "boolean" | "enum" | "image";
+  direction: "inbound" | "outbound" | "read" | "bidirectional";
+  required: boolean;
+  notes?: string | null;
+}
+
+export interface IntegrationParityTable {
+  external_name: string;
+  canonical_object: IntegrationParityObject;
+  key_column: string;
+  description?: string | null;
+  columns: IntegrationParityColumn[];
+}
+
+export interface IntegrationParityAutomation {
+  name: string;
+  trigger: "row_added" | "row_updated" | "scheduled" | "webhook";
+  direction: "inbound" | "outbound";
+  capability: IntegrationParityCapability;
+  external_action: string;
+  enabled: boolean;
+}
+
+export interface IntegrationParityGap {
+  code: string;
+  severity: "error" | "warning";
+  capability?: IntegrationParityCapability | null;
+  message: string;
+}
+
+export interface IntegrationParityContract {
+  id?: number | null;
+  persisted: boolean;
+  organization_id: number;
+  integration_id: number;
+  provider: ExternalIntegrationProvider;
+  source_revision: string;
+  required_capabilities: IntegrationParityCapability[];
+  covered_capabilities: IntegrationParityCapability[];
+  tables: IntegrationParityTable[];
+  automations: IntegrationParityAutomation[];
+  readiness_status: "draft" | "ready" | "blocked";
+  readiness_score: number;
+  gaps: IntegrationParityGap[];
+  source_fingerprint: string;
+  version: number;
+  created_by?: number | null;
+  updated_by?: number | null;
+  validated_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface ImportBatch {
   id: number;
   organization_id: number;

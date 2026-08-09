@@ -17,6 +17,7 @@ from app.models import (
     ExternalIntegration,
     ExternalSyncLog,
     ExternalWorkOrderLink,
+    IntegrationParityContract,
     Organization,
     Part,
     Warehouse,
@@ -29,6 +30,8 @@ from app.schemas import (
     ExternalIntegrationRotate,
     ExternalIntegrationSecretRead,
     ExternalIntegrationUpdate,
+    IntegrationParityContractRead,
+    IntegrationParityContractUpsert,
     ExternalPartRecommendationRead,
     ExternalSyncLogRead,
     ExternalWorkOrderRead,
@@ -48,6 +51,12 @@ from app.services.integrations import (
 )
 from app.services.inventory import get_available_stock_quantity, get_stock_balances
 from app.services.commercial import consume_monthly_usage, require_subscription_access
+from app.services.integration_parity import (
+    apply_parity_contract,
+    assess_parity_contract,
+    parity_contract_read,
+    stored_parity_payload,
+)
 from app.services.recommendations import build_part_recommendations
 
 
@@ -233,6 +242,20 @@ def update_integration(
     integration.version += 1
     integration.updated_by = actor.user_id
     db.add(integration)
+    if integration.parity_contract and set(changed_fields).intersection(
+        {"field_mapping", "webhook_url", "subscribed_events", "is_active"}
+    ):
+        parity_payload = stored_parity_payload(integration.parity_contract)
+        parity_assessment = assess_parity_contract(integration, parity_payload)
+        integration.parity_contract.version += 1
+        apply_parity_contract(
+            integration.parity_contract,
+            parity_payload,
+            parity_assessment,
+            actor_id=actor.user_id,
+        )
+        db.add(integration.parity_contract)
+        changed_fields.append("parity_readiness")
     _audit_integration(
         db,
         actor,
@@ -253,6 +276,102 @@ def update_integration(
         ) from exc
     db.refresh(integration)
     return integration_read(integration)
+
+
+@router.get(
+    "/integrations/{integration_id}/parity-contract",
+    response_model=IntegrationParityContractRead,
+)
+def get_integration_parity_contract(
+    integration_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_READ)
+    integration = _integration_or_404(db, integration_id)
+    contract = db.scalar(
+        select(IntegrationParityContract).where(
+            IntegrationParityContract.integration_id == integration.id,
+        )
+    )
+    return parity_contract_read(integration, contract)
+
+
+@router.put(
+    "/integrations/{integration_id}/parity-contract",
+    response_model=IntegrationParityContractRead,
+)
+def save_integration_parity_contract(
+    integration_id: int,
+    payload: IntegrationParityContractUpsert,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_MANAGE)
+    integration = db.scalar(
+        select(ExternalIntegration)
+        .where(ExternalIntegration.id == integration_id)
+        .with_for_update()
+    )
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    contract = db.scalar(
+        select(IntegrationParityContract).where(
+            IntegrationParityContract.integration_id == integration.id,
+        )
+    )
+    if contract is None:
+        if payload.expected_version != 0:
+            raise HTTPException(status_code=409, detail="Parity contract version is stale")
+        assessment = assess_parity_contract(integration, payload)
+        contract = IntegrationParityContract(
+            organization_id=actor.organization_id,
+            integration_id=integration.id,
+            source_fingerprint=assessment.source_fingerprint,
+            created_by=actor.user_id,
+            updated_by=actor.user_id,
+            validated_at=datetime.utcnow(),
+        )
+        apply_parity_contract(
+            contract,
+            payload,
+            assessment,
+            actor_id=actor.user_id,
+        )
+        db.add(contract)
+        action = "create_integration_parity_contract"
+    else:
+        if contract.version != payload.expected_version:
+            raise HTTPException(status_code=409, detail="Parity contract version is stale")
+        assessment = assess_parity_contract(integration, payload)
+        if contract.source_fingerprint == assessment.source_fingerprint:
+            return parity_contract_read(integration, contract)
+        contract.version += 1
+        apply_parity_contract(
+            contract,
+            payload,
+            assessment,
+            actor_id=actor.user_id,
+        )
+        db.add(contract)
+        action = "update_integration_parity_contract"
+    db.flush()
+    _audit_integration(
+        db,
+        actor,
+        action,
+        integration,
+        {
+            "parity_contract_id": contract.id,
+            "new_version": contract.version,
+            "readiness_status": contract.readiness_status,
+            "readiness_score": contract.readiness_score,
+            "source_fingerprint": contract.source_fingerprint,
+        },
+    )
+    db.commit()
+    db.refresh(contract)
+    return parity_contract_read(integration, contract)
 
 
 @router.post(

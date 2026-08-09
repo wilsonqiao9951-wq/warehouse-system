@@ -8,7 +8,11 @@ import {
   ExternalIntegrationProvider,
   ExternalIntegrationSecret,
   ExternalSyncLog,
-  ExternalWebhookEvent
+  ExternalWebhookEvent,
+  IntegrationParityAutomation,
+  IntegrationParityCapability,
+  IntegrationParityContract,
+  IntegrationParityTable
 } from "@/types";
 
 const defaultMapping = {
@@ -31,6 +35,15 @@ const webhookEvents: Array<{ value: ExternalWebhookEvent; label: string }> = [
   { value: "work_order.completed", label: "Work-order completion" },
   { value: "work_order.part_used", label: "Part usage" }
 ];
+const capabilityLabels: Record<IntegrationParityCapability, string> = {
+  work_order_intake: "Work-order intake",
+  work_order_status_read: "Work-order status read",
+  inventory_read: "Inventory read",
+  recommendations_read: "AI recommendations read",
+  status_callback: "Status callback",
+  completion_callback: "Completion callback",
+  part_usage_callback: "Parts-usage callback"
+};
 
 function parseMapping(value: string): Record<string, string> {
   const parsed = JSON.parse(value) as unknown;
@@ -45,10 +58,17 @@ function parseMapping(value: string): Record<string, string> {
   return parsed as Record<string, string>;
 }
 
+function parseList<T>(value: string, label: string): T[] {
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) throw new Error(`${label} must be a JSON array.`);
+  return parsed as T[];
+}
+
 export default function IntegrationsPage() {
   const [integrations, setIntegrations] = useState<ExternalIntegration[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [logs, setLogs] = useState<ExternalSyncLog[]>([]);
+  const [parity, setParity] = useState<IntegrationParityContract | null>(null);
   const [role, setRole] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -66,6 +86,12 @@ export default function IntegrationsPage() {
     webhook_url: "",
     subscribed_events: [] as ExternalWebhookEvent[],
     is_active: true
+  });
+  const [parityEditor, setParityEditor] = useState({
+    source_revision: "",
+    required_capabilities: [] as IntegrationParityCapability[],
+    tables: "[]",
+    automations: "[]"
   });
 
   const selected = useMemo(
@@ -92,6 +118,7 @@ export default function IntegrationsPage() {
   useEffect(() => {
     if (!selected) {
       setLogs([]);
+      setParity(null);
       return;
     }
     setEditor({
@@ -101,8 +128,20 @@ export default function IntegrationsPage() {
       subscribed_events: selected.subscribed_events,
       is_active: selected.is_active
     });
-    api.listIntegrationSyncLogs(selected.id)
-      .then(setLogs)
+    Promise.all([
+      api.listIntegrationSyncLogs(selected.id),
+      api.getIntegrationParityContract(selected.id)
+    ])
+      .then(([nextLogs, nextParity]) => {
+        setLogs(nextLogs);
+        setParity(nextParity);
+        setParityEditor({
+          source_revision: nextParity.source_revision,
+          required_capabilities: nextParity.required_capabilities,
+          tables: JSON.stringify(nextParity.tables, null, 2),
+          automations: JSON.stringify(nextParity.automations, null, 2)
+        });
+      })
       .catch((reason: Error) => setError(reason.message));
   }, [selected]);
 
@@ -186,6 +225,41 @@ export default function IntegrationsPage() {
     }
   };
 
+  const saveParityContract = async () => {
+    if (!selected || !parity) return;
+    try {
+      const updated = await api.saveIntegrationParityContract(selected.id, {
+        expected_version: parity.version,
+        source_revision: parityEditor.source_revision.trim(),
+        required_capabilities: parityEditor.required_capabilities,
+        tables: parseList<IntegrationParityTable>(parityEditor.tables, "Tables"),
+        automations: parseList<IntegrationParityAutomation>(parityEditor.automations, "Automations")
+      });
+      setParity(updated);
+      setParityEditor({
+        source_revision: updated.source_revision,
+        required_capabilities: updated.required_capabilities,
+        tables: JSON.stringify(updated.tables, null, 2),
+        automations: JSON.stringify(updated.automations, null, 2)
+      });
+      setNotice(`Parallel-run contract saved. Readiness is ${updated.readiness_score}%.`);
+      setError("");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to save the parallel-run contract.");
+    }
+  };
+
+  const downloadParityContract = () => {
+    if (!selected || !parity) return;
+    const blob = new Blob([JSON.stringify(parity, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${selected.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-parallel-run-contract.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <ManagerShell
       title="External integrations"
@@ -193,7 +267,8 @@ export default function IntegrationsPage() {
       metrics={[
         { label: "Integrations", value: integrations.length },
         { label: "Active", value: integrations.filter((item) => item.is_active).length },
-        { label: "Failed events", value: logs.filter((item) => item.status === "failed").length }
+        { label: "Failed events", value: logs.filter((item) => item.status === "failed").length },
+        { label: "Parity readiness", value: parity ? `${parity.readiness_score}%` : "—" }
       ]}
     >
       {notice && <p className="notice notice-success" role="status">{notice}</p>}
@@ -332,6 +407,104 @@ export default function IntegrationsPage() {
               <p className="notice">Managers may inspect mappings and sync logs. Only administrators can create, edit, deactivate, or rotate keys.</p>
             )}
           </section>
+
+          {parity && (
+            <section className="card">
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                <div>
+                  <h3 style={{ marginBottom: 4 }}>Parallel-run contract</h3>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    Versioned AppSheet/Google Sheets field dictionary and automation coverage. This documents external columns without granting new write permissions.
+                  </p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <strong style={{ fontSize: 28 }}>{parity.readiness_score}%</strong>
+                  <div className="muted">{parity.readiness_status} · contract v{parity.version}</div>
+                </div>
+              </div>
+
+              <div className="pilot-grid" style={{ marginBottom: 16 }}>
+                {parity.required_capabilities.map((capability) => {
+                  const covered = parity.covered_capabilities.includes(capability);
+                  return (
+                    <div className={`pilot-metric${covered ? "" : " pilot-metric--alert"}`} key={capability}>
+                      <strong>{covered ? "Covered" : "Gap"}</strong>
+                      <small>{capabilityLabels[capability]}</small>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {parity.gaps.length > 0 && (
+                <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+                  {parity.gaps.map((gap, index) => (
+                    <div className={`notice ${gap.severity === "error" ? "notice-error" : ""}`} key={`${gap.code}-${index}`}>
+                      <strong>{gap.severity === "error" ? "Blocking gap" : "Review note"}:</strong> {gap.message}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="table-wrap" style={{ marginBottom: 16 }}>
+                <table>
+                  <thead><tr><th>External table</th><th>Purpose</th><th>Key</th><th>Columns</th><th>Mapped</th></tr></thead>
+                  <tbody>
+                    {parity.tables.map((table) => (
+                      <tr key={`${table.canonical_object}-${table.external_name}`}>
+                        <td>{table.external_name}</td>
+                        <td>{table.canonical_object}</td>
+                        <td>{table.key_column}</td>
+                        <td>{table.columns.length}</td>
+                        <td>{table.columns.filter((column) => column.canonical_field).length}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {isAdmin ? (
+                <>
+                  <label>
+                    Source revision or discovery date
+                    <input
+                      value={parityEditor.source_revision}
+                      onChange={(event) => setParityEditor((previous) => ({ ...previous, source_revision: event.target.value }))}
+                      placeholder="AppSheet metadata export 2026-08-08"
+                      maxLength={160}
+                    />
+                  </label>
+                  <label>
+                    External tables and columns (JSON)
+                    <textarea
+                      value={parityEditor.tables}
+                      onChange={(event) => setParityEditor((previous) => ({ ...previous, tables: event.target.value }))}
+                      rows={16}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label>
+                    Bots and automations (JSON)
+                    <textarea
+                      value={parityEditor.automations}
+                      onChange={(event) => setParityEditor((previous) => ({ ...previous, automations: event.target.value }))}
+                      rows={12}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <div className="two-col">
+                    <button type="button" onClick={() => void saveParityContract()}>Validate and save contract</button>
+                    <button type="button" onClick={downloadParityContract}>Download contract JSON</button>
+                  </div>
+                </>
+              ) : (
+                <button type="button" onClick={downloadParityContract}>Download contract JSON</button>
+              )}
+              <p className="muted" style={{ overflowWrap: "anywhere" }}>
+                Fingerprint: <code>{parity.source_fingerprint}</code>
+                {parity.validated_at ? ` · validated ${new Date(parity.validated_at).toLocaleString()}` : " · template not saved"}
+              </p>
+            </section>
+          )}
 
           <section className="card">
             <h3>Synchronization log</h3>

@@ -1,5 +1,22 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260808_0064 - Governed integration parity contracts
+
+- Added one tenant-scoped, versioned AppSheet/Google Sheets parallel-run
+  contract per external integration.
+- Persists bounded table/column and automation dictionaries, required and
+  covered capabilities, readiness score/status, explicit gaps, source revision,
+  SHA-256 fingerprint, responsible actors, and server validation time.
+- Live integration mapping or Webhook subscription changes revalidate saved
+  readiness evidence without granting any new external mutation permission.
+- Enabled and forced PostgreSQL row-level security and tenant-leading readiness
+  indexing for the new contract table.
+- Extends controlled tenant restore schema compatibility through revision
+  `0064`; integration credentials, contracts, and synchronization evidence
+  remain protected operational configuration and are not restorable master data.
+- Downgrade removes only parity-contract evidence and leaves integration keys,
+  mappings, source links, deliveries, work orders, and inventory unchanged.
+
 ## 20260808_0063 - Governed part-usage baselines and review evidence
 
 - Added fingerprinted tenant/part baselines for exact job-machine-store,
