@@ -200,6 +200,19 @@ AppSheet feature -> OpenPartsFlow module -> API endpoint -> frontend page
   - `GET /api/integrations/{integration_id}/sync-logs`
 - Frontend page: `frontend/app/integrations/page.tsx`
 
+11. AppSheet/Google Sheets parallel-run contract
+- AppSheet feature: Table/column dictionary and Bot/automation coverage review
+- OpenPartsFlow module: Integration Parity Contracts
+- API endpoint:
+  - `GET /api/integrations/{integration_id}/parity-contract`
+  - `PUT /api/integrations/{integration_id}/parity-contract`
+- Frontend page: `frontend/app/integrations/page.tsx`
+- `Implemented` Provider-aware template, protected canonical allowlist, stable
+  fingerprint, optimistic versions, actor/time evidence, readiness score, gap
+  report, download, tenant isolation, and forced PostgreSQL RLS
+- Real customer tables, formulas, Bots, security filters, attachments, and
+  volumes remain required discovery inputs before parity can be accepted.
+
 ---
 
 ## 5) Missing Information We Need from AppSheet
@@ -306,6 +319,15 @@ After Phase 1 sign-off, release improvements in controlled increments:
   signals that cannot mutate inventory
 - `Implemented` Versioned manager review queue with acknowledgement,
   confirm/dismiss decisions, actor/time/reason evidence, and audit logs
+
+7. AppSheet/Google Sheets field and automation parity
+- `Implemented` Versioned external table/column and automation contract with
+  provider template, live mapping/subscription comparison, capability coverage,
+  blocking gaps, warnings, SHA-256 fingerprint, and downloadable evidence
+- `Implemented` Existing status, completion, and part-usage outbound callbacks
+  are represented as governed capabilities rather than duplicated integrations
+- `External input required` Customer metadata export, formulas, Bots, security
+  filters, attachment rules, data volume, and operations sign-off
 
 ---
 

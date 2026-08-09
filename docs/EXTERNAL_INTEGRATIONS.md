@@ -32,6 +32,8 @@ Management endpoints:
 - `POST /api/integrations/{integration_id}/rotate-key`
 - `GET /api/integrations/{integration_id}/sync-logs`
 - `POST /api/integrations/{integration_id}/sync-logs/{log_id}/retry`
+- `GET /api/integrations/{integration_id}/parity-contract`
+- `PUT /api/integrations/{integration_id}/parity-contract`
 
 ## Work-order Webhook
 
@@ -180,6 +182,20 @@ request. Receivers must therefore retain their normal idempotency protection.
 
 API key authentication establishes the organization before reading links, logs, or work orders. Integrations, source links, sync logs, work orders, and audit entries all use the existing database tenant filter. The same external row ID may be used independently by different organizations.
 
+## AppSheet and Google Sheets parallel-run contract
+
+The integrations workspace creates a provider-aware field and automation
+template, accepts a complete external table dictionary, validates canonical
+field directions and live Webhook coverage, and calculates a seven-capability
+readiness score. Saved contracts retain versions, actor/time evidence, gaps,
+and a SHA-256 fingerprint. External-only columns may be documented with no
+canonical mapping; unsupported or protected canonical fields are rejected.
+
+Managers have read-only access and administrators save through optimistic
+versions. Integration mapping or subscription changes automatically revalidate
+the saved contract. See
+[`INTEGRATION_PARITY_CONTRACTS.md`](INTEGRATION_PARITY_CONTRACTS.md).
+
 ## Current boundary
 
-This batch covers inbound work-order create/update, external inventory/status/recommendation reads, and outbound work-order lifecycle callbacks. Field mapping remains intake-only; external systems cannot mutate engineer ownership, authenticated device claims, completion evidence, part usage, or inventory through these APIs.
+The platform covers inbound work-order create/update, external inventory/status/recommendation reads, outbound work-order lifecycle callbacks, and versioned AppSheet/Google Sheets parallel-run contracts. Field mapping remains intake-only; external systems cannot mutate engineer ownership, authenticated device claims, completion evidence, part usage, or inventory through these APIs.

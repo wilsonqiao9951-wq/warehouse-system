@@ -178,6 +178,21 @@ responsible account, server timestamp, and manager note/reason; exact retries
 are idempotent and stale writes return `409`. See
 [`ABNORMAL_PARTS_USAGE.md`](ABNORMAL_PARTS_USAGE.md).
 
+## External integration parity contracts
+
+| Operation | Engineer | Manager | Organization admin | Warehouse |
+| --- | ---: | ---: | ---: | ---: |
+| Read integration contract and readiness gaps | Deny by default | Allow with `integrations.read` | Allow | Deny by default |
+| Save or update a contract | Deny | Deny by default | Allow with `integrations.manage` | Deny |
+| Gain new external write capability by mapping a field | Deny | Deny | Deny | Deny |
+
+Contract reads and writes are tenant-scoped and the contract table has forced
+PostgreSQL RLS. Saves require an expected version and record actor, server time,
+readiness evidence, and a source fingerprint. The canonical field catalog is an
+allowlist; inventory/recommendation fields are read-only, and ownership, device,
+signature, approval, financial, and inventory mutation fields cannot be added.
+See [`INTEGRATION_PARITY_CONTRACTS.md`](INTEGRATION_PARITY_CONTRACTS.md).
+
 ## Enterprise operations analytics
 
 | Operation | Engineer | Manager | Organization admin | Warehouse |
