@@ -3,6 +3,8 @@ import {
   AuditLogPage,
   AuditLogSummary,
   PermissionEffect,
+  OperationsAlertDelivery,
+  OperationsAlerting,
   OperationsStaleDeliveryRecoveryResult,
   PlatformOperationsHistory,
   PlatformOperationsSummary,
@@ -1248,6 +1250,24 @@ export const api = {
   getPlatformOperationsHistory: (hours = 24, bucketMinutes = 15) =>
     request<PlatformOperationsHistory>(
       `/platform/operations/history?hours=${hours}&bucket_minutes=${bucketMinutes}`
+    ),
+  getPlatformOperationsAlerting: () =>
+    request<OperationsAlerting>("/platform/operations/alerting"),
+  queuePlatformOperationsAlertTest: (payload: {
+    account_password: string;
+    reason: string;
+  }) =>
+    request<OperationsAlertDelivery>("/platform/operations/alerting/test", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    }),
+  retryPlatformOperationsAlertDelivery: (
+    deliveryId: number,
+    payload: { account_password: string; reason: string; expected_version: number }
+  ) =>
+    request<OperationsAlertDelivery>(
+      `/platform/operations/alerting/deliveries/${deliveryId}/retry`,
+      { method: "POST", body: JSON.stringify(payload) }
     ),
   recoverStaleIntegrationDeliveries: (payload: {
     account_password: string;

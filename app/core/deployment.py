@@ -151,6 +151,9 @@ def validate_deployment_settings(config: Settings = settings) -> None:
     errors.extend(
         integration_credential_configuration_errors(config, required=True)
     )
+    from app.services.operations_alerts import operations_alert_configuration_errors
+
+    errors.extend(operations_alert_configuration_errors(config))
 
     try:
         database = make_url(config.database_url)

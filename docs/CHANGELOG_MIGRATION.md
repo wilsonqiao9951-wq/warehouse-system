@@ -1,5 +1,25 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260808_0066 - Durable signed operations alert delivery
+
+- Added platform-global alert incidents with one active episode per safe alert
+  code, current/peak/observation evidence, server times, versions, and explicit
+  resolution.
+- Added a durable delivery outbox for triggered, escalated, reminder, resolved,
+  and test events with canonical payload/request hashes, stable idempotency,
+  bounded five-attempt retry evidence, and controlled failure codes.
+- Added signed, public-address-pinned HTTPS delivery without redirects or
+  response-body retention, plus a database-leased multi-replica worker.
+- Added platform-administrator-only incident/delivery reads, password-confirmed
+  test and failed-delivery retry, operator audit evidence, and the Platform
+  Operations control surface.
+- The tables are platform-global and contain no tenant records, host identity,
+  request paths, external response content, or secrets. Customer restore and
+  retention workflows cannot modify them.
+- Downgrade removes only the alert incident/outbox evidence and does not change
+  health samples, tenant alerts, work orders, inventory, billing, or integration
+  delivery records.
+
 ## 20260808_0065 - Governed ERP/WMS adapter connections
 
 - Added one tenant-scoped REST/JSON or OData v4 adapter configuration per ERP

@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     operations_history_interval_seconds: int = 60
     operations_history_retention_days: int = 30
     operations_history_query_max_samples: int = 100000
+    operations_alert_delivery_enabled: bool = False
+    operations_alert_delivery_poll_seconds: int = 60
+    operations_alert_webhook_url: str = ""
+    operations_alert_webhook_secret: str = ""
+    operations_alert_min_severity: str = "critical"
+    operations_alert_reminder_minutes: int = 60
+    operations_alert_request_timeout_seconds: int = 10
+    operations_alert_max_response_bytes: int = 4096
     # Includes room for the manifest/ZIP overhead around a max-sized export.
     max_data_restore_archive_bytes: int = 528 * 1024 * 1024
     max_data_restore_uncompressed_bytes: int = 528 * 1024 * 1024

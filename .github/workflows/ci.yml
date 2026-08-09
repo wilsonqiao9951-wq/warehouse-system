@@ -68,6 +68,9 @@ jobs:
       JWT_SECRET_KEY: ci-only-jwt-secret-with-at-least-32-characters
       MFA_ENCRYPTION_KEYS: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
       INTEGRATION_CREDENTIAL_ENCRYPTION_KEYS: ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8=
+      OPERATIONS_ALERT_DELIVERY_ENABLED: "true"
+      OPERATIONS_ALERT_WEBHOOK_URL: https://alerts.example.test/openpartsflow
+      OPERATIONS_ALERT_WEBHOOK_SECRET: ci-only-operations-alert-secret-over-32-characters
       FRONTEND_PUBLIC_URL: https://parts.example.test
       CORS_EXTRA_ORIGINS: https://parts.example.test
       DATA_EXPORT_PUBLIC_FILES_ROOT: /app/data/uploads
@@ -90,6 +93,7 @@ jobs:
       - run: python -m scripts.verify_postgres_rls
       - run: python -m scripts.verify_worker_leases
       - run: python -m scripts.verify_operations_history
+      - run: python -m scripts.verify_operations_alerts
       - run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
         env:
           DATABASE_URL: postgresql+psycopg://openpartsflow_app:ci-app-postgres-password@db:5432/openpartsflow

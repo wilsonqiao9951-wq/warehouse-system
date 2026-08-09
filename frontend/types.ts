@@ -195,6 +195,53 @@ export interface OperationsAlert {
   count: number;
 }
 
+export interface OperationsAlertIncident {
+  id: number;
+  alert_code: string;
+  severity: "warning" | "critical";
+  message: string;
+  status: "open" | "resolved";
+  current_count: number;
+  peak_count: number;
+  observation_count: number;
+  opened_at: string;
+  last_observed_at: string;
+  resolved_at?: string | null;
+  version: number;
+}
+
+export interface OperationsAlertDelivery {
+  id: number;
+  incident_id?: number | null;
+  event_type: "triggered" | "escalated" | "reminder" | "resolved" | "test";
+  idempotency_key: string;
+  request_hash: string;
+  status: "pending" | "processing" | "sent" | "failed";
+  attempt_count: number;
+  response_status_code?: number | null;
+  failure_code?: string | null;
+  next_attempt_at?: string | null;
+  last_attempt_at?: string | null;
+  sent_at?: string | null;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OperationsAlerting {
+  enabled: boolean;
+  configured: boolean;
+  destination_host?: string | null;
+  minimum_severity: "warning" | "critical";
+  poll_seconds: number;
+  reminder_minutes: number;
+  open_incident_count: number;
+  pending_delivery_count: number;
+  failed_delivery_count: number;
+  incidents: OperationsAlertIncident[];
+  deliveries: OperationsAlertDelivery[];
+}
+
 export interface OperationsHistoryPoint {
   bucket_at: string;
   instances_reporting: number;

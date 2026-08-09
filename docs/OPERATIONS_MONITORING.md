@@ -161,6 +161,22 @@ Operational procedure:
 5. Watch the worker and queue counts until the rows become `processed` or enter
    normal retry/failed handling; retain the audit export with the incident.
 
+## Signed external alert delivery
+
+The platform can persist threshold episodes and send aggregate `triggered`,
+`escalated`, periodic `reminder`, and `resolved` events to an external on-call
+Webhook. Delivery uses HMAC-SHA256, stable idempotency, a five-attempt durable
+outbox, public-address-pinned TLS, no redirects, safe failure codes, and no
+response-body retention. A dedicated database lease elects one alert worker
+across API replicas.
+
+Only a platform administrator can inspect delivery evidence, queue a signed
+test, or retry a terminal failure. Test/retry require current-password
+confirmation and an operational reason. The browser receives only the
+destination host, not the URL or signing secret. See
+[`SLA_ALERT_DELIVERY.md`](SLA_ALERT_DELIVERY.md) for the receiver protocol,
+configuration, state machine, and activation rehearsal.
+
 ## Default thresholds
 
 | Setting | Default | Purpose |
@@ -175,6 +191,12 @@ Operational procedure:
 | `OPERATIONS_HISTORY_INTERVAL_SECONDS` | 60 | Per-replica sample cadence; production range 30-900 |
 | `OPERATIONS_HISTORY_RETENTION_DAYS` | 30 | Sample retention; production range 1-365 |
 | `OPERATIONS_HISTORY_QUERY_MAX_SAMPLES` | 100000 | Hard read cap; production range 1,000-500,000 |
+| `OPERATIONS_ALERT_DELIVERY_ENABLED` | false | Enable the leased signed on-call delivery worker |
+| `OPERATIONS_ALERT_DELIVERY_POLL_SECONDS` | 60 | Alert evaluation and outbox cadence |
+| `OPERATIONS_ALERT_MIN_SEVERITY` | critical | Lowest externally delivered severity |
+| `OPERATIONS_ALERT_REMINDER_MINUTES` | 60 | Repeat interval for an active delivered incident |
+| `OPERATIONS_ALERT_REQUEST_TIMEOUT_SECONDS` | 10 | Pinned HTTPS request bound |
+| `OPERATIONS_ALERT_MAX_RESPONSE_BYTES` | 4096 | Bounded response drain; content is discarded |
 
 A request error-rate alert requires at least 20 samples and a 5xx rate of at
 least 5%. A latency alert requires at least five samples. Counts above zero
@@ -202,5 +224,6 @@ backups, and restore conflicts.
    recovery control.
 8. Verify the backup-overdue count falls after each customer backup policy is
    satisfied.
-9. Route critical alerts to the on-call system and define response ownership in
+9. Configure the signed alert receiver, queue a protected test, and rehearse a
+   trigger, recovery, receiver failure, and retry. Define response ownership in
    the customer SLA; this application view alone is not an SLA guarantee.

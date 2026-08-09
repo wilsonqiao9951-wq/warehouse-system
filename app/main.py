@@ -53,6 +53,7 @@ from app.services.operations_history import (
     operations_instance_key,
     write_operations_health_sample,
 )
+from app.services.operations_alerts import process_operations_alert_cycle
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -128,6 +129,7 @@ async def lifespan(app_instance: FastAPI):
     delivery_task = None
     billing_task = None
     history_task = None
+    alert_delivery_task = None
     testing = get_db in app_instance.dependency_overrides
     process_instance_id = _worker_owner_id()
     operations_monitor.reset(
@@ -137,6 +139,8 @@ async def lifespan(app_instance: FastAPI):
         billing_interval_seconds=settings.billing_reconciliation_poll_seconds,
         history_enabled=settings.operations_history_enabled and not testing,
         history_interval_seconds=settings.operations_history_interval_seconds,
+        alert_delivery_enabled=settings.operations_alert_delivery_enabled and not testing,
+        alert_delivery_interval_seconds=settings.operations_alert_delivery_poll_seconds,
     )
     if not testing:
         validate_deployment_settings()
@@ -224,6 +228,23 @@ async def lifespan(app_instance: FastAPI):
                 )
 
         history_task = asyncio.create_task(operations_history_loop())
+    if settings.operations_alert_delivery_enabled and not testing:
+        alert_delivery_task = asyncio.create_task(
+            _leased_worker_loop(
+                name="operations_alert_delivery",
+                owner_id=process_instance_id,
+                interval_seconds=max(30, settings.operations_alert_delivery_poll_seconds),
+                initial_delay_seconds=max(5, settings.operations_alert_delivery_poll_seconds),
+                task=lambda heartbeat: process_operations_alert_cycle(
+                    SessionLocal,
+                    schema_ready=bool(
+                        getattr(app_instance.state, "schema_ready", False)
+                    ),
+                    heartbeat=heartbeat,
+                ),
+                failure_message="Operations alert delivery worker failed",
+            )
+        )
     try:
         yield
     finally:
@@ -243,6 +264,12 @@ async def lifespan(app_instance: FastAPI):
             history_task.cancel()
             try:
                 await history_task
+            except asyncio.CancelledError:
+                pass
+        if alert_delivery_task:
+            alert_delivery_task.cancel()
+            try:
+                await alert_delivery_task
             except asyncio.CancelledError:
                 pass
 

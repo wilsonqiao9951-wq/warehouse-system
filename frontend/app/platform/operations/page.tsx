@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import ManagerShell from "@/components/manager-shell";
 import { api } from "@/lib/api";
-import { PlatformOperationsHistory, PlatformOperationsSummary } from "@/types";
+import { OperationsAlerting, PlatformOperationsHistory, PlatformOperationsSummary } from "@/types";
 
 function formatTimestamp(value?: string | null): string {
   if (!value) return "Never";
@@ -23,6 +23,7 @@ function formatUptime(seconds: number): string {
 export default function PlatformOperationsPage() {
   const [data, setData] = useState<PlatformOperationsSummary | null>(null);
   const [history, setHistory] = useState<PlatformOperationsHistory | null>(null);
+  const [alerting, setAlerting] = useState<OperationsAlerting | null>(null);
   const [historyHours, setHistoryHours] = useState(24);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -30,17 +31,23 @@ export default function PlatformOperationsPage() {
   const [accountPassword, setAccountPassword] = useState("");
   const [recovering, setRecovering] = useState(false);
   const [recoveryNotice, setRecoveryNotice] = useState("");
+  const [alertReason, setAlertReason] = useState("");
+  const [alertPassword, setAlertPassword] = useState("");
+  const [alertBusy, setAlertBusy] = useState<string | null>(null);
+  const [alertNotice, setAlertNotice] = useState("");
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       const bucketMinutes = historyHours <= 24 ? 5 : historyHours <= 72 ? 15 : 60;
-      const [summary, historical] = await Promise.all([
+      const [summary, historical, alertState] = await Promise.all([
         api.getPlatformOperationsSummary(),
-        api.getPlatformOperationsHistory(historyHours, bucketMinutes)
+        api.getPlatformOperationsHistory(historyHours, bucketMinutes),
+        api.getPlatformOperationsAlerting()
       ]);
       setData(summary);
       setHistory(historical);
+      setAlerting(alertState);
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to load platform operations.");
@@ -80,6 +87,55 @@ export default function PlatformOperationsPage() {
       setError(caught instanceof Error ? caught.message : "Unable to recover stale deliveries.");
     } finally {
       setRecovering(false);
+    }
+  };
+
+  const requireAlertConfirmation = (): boolean => {
+    if (alertReason.trim().length < 3 || !alertPassword) {
+      setError("Enter an alert-delivery reason and your current account password.");
+      return false;
+    }
+    return true;
+  };
+
+  const queueAlertTest = async () => {
+    if (!requireAlertConfirmation()) return;
+    try {
+      setAlertBusy("test");
+      setError("");
+      setAlertNotice("");
+      const delivery = await api.queuePlatformOperationsAlertTest({
+        account_password: alertPassword,
+        reason: alertReason.trim()
+      });
+      setAlertNotice(`Test delivery #${delivery.id} was queued for the alert worker.`);
+      setAlertPassword("");
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to queue an alert delivery test.");
+    } finally {
+      setAlertBusy(null);
+    }
+  };
+
+  const retryAlertDelivery = async (deliveryId: number, expectedVersion: number) => {
+    if (!requireAlertConfirmation()) return;
+    try {
+      setAlertBusy(`retry-${deliveryId}`);
+      setError("");
+      setAlertNotice("");
+      await api.retryPlatformOperationsAlertDelivery(deliveryId, {
+        account_password: alertPassword,
+        reason: alertReason.trim(),
+        expected_version: expectedVersion
+      });
+      setAlertNotice(`Failed alert delivery #${deliveryId} was safely requeued.`);
+      setAlertPassword("");
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to retry the alert delivery.");
+    } finally {
+      setAlertBusy(null);
     }
   };
 
@@ -239,6 +295,119 @@ export default function PlatformOperationsPage() {
                   </div>
                 ))}
               </div>
+            )}
+          </section>
+
+          <section className="card">
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+              <div>
+                <h3>Signed on-call delivery</h3>
+                <p className="muted">
+                  Durable triggered, escalated, reminder, and resolved events contain aggregate platform evidence only.
+                  External synthetic probes remain authoritative for contractual uptime.
+                </p>
+              </div>
+              <span className={`badge ${alerting?.configured ? "badge-success" : "badge-warning"}`}>
+                {alerting?.configured ? `Enabled · ${alerting.destination_host}` : "Not configured"}
+              </span>
+            </div>
+            {alerting && (
+              <>
+                <div className="pilot-metric-grid" style={{ marginTop: 12 }}>
+                  <div className="pilot-metric">
+                    <div className="muted">Open incidents</div>
+                    <div className="metric">{alerting.open_incident_count}</div>
+                  </div>
+                  <div className="pilot-metric">
+                    <div className="muted">Pending deliveries</div>
+                    <div className="metric">{alerting.pending_delivery_count}</div>
+                  </div>
+                  <div className={`pilot-metric${alerting.failed_delivery_count > 0 ? " pilot-metric--alert" : ""}`}>
+                    <div className="muted">Failed deliveries</div>
+                    <div className="metric">{alerting.failed_delivery_count}</div>
+                  </div>
+                  <div className="pilot-metric">
+                    <div className="muted">Policy</div>
+                    <div style={{ fontWeight: 700 }}>{alerting.minimum_severity}+</div>
+                    <small>{alerting.poll_seconds}s poll · {alerting.reminder_minutes}m reminder</small>
+                  </div>
+                </div>
+                <div className="table-wrap" style={{ marginTop: 12 }}>
+                  <table>
+                    <thead><tr><th>Incident</th><th>Severity</th><th>Status</th><th>Current / peak</th><th>Opened</th><th>Last observed / resolved</th></tr></thead>
+                    <tbody>
+                      {alerting.incidents.length === 0 ? (
+                        <tr><td colSpan={6}>No durable alert incidents have been observed.</td></tr>
+                      ) : alerting.incidents.slice(0, 20).map((incident) => (
+                        <tr key={incident.id}>
+                          <td><code>{incident.alert_code}</code><br /><small>{incident.message}</small></td>
+                          <td>{incident.severity}</td>
+                          <td>{incident.status}</td>
+                          <td>{incident.current_count} / {incident.peak_count}</td>
+                          <td>{formatTimestamp(incident.opened_at)}</td>
+                          <td>{formatTimestamp(incident.resolved_at || incident.last_observed_at)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="two-col" style={{ marginTop: 12 }}>
+                  <input
+                    value={alertReason}
+                    onChange={(event) => setAlertReason(event.target.value)}
+                    placeholder="Alert test or retry reason"
+                    maxLength={500}
+                  />
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={alertPassword}
+                    onChange={(event) => setAlertPassword(event.target.value)}
+                    placeholder="Current account password"
+                    maxLength={128}
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={!alerting.configured || alertBusy !== null}
+                  onClick={() => void queueAlertTest()}
+                  style={{ marginTop: 12 }}
+                >
+                  {alertBusy === "test" ? "Queuing..." : "Queue signed test event"}
+                </button>
+                {alertNotice && <p className="notice" style={{ marginTop: 12 }}>{alertNotice}</p>}
+                <div className="table-wrap" style={{ marginTop: 12 }}>
+                  <table>
+                    <thead><tr><th>Delivery</th><th>Event</th><th>Status</th><th>Attempts</th><th>HTTP / safe failure</th><th>Updated</th><th>Action</th></tr></thead>
+                    <tbody>
+                      {alerting.deliveries.length === 0 ? (
+                        <tr><td colSpan={7}>No alert deliveries have been queued.</td></tr>
+                      ) : alerting.deliveries.slice(0, 20).map((delivery) => (
+                        <tr key={delivery.id}>
+                          <td>#{delivery.id}</td>
+                          <td>{delivery.event_type}</td>
+                          <td>{delivery.status}</td>
+                          <td>{delivery.attempt_count}</td>
+                          <td>{delivery.response_status_code ?? delivery.failure_code ?? "-"}</td>
+                          <td>{formatTimestamp(delivery.updated_at)}</td>
+                          <td>
+                            {delivery.status === "failed" ? (
+                              <button
+                                type="button"
+                                className="secondary"
+                                disabled={!alerting.configured || alertBusy !== null}
+                                onClick={() => void retryAlertDelivery(delivery.id, delivery.version)}
+                              >
+                                {alertBusy === `retry-${delivery.id}` ? "Retrying..." : "Retry"}
+                              </button>
+                            ) : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </section>
 

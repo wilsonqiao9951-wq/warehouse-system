@@ -54,6 +54,8 @@ class OperationsMonitor:
         billing_interval_seconds: int = 3600,
         history_enabled: bool = False,
         history_interval_seconds: int = 60,
+        alert_delivery_enabled: bool = False,
+        alert_delivery_interval_seconds: int = 60,
         started_at: datetime | None = None,
     ) -> None:
         with self._lock:
@@ -71,6 +73,10 @@ class OperationsMonitor:
                 "operations_history": _WorkerState(
                     enabled=history_enabled,
                     interval_seconds=max(1, history_interval_seconds),
+                ),
+                "operations_alert_delivery": _WorkerState(
+                    enabled=alert_delivery_enabled,
+                    interval_seconds=max(1, alert_delivery_interval_seconds),
                 ),
             }
 
