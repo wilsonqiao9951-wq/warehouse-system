@@ -1,66 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { api, clearLocalAuthentication, hasStoredAuthentication } from "@/lib/api";
+import { useAccessSession } from "@/components/access-session-provider";
+import { api, clearLocalAuthentication } from "@/lib/api";
+import { policyAllows, routeAccessPolicies } from "@/lib/access-policy";
 
-type NavLink = {
-  href: string;
-  label: string;
-  roles: string[];
-  platformOnly?: boolean;
-  exact?: boolean;
-  permission?: string;
-};
-
-const links: NavLink[] = [
-  { href: "/", label: "Dashboard", roles: ["manager", "admin"] },
-  { href: "/work-orders", label: "Work Orders", roles: ["manager", "admin"] },
-  { href: "/calendar", label: "Calendar", roles: ["manager", "admin"] },
-  { href: "/map", label: "Map", roles: ["manager", "admin", "engineer"] },
-  { href: "/inventory", label: "Inventory", roles: ["warehouse", "manager", "admin"] },
-  { href: "/inventory-ledger", label: "Inventory Ledger", roles: ["warehouse", "manager", "admin"] },
-  { href: "/inventory-reconciliation", label: "Inventory Reconciliation", roles: ["warehouse", "manager", "admin"] },
-  { href: "/van-inventory-planning", label: "Van Planning", roles: ["warehouse", "manager", "admin"] },
-  { href: "/regions", label: "Regions", roles: ["warehouse", "manager", "admin"] },
-  { href: "/inventory-scan", label: "Scan & Check", roles: ["warehouse", "manager", "admin", "engineer"] },
-  { href: "/warehouse-tasks", label: "Warehouse Tasks", roles: ["warehouse", "manager", "admin"] },
-  { href: "/low-stock-rules", label: "Low-stock Rules", roles: ["warehouse", "manager", "admin"] },
-  { href: "/inventory-counts", label: "Inventory Counts", roles: ["warehouse", "manager", "admin"] },
-  { href: "/knowledge-base", label: "Service Knowledge", roles: ["warehouse", "manager", "admin", "engineer"] },
-  { href: "/part-observation", label: "Photo Memory", roles: ["warehouse", "manager", "admin", "engineer"] },
-  { href: "/employees", label: "Employees", roles: ["manager", "admin"], permission: "users.read" },
-  { href: "/reports", label: "Reports", roles: ["manager", "admin"], permission: "reports.read" },
-  { href: "/abnormal-usage", label: "Usage Reviews", roles: ["manager", "admin"], permission: "reports.read" },
-  { href: "/analytics", label: "Analytics", roles: ["manager", "admin"], permission: "reports.read" },
-  { href: "/profit-snapshots", label: "Profit Snapshots", roles: ["manager", "admin"], permission: "reports.read" },
-  { href: "/performance", label: "Performance", roles: ["manager", "admin", "engineer"] },
-  { href: "/agent", label: "Operations Agent", roles: ["manager", "admin"], permission: "agent.use" },
-  { href: "/audit-logs", label: "Audit Logs", roles: ["manager", "admin"], permission: "audit.read" },
-  { href: "/backups", label: "Backups", roles: ["admin"] },
-  { href: "/pilot-checklist", label: "Pilot Governance", roles: ["engineer", "warehouse", "manager", "admin"] },
-  { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
-  { href: "/work-order-templates", label: "Job Forms", roles: ["manager", "admin"] },
-  { href: "/form-actions", label: "Form Actions", roles: ["warehouse", "manager", "admin"] },
-  { href: "/sync-conflicts", label: "Sync Conflicts", roles: ["admin"] },
-  { href: "/integrations", label: "Integrations", roles: ["manager", "admin"], permission: "integrations.read" },
-  { href: "/integration-reconciliation", label: "Parallel Run", roles: ["manager", "admin"], permission: "integrations.read" },
-  { href: "/platform", label: "Customers", roles: ["admin"], platformOnly: true, exact: true },
-  { href: "/platform/operations", label: "Operations", roles: ["admin"], platformOnly: true },
-  { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },
-  { href: "/parts-import", label: "Parts Import", roles: ["warehouse", "manager", "admin"] },
-  { href: "/inventory-import", label: "Opening Stock", roles: ["warehouse", "manager", "admin"] },
-  { href: "/work-order-details", label: "WO Details", roles: ["admin"] },
-  { href: "/today", label: "Today", roles: ["engineer"] },
-  { href: "/my-jobs", label: "My Jobs", roles: ["engineer"] },
-  { href: "/my-van-inventory", label: "My Van", roles: ["engineer"] },
-  { href: "/sync-center", label: "Sync", roles: ["engineer", "warehouse", "manager", "admin"] },
-  { href: "/profile", label: "Profile", roles: ["engineer", "warehouse", "manager", "admin", "assistant"] }
-];
-
-function sortEngineerLinks(items: typeof links) {
-  const order = ["/today", "/my-jobs", "/performance", "/my-van-inventory", "/knowledge-base", "/inventory-scan", "/sync-center", "/profile", "/map", "/part-observation"];
+function sortEngineerLinks(items: typeof routeAccessPolicies) {
+  const order = ["/today", "/my-jobs", "/work-orders", "/performance", "/my-van-inventory", "/knowledge-base", "/inventory-scan", "/sync-center", "/profile", "/map", "/part-observation"];
   return [...items].sort((a, b) => {
     const ai = order.indexOf(a.href); const bi = order.indexOf(b.href);
     return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi);
@@ -69,46 +17,12 @@ function sortEngineerLinks(items: typeof links) {
 
 export default function Nav() {
   const pathname = usePathname();
-  const [role, setRole] = useState("admin");
-  const [authenticated, setAuthenticated] = useState(false);
-  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
-  const [permissions, setPermissions] = useState<string[] | null>(null);
-
-  useEffect(() => {
-    const saved = window.localStorage.getItem("opf_role");
-    const hasSession = hasStoredAuthentication();
-    if (saved) {
-      setRole(saved);
-    }
-    if (hasSession) {
-      if (!navigator.onLine) {
-        setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
-        return;
-      }
-      Promise.all([api.getMe(), api.getMyPermissions()])
-        .then(([user, permissionMatrix]) => {
-          setAuthenticated(true);
-          setRole(user.role);
-          setIsPlatformAdmin(user.is_platform_admin);
-          setPermissions(permissionMatrix.effective_permissions);
-          window.localStorage.setItem("opf_role", user.role);
-          window.localStorage.setItem("opf_user_id", String(user.id));
-        })
-        .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : "";
-          const networkUnavailable = (
-            message.includes("Network unavailable")
-            || message.includes("API unavailable")
-          );
-          if (navigator.onLine && !networkUnavailable) {
-            clearLocalAuthentication();
-            setAuthenticated(false);
-          } else {
-            setAuthenticated(Boolean(saved && window.localStorage.getItem("opf_user_id")));
-          }
-        });
-    }
-  }, []);
+  const {
+    authenticated,
+    role,
+    permissions,
+    isPlatformAdmin,
+  } = useAccessSession();
 
   useEffect(() => {
     if (role === "engineer") {
@@ -120,15 +34,11 @@ export default function Nav() {
   }, [role]);
 
   const visibleLinks = useMemo(() => {
-    if (!authenticated) return [];
-    const items = links.filter(
-      (link) => (
-        (link.permission && permissions
-          ? permissions.includes(link.permission)
-          : link.roles.includes(role))
-        && (!link.platformOnly || isPlatformAdmin)
-      )
-    );
+    if (!authenticated || !role) return [];
+    const items = routeAccessPolicies.filter((link) => (
+      link.navigation !== false
+      && policyAllows(link, { role, permissions, isPlatformAdmin })
+    ));
     if (role === "engineer") {
       return sortEngineerLinks(items);
     }

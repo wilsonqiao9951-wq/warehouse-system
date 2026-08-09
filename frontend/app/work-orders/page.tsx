@@ -28,7 +28,7 @@ export default function WorkOrdersPage() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [editing, setEditing] = useState<Record<number, { status: string; engineer_id: string; revenue: string }>>({});
-  const [role, setRole] = useState<AppRole>("admin");
+  const [role, setRole] = useState<AppRole | null>(null);
   const [filters, setFilters] = useState({
     technician_id: searchParams.get("technician_id") || "",
     status: searchParams.get("status") || "",
@@ -45,7 +45,11 @@ export default function WorkOrdersPage() {
     setRole(getCurrentRole());
   }, []);
 
+  const canCreate = role === "manager" || role === "admin";
+  const canEditRows = role === "admin";
+
   const load = useCallback(async () => {
+    if (!role) return;
     setLoading(true);
     try {
       const [orders, users, templates] = await Promise.all([
@@ -60,8 +64,8 @@ export default function WorkOrdersPage() {
           date_to: filters.date_to || undefined,
           q: filters.q || undefined
         }),
-        api.listEngineers(),
-        api.listWorkOrderFormTemplates()
+        canCreate ? api.listEngineers() : Promise.resolve([]),
+        canCreate ? api.listWorkOrderFormTemplates() : Promise.resolve([])
       ]);
       setWorkOrders(orders);
       setEngineers(users);
@@ -81,7 +85,9 @@ export default function WorkOrdersPage() {
     filters.job_type,
     filters.date_from,
     filters.date_to,
-    filters.q
+    filters.q,
+    role,
+    canCreate
   ]);
 
   useEffect(() => {
@@ -153,18 +159,18 @@ export default function WorkOrdersPage() {
   };
 
   const saveRow = async (order: WorkOrder) => {
+    if (!canEditRows) {
+      setNotice({ type: "error", text: "Only administrators can correct a work order from the overview." });
+      return;
+    }
     const row = editing[order.id];
     if (!row) return;
     try {
       await api.updateWorkOrder(order.id, {
         status: row.status,
-        ...(role === "manager" || role === "admin"
-          ? {
-              revenue: Number(row.revenue) || 0,
-              engineer_id: row.engineer_id ? Number(row.engineer_id) : null,
-              assigned_user_id: row.engineer_id ? Number(row.engineer_id) : null
-            }
-          : {})
+        revenue: Number(row.revenue) || 0,
+        engineer_id: row.engineer_id ? Number(row.engineer_id) : null,
+        assigned_user_id: row.engineer_id ? Number(row.engineer_id) : null
       });
       setNotice({ type: "success", text: `Work order ${order.ticket_number} updated.` });
       await load();
@@ -175,14 +181,16 @@ export default function WorkOrdersPage() {
 
   const filterBody = (
     <div className="two-col filter-details-body">
-      <select value={filters.technician_id} onChange={(e) => setFilters((f) => ({ ...f, technician_id: e.target.value }))}>
-        <option value="">All technicians</option>
-        {engineers.map((e) => (
-          <option key={e.id} value={e.id}>
-            {e.name}
-          </option>
-        ))}
-      </select>
+      {canCreate && (
+        <select value={filters.technician_id} onChange={(e) => setFilters((f) => ({ ...f, technician_id: e.target.value }))}>
+          <option value="">All technicians</option>
+          {engineers.map((e) => (
+            <option key={e.id} value={e.id}>
+              {e.name}
+            </option>
+          ))}
+        </select>
+      )}
       <select value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}>
         <option value="">All status</option>
         <option value="open">open</option>
@@ -202,7 +210,9 @@ export default function WorkOrdersPage() {
   return (
     <ManagerShell
       title="Work Orders"
-      subtitle="Manage and track all service jobs."
+      subtitle={role === "engineer"
+        ? "View the team job pool and progress. Changes remain limited to jobs claimed by this account and registered phone."
+        : "Manage and track all service jobs."}
       metrics={[
         { label: "On this page", value: workOrders.length },
         { label: "Open (page)", value: workOrders.filter((w) => w.status === "open").length },
@@ -214,7 +224,7 @@ export default function WorkOrdersPage() {
         {filterBody}
       </details>
       <section className="two-col">
-        {(role === "manager" || role === "admin") && (
+        {canCreate && (
           <div className="card">
             <h3>Create Job</h3>
             <form onSubmit={onSubmit}>
@@ -324,7 +334,10 @@ export default function WorkOrdersPage() {
                         {w.wo_number ? `· ${w.wo_number}` : ""} ({w.status})
                       </span>
                     </div>
-                    {(role === "manager" || role === "admin") && (
+                    <div className="muted" style={{ marginTop: 6 }}>
+                      Owner: {w.claimed_by_name || "Available"}
+                    </div>
+                    {canEditRows && (
                       <>
                         <select
                           style={{ marginTop: 8 }}
@@ -344,20 +357,22 @@ export default function WorkOrdersPage() {
                           value={editing[w.id]?.revenue ?? String(w.revenue)}
                           onChange={(e) => setRowField(w.id, "revenue", e.target.value, w)}
                         />
+                        <select
+                          style={{ marginTop: 8 }}
+                          value={editing[w.id]?.status ?? w.status}
+                          onChange={(e) => setRowField(w.id, "status", e.target.value, w)}
+                        >
+                          <option value="open">open</option>
+                          <option value="in_progress">in_progress</option>
+                        </select>
                       </>
                     )}
-                    <select
-                      style={{ marginTop: 8 }}
-                      value={editing[w.id]?.status ?? w.status}
-                      onChange={(e) => setRowField(w.id, "status", e.target.value, w)}
-                    >
-                      <option value="open">open</option>
-                      <option value="in_progress">in_progress</option>
-                    </select>
                     <div className="one-hand-actions" style={{ marginTop: 10 }}>
-                      <button type="button" onClick={() => saveRow(w)}>
-                        Save
-                      </button>
+                      {canEditRows && (
+                        <button type="button" onClick={() => saveRow(w)}>
+                          Save
+                        </button>
+                      )}
                       <Link className="nav-item" href={`/work-order-details?work_order_id=${w.id}`}>
                         Details
                       </Link>
@@ -370,8 +385,9 @@ export default function WorkOrdersPage() {
                   <thead>
                     <tr>
                       <th>Ticket</th>
-                      {(role === "manager" || role === "admin") && <th>Engineer</th>}
-                      {(role === "manager" || role === "admin") && <th>Revenue</th>}
+                      <th>Owner</th>
+                      {canEditRows && <th>Engineer</th>}
+                      {canEditRows && <th>Revenue</th>}
                       <th>Status</th>
                       <th>Action</th>
                     </tr>
@@ -380,7 +396,8 @@ export default function WorkOrdersPage() {
                     {workOrders.map((w) => (
                       <tr key={w.id}>
                         <td>{w.ticket_number}</td>
-                        {(role === "manager" || role === "admin") && (
+                        <td>{w.claimed_by_name || "Available"}</td>
+                        {canEditRows && (
                           <td>
                             <select
                               value={editing[w.id]?.engineer_id ?? String(w.engineer_id || w.assigned_user_id || "")}
@@ -395,7 +412,7 @@ export default function WorkOrdersPage() {
                             </select>
                           </td>
                         )}
-                        {(role === "manager" || role === "admin") && (
+                        {canEditRows && (
                           <td>
                             <input
                               type="number"
@@ -405,19 +422,23 @@ export default function WorkOrdersPage() {
                           </td>
                         )}
                         <td>
-                          <select
-                            value={editing[w.id]?.status ?? w.status}
-                            onChange={(e) => setRowField(w.id, "status", e.target.value, w)}
-                          >
-                            <option value="open">open</option>
-                            <option value="in_progress">in_progress</option>
-                          </select>
+                          {canEditRows ? (
+                            <select
+                              value={editing[w.id]?.status ?? w.status}
+                              onChange={(e) => setRowField(w.id, "status", e.target.value, w)}
+                            >
+                              <option value="open">open</option>
+                              <option value="in_progress">in_progress</option>
+                            </select>
+                          ) : w.status}
                         </td>
                         <td>
                           <div style={{ display: "grid", gap: 6 }}>
-                            <button type="button" onClick={() => saveRow(w)}>
-                              Save
-                            </button>
+                            {canEditRows && (
+                              <button type="button" onClick={() => saveRow(w)}>
+                                Save
+                              </button>
+                            )}
                             <Link className="nav-item" href={`/work-order-details?work_order_id=${w.id}`}>
                               Details
                             </Link>

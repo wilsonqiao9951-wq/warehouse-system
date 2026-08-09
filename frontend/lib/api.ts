@@ -202,6 +202,8 @@ export function storeAuthenticatedSession(session: AuthSession): void {
   }
   window.localStorage.setItem("opf_role", session.user.role);
   window.localStorage.setItem("opf_user_id", String(session.user.id));
+  window.localStorage.removeItem("opf_effective_permissions");
+  window.localStorage.setItem("opf_is_platform_admin", String(session.user.is_platform_admin));
 }
 
 export function clearLocalAuthentication(): void {
@@ -212,6 +214,8 @@ export function clearLocalAuthentication(): void {
   window.localStorage.removeItem(CSRF_TOKEN_KEY);
   window.localStorage.removeItem("opf_role");
   window.localStorage.removeItem("opf_user_id");
+  window.localStorage.removeItem("opf_effective_permissions");
+  window.localStorage.removeItem("opf_is_platform_admin");
 }
 
 async function downloadAuthenticatedFile(

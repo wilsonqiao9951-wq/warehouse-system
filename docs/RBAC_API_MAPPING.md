@@ -13,6 +13,13 @@ delegable. All changes require a reason and append an audit event. See
 These policy overrides do not weaken work-order ownership, registered-device,
 claim-version, completion-password, inventory-custody, or tenant checks.
 
+The frontend navigation and direct-route guard now consume one centralized,
+fail-closed role policy. The technician workspace includes a read-only
+organization work-order pool, while manager, warehouse, technician, tenant
+administrator, and platform-only pages remain separated. This UI policy is a
+usability boundary only; the API checks documented below remain authoritative.
+See [`ROLE_PAGE_ACCESS.md`](ROLE_PAGE_ACCESS.md) for the complete page matrix.
+
 PostgreSQL deployments additionally force tenant read/write row-level security
 on all tenant models. API/ORM authorization remains authoritative for roles,
 ownership, devices, and field-level disclosure; RLS is the final organization
