@@ -123,12 +123,14 @@ loopback PostgreSQL. In one rolled-back transaction it creates two tenants,
 default. It then runs the production-shaped recent-work-order, scheduled-work,
 inventory-ledger, engineer part-use, and parts-cost queries repeatedly.
 
-The gate records p50/p95 latency, plan node types, and index names. It fails if
-a protected large table regresses to a sequential scan, an expected tenant-led
-index disappears from the plan, or p95 exceeds the deliberately broad 750 ms
-CI budget. The synthetic transaction is always rolled back. The report contains
-only scale, plans, and timings and explicitly is not a capacity certification or
-contractual SLA.
+The gate records p50/p95 latency, plan node types, and index names. It first
+proves that every tenant-led `0067` index exists in the PostgreSQL catalog, then
+fails if a protected large table regresses to a sequential scan, a query does
+not use any index, or p95 exceeds the deliberately broad 750 ms CI budget.
+Exact index selection remains PostgreSQL's cost-based decision. The synthetic
+transaction is always rolled back and uses explicit temporary identifiers so it
+does not advance production sequences. The report contains only scale, plans,
+and timings and explicitly is not a capacity certification or contractual SLA.
 
 Migration `20260808_0067` adds the tenant-led pagination and range indexes used
 by this gate. Controlled tenant restore compatibility is extended through

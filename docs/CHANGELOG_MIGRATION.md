@@ -9,8 +9,9 @@
   under one hash-protected recovery point after user writes are closed.
 - Adds isolated restore refusal, pre-mutation archive validation, exact schema/
   row/file verification, safe RPO/RTO reporting, and report budget validation.
-- Adds a repeatable loopback-only PostgreSQL scale gate with rolled-back
-  synthetic data, query-plan/index assertions, and p50/p95 regression evidence.
+- Adds a repeatable loopback-only PostgreSQL scale gate with rolled-back,
+  sequence-neutral synthetic data, required-index catalog checks, indexed-plan
+  assertions, and p50/p95 regression evidence.
 - Extends controlled tenant restore compatibility through `0067`; these
   revisions do not change the allowlisted portable record format.
 
