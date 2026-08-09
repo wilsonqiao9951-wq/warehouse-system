@@ -8,9 +8,9 @@
 
 ## 2026-08-08 - AppSheet parallel-run discrepancy reconciliation
 
-Status: implementation and local verification complete on
-`codex/integration-parallel-reconciliation`; publication and GitHub CI are the
-remaining batch gates.
+Status: implemented and published as stacked draft PR #42 on
+`codex/integration-parallel-reconciliation`. Feature commit `4d5b4d2` and
+GitHub Actions run #81 passed every required job.
 
 Delivered:
 
@@ -50,6 +50,11 @@ Verification:
   routes, including `/integration-reconciliation`.
 - Python requirements and full/production npm dependency audits report no
   known vulnerabilities. Python compilation and Git diff integrity checks pass.
+- GitHub Actions #81 passed backend (including the complete 310-test suite),
+  frontend, and private-deployment. The deployment job verified PostgreSQL 16
+  migration `0068`, Alembic zero drift, forced RLS, worker/operations checks,
+  scale and disaster-recovery rehearsals, Compose configuration, and API/Web/
+  recovery image builds.
 
 ## 2026-08-08 - Platform recovery and repeatable scale rehearsals
 
