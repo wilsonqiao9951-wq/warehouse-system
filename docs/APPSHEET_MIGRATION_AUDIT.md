@@ -30,7 +30,7 @@ Status legend:
 - `Implemented` Update status
 - `Implemented` Input revenue
 - `Partial` Work order details parity (address/problem fields exist; AppSheet field parity pending)
-- `Partial` Work order photo evidence (photo upload exists for part usage; full work-order-level media workflow pending)
+- `Implemented` Work-order photo/video evidence with mobile camera/library capture, categories/captions, team read visibility, claimant-phone/admin write control, immutable attribution, private authenticated delivery, completion freeze, and portable backup inclusion
 - `Unknown` AppSheet automation rules (auto status transitions, reminders, escalations)
 
 ### Parts Usage and Inventory

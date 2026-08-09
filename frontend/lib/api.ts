@@ -94,6 +94,8 @@ import {
   User,
   Warehouse,
   WorkOrder,
+  WorkOrderMedia,
+  WorkOrderMediaCategory,
   WorkOrderPart,
   AbnormalUsageRow,
   PartUsageBaseline,
@@ -2311,6 +2313,59 @@ export const api = {
     request<QCPicture[]>(`/qc-pictures${workOrderId ? `?work_order_id=${workOrderId}` : ""}`),
   createQCPicture: (payload: { work_order_id: number; image_url: string; uploaded_by?: number | null }) =>
     requestWithOfflineMediaQueue<QCPicture>("/qc-pictures", { method: "POST", body: JSON.stringify(payload) }),
+  listWorkOrderMedia: (workOrderId: number) =>
+    request<WorkOrderMedia[]>(`/work-orders/${workOrderId}/media`),
+  createWorkOrderMedia: (
+    workOrderId: number,
+    payload: {
+      file: File;
+      category: WorkOrderMediaCategory;
+      caption?: string;
+      clientRequestId: string;
+    }
+  ) => {
+    const form = new FormData();
+    form.append("file", payload.file);
+    form.append("category", payload.category);
+    if (payload.caption?.trim()) form.append("caption", payload.caption.trim());
+    form.append("client_request_id", payload.clientRequestId);
+    return request<WorkOrderMedia>(
+      `/work-orders/${workOrderId}/media`,
+      { method: "POST", body: form },
+      false
+    );
+  },
+  openWorkOrderMedia: async (media: WorkOrderMedia) => {
+    if (typeof window === "undefined") throw new Error("Media preview requires a browser.");
+    const preview = window.open("about:blank", "_blank");
+    try {
+      const apiPath = media.content_url.startsWith("/api/")
+        ? media.content_url.slice(4)
+        : media.content_url;
+      const response = await fetch(`${API_BASE}${apiPath}`, {
+        headers: authenticationHeaders("GET"),
+        credentials: "include",
+        cache: "no-store"
+      });
+      if (!response.ok) {
+        let detail = `Unable to open field media (${response.status})`;
+        try {
+          const body = await response.json() as { detail?: string };
+          if (body.detail) detail = body.detail;
+        } catch {
+          // Keep the status fallback.
+        }
+        throw new Error(detail);
+      }
+      const objectUrl = URL.createObjectURL(await response.blob());
+      if (preview) preview.location.href = objectUrl;
+      else window.location.href = objectUrl;
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 300_000);
+    } catch (error) {
+      preview?.close();
+      throw error;
+    }
+  },
   listVoiceNotes: (workOrderId: number) =>
     request<WorkOrderVoiceNote[]>(`/work-orders/${workOrderId}/voice-notes`),
   uploadVoiceNote: (workOrderId: number, blob: Blob, durationSeconds: number) => {

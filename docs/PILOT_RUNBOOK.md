@@ -64,16 +64,20 @@ Recommended naming:
 5. Tap `Start Job` (status should become `IN_PROGRESS`)
 6. Add job status updates
 7. Add parts used
-8. Upload QC pictures
-9. Add returned equipment (if applicable)
-10. Tap `Complete Job` with the current account password
-11. Verify exact engineer/device attribution and the post-completion lock
+8. Upload categorized field photos/videos; confirm another engineer can view
+   them but cannot add or alter evidence
+9. Upload a legacy QC picture when exercising offline photo replay
+10. Add returned equipment (if applicable)
+11. Tap `Complete Job` with the current account password
+12. Verify exact engineer/device attribution and the post-completion media lock
 
 Expected result:
 - Same-organization jobs and progress are visible, but only the active claimant
   on the bound device can modify field data
 - All actions saved with timestamps
 - No post-completion edits allowed
+- Field media opens only through the authenticated content endpoint; a direct
+  `/uploads` URL must not expose it
 
 ### 4.2 Manager Work Order Review
 

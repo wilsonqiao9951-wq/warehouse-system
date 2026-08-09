@@ -2238,6 +2238,34 @@ export interface QCPicture {
   uploaded_by?: number | null;
 }
 
+export type WorkOrderMediaCategory =
+  | "arrival"
+  | "before"
+  | "during"
+  | "after"
+  | "damage"
+  | "serial_label"
+  | "other";
+
+export interface WorkOrderMedia {
+  id: number;
+  organization_id: number;
+  work_order_id: number;
+  category: WorkOrderMediaCategory;
+  caption?: string | null;
+  media_type: "photo" | "video";
+  mime_type: string;
+  size_bytes: number;
+  file_sha256: string;
+  original_filename?: string | null;
+  client_request_id: string;
+  created_by?: number | null;
+  created_device_id?: number | null;
+  claim_version: number;
+  content_url: string;
+  created_at: string;
+}
+
 export interface WorkOrderVoiceNote {
   id: number;
   work_order_id: number;

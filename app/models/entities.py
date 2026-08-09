@@ -3078,6 +3078,77 @@ class QCPicture(Base):
     organization = relationship("Organization")
 
 
+class WorkOrderMedia(Base):
+    __tablename__ = "work_order_media"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "client_request_id",
+            name="uq_work_order_media_org_request",
+        ),
+        CheckConstraint(
+            "category IN ('arrival', 'before', 'during', 'after', 'damage', "
+            "'serial_label', 'other')",
+            name="ck_work_order_media_category",
+        ),
+        CheckConstraint(
+            "media_type IN ('photo', 'video')",
+            name="ck_work_order_media_type",
+        ),
+        CheckConstraint(
+            "size_bytes > 0",
+            name="ck_work_order_media_size_positive",
+        ),
+        CheckConstraint(
+            "length(file_sha256) = 64 AND length(request_fingerprint) = 64",
+            name="ck_work_order_media_fingerprints",
+        ),
+        CheckConstraint(
+            "claim_version >= 0",
+            name="ck_work_order_media_claim_version",
+        ),
+        Index(
+            "ix_work_order_media_org_work_order_time",
+            "organization_id",
+            "work_order_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    work_order_id: Mapped[int] = mapped_column(
+        ForeignKey("work_orders.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    category: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    caption: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    media_type: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    media_storage_key: Mapped[str] = mapped_column(String(500), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_request_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    created_device_id: Mapped[int | None] = mapped_column(
+        ForeignKey("user_devices.id"), nullable=True
+    )
+    claim_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    organization = relationship("Organization")
+    work_order = relationship("WorkOrder")
+    creator = relationship("User")
+    created_device = relationship("UserDevice")
+
+
 class WorkOrderVoiceNote(Base):
     __tablename__ = "work_order_voice_notes"
 

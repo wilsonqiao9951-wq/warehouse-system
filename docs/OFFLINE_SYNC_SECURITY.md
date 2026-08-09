@@ -35,6 +35,13 @@ Only these JSON mutations can enter the browser queue:
 
 Every other mutation requires a live connection. This includes claim/release, start/pause/status, completion/approval, part usage, replenishment, transfer/receipt, vehicle returns, inventory counts, imports, configuration, integrations, users, and conflict decisions.
 
+The append-only work-order field photo/video endpoint is also online-only.
+Although its JSON evidence is idempotent, the private binary is larger than the
+reviewed image-only device store and does not yet have a versioned binary replay
+contract. The mobile screen reports the live-connection requirement without
+queuing or claiming success. Legacy QC-photo offline retention remains
+available.
+
 The allowlist is intentional. New API mutations remain online-only until their replay, idempotency, ownership, and conflict semantics are explicitly reviewed. Queue records created by older clients outside the current allowlist are retained as blocked evidence and are never replayed automatically.
 
 ## Account, phone, and work-order binding

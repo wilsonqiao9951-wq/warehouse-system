@@ -271,6 +271,15 @@ def test_portable_restore_compatibility_continues_through_pilot_governance_revis
     } <= compatible
 
 
+def test_portable_restore_compatibility_continues_through_work_order_media_revision():
+    compatible = RESTORE_SCHEMA_COMPATIBILITY["20260809_0070"]
+    assert {
+        "20260808_0068",
+        "20260809_0069",
+        "20260809_0070",
+    } <= compatible
+
+
 def test_atomic_replace_retries_transient_permission_error(monkeypatch, tmp_path):
     source = tmp_path / "source"
     target = tmp_path / "target"

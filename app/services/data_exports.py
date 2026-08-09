@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.rbac import TENANT_MODELS
-from app.models import MachineKnowledgeEntry, Organization
+from app.models import Organization
 
 
 FORMAT_VERSION = "opf-portable-v1"
@@ -215,8 +215,9 @@ def build_organization_data_export(
                         payload = _row_payload(row)
                         public_references.update(_find_public_file_references(payload))
                         private_references.update(_find_private_file_references(payload))
-                        if isinstance(row, MachineKnowledgeEntry) and row.media_storage_key:
-                            private_references.add(row.media_storage_key)
+                        media_storage_key = getattr(row, "media_storage_key", None)
+                        if isinstance(media_storage_key, str) and media_storage_key:
+                            private_references.add(media_storage_key)
                         line = (
                             json.dumps(
                                 payload,

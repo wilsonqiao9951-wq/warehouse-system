@@ -31,6 +31,7 @@ from app.api.performance import router as performance_router
 from app.api.low_stock import router as low_stock_router
 from app.api.abnormal_usage import router as abnormal_usage_router
 from app.api.pilot_governance import router as pilot_governance_router
+from app.api.work_order_media import router as work_order_media_router
 from app.core.config import settings
 from app.core.database import (
     SessionLocal,
@@ -304,6 +305,7 @@ app.include_router(performance_router, prefix="/api")
 app.include_router(low_stock_router, prefix="/api")
 app.include_router(abnormal_usage_router, prefix="/api")
 app.include_router(pilot_governance_router, prefix="/api")
+app.include_router(work_order_media_router, prefix="/api")
 app.include_router(operations_router)
 app.include_router(pages_router)
 uploads_dir = Path(settings.data_export_public_files_root)
