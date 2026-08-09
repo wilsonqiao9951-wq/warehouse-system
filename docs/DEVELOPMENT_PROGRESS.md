@@ -8,8 +8,9 @@
 
 ## 2026-08-09 - Centralized role page access and technician team visibility
 
-Status: implemented and locally verified on `codex/role-page-access`; stacked
-draft pull request and GitHub CI are pending.
+Status: implemented and published as stacked draft PR #45 on
+`codex/role-page-access`. Feature commit `8e290cb` and GitHub Actions run #87
+passed every required job.
 
 Delivered:
 
@@ -51,6 +52,10 @@ Verification:
   full npm, and production npm audits reported no known vulnerabilities; Git
   diff integrity passed.
 - No database model or migration changed; Schema head remains `0070`.
+- GitHub Actions run #87 passed the backend, frontend, and private-deployment
+  jobs, including PostgreSQL migration/RLS checks, dependency audits, scale and
+  disaster-recovery verification, Compose validation, and production image
+  builds.
 
 ## 2026-08-09 - Immutable work-order field media evidence
 
