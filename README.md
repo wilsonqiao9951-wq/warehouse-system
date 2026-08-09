@@ -221,6 +221,9 @@ RBAC_ENFORCE=true
 LEGACY_HEADER_AUTH=false
 JWT_SECRET_KEY=<at least 32 random characters>
 MFA_ENCRYPTION_KEYS=<base64 AES-256 key; required in staging/production>
+INTEGRATION_CREDENTIAL_ENCRYPTION_KEYS=<base64 AES-256 key; required in staging/production>
+INTEGRATION_CONNECTION_TIMEOUT_SECONDS=10
+INTEGRATION_CONNECTION_MAX_RESPONSE_BYTES=65536
 MAX_IMAGE_UPLOAD_BYTES=10485760
 MAX_KNOWLEDGE_MEDIA_UPLOAD_BYTES=52428800
 OPERATIONS_REQUEST_WINDOW_SECONDS=300
@@ -236,7 +239,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260808_0064` (versioned AppSheet/Google Sheets parity contracts and readiness evidence).
+- Current schema head: `20260808_0065` (encrypted ERP/WMS adapter profiles and immutable connection-test evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

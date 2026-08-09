@@ -9,6 +9,10 @@ import {
   ExternalIntegrationSecret,
   ExternalSyncLog,
   ExternalWebhookEvent,
+  IntegrationAdapterAuthType,
+  IntegrationAdapterConfiguration,
+  IntegrationAdapterProtocol,
+  IntegrationConnectionTest,
   IntegrationParityAutomation,
   IntegrationParityCapability,
   IntegrationParityContract,
@@ -69,6 +73,8 @@ export default function IntegrationsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [logs, setLogs] = useState<ExternalSyncLog[]>([]);
   const [parity, setParity] = useState<IntegrationParityContract | null>(null);
+  const [adapter, setAdapter] = useState<IntegrationAdapterConfiguration | null>(null);
+  const [connectionTests, setConnectionTests] = useState<IntegrationConnectionTest[]>([]);
   const [role, setRole] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -92,6 +98,17 @@ export default function IntegrationsPage() {
     required_capabilities: [] as IntegrationParityCapability[],
     tables: "[]",
     automations: "[]"
+  });
+  const [adapterEditor, setAdapterEditor] = useState({
+    protocol: "rest_json" as IntegrationAdapterProtocol,
+    base_url: "",
+    health_path: "/",
+    auth_type: "none" as IntegrationAdapterAuthType,
+    auth_username: "",
+    api_key_header: "x-api-key",
+    credential_secret: "",
+    timeout_seconds: 10,
+    account_password: ""
   });
 
   const selected = useMemo(
@@ -119,6 +136,8 @@ export default function IntegrationsPage() {
     if (!selected) {
       setLogs([]);
       setParity(null);
+      setAdapter(null);
+      setConnectionTests([]);
       return;
     }
     setEditor({
@@ -128,19 +147,37 @@ export default function IntegrationsPage() {
       subscribed_events: selected.subscribed_events,
       is_active: selected.is_active
     });
+    const supportsAdapter = selected.provider === "erp" || selected.provider === "wms";
     Promise.all([
       api.listIntegrationSyncLogs(selected.id),
-      api.getIntegrationParityContract(selected.id)
+      api.getIntegrationParityContract(selected.id),
+      supportsAdapter ? api.getIntegrationAdapterConfiguration(selected.id) : Promise.resolve(null),
+      supportsAdapter ? api.listIntegrationAdapterConnectionTests(selected.id) : Promise.resolve([])
     ])
-      .then(([nextLogs, nextParity]) => {
+      .then(([nextLogs, nextParity, nextAdapter, nextConnectionTests]) => {
         setLogs(nextLogs);
         setParity(nextParity);
+        setAdapter(nextAdapter);
+        setConnectionTests(nextConnectionTests);
         setParityEditor({
           source_revision: nextParity.source_revision,
           required_capabilities: nextParity.required_capabilities,
           tables: JSON.stringify(nextParity.tables, null, 2),
           automations: JSON.stringify(nextParity.automations, null, 2)
         });
+        if (nextAdapter) {
+          setAdapterEditor({
+            protocol: nextAdapter.protocol,
+            base_url: nextAdapter.base_url,
+            health_path: nextAdapter.health_path,
+            auth_type: nextAdapter.auth_type,
+            auth_username: nextAdapter.auth_username || "",
+            api_key_header: nextAdapter.api_key_header || "x-api-key",
+            credential_secret: "",
+            timeout_seconds: nextAdapter.timeout_seconds,
+            account_password: ""
+          });
+        }
       })
       .catch((reason: Error) => setError(reason.message));
   }, [selected]);
@@ -260,6 +297,67 @@ export default function IntegrationsPage() {
     URL.revokeObjectURL(url);
   };
 
+  const saveAdapterConfiguration = async () => {
+    if (!selected || !adapter) return;
+    try {
+      const updated = await api.saveIntegrationAdapterConfiguration(selected.id, {
+        expected_version: adapter.version,
+        protocol: adapterEditor.protocol,
+        base_url: adapterEditor.base_url.trim(),
+        health_path: adapterEditor.health_path.trim(),
+        auth_type: adapterEditor.auth_type,
+        auth_username: adapterEditor.auth_type === "basic" ? adapterEditor.auth_username.trim() : null,
+        api_key_header: adapterEditor.auth_type === "api_key_header" ? adapterEditor.api_key_header : null,
+        ...(adapterEditor.credential_secret ? { credential_secret: adapterEditor.credential_secret } : {}),
+        timeout_seconds: adapterEditor.timeout_seconds,
+        account_password: adapterEditor.account_password
+      });
+      setAdapter(updated);
+      setAdapterEditor((previous) => ({
+        ...previous,
+        credential_secret: "",
+        account_password: ""
+      }));
+      setNotice(`Adapter configuration saved as version ${updated.version}. Run a connection test to create current evidence.`);
+      setError("");
+    } catch (reason) {
+      setAdapterEditor((previous) => ({
+        ...previous,
+        credential_secret: "",
+        account_password: ""
+      }));
+      setError(reason instanceof Error ? reason.message : "Unable to save the adapter configuration.");
+    }
+  };
+
+  const testAdapterConnection = async () => {
+    if (!selected || !adapter || !adapter.persisted) return;
+    try {
+      const result = await api.testIntegrationAdapterConnection(
+        selected.id,
+        adapter.version,
+        adapterEditor.account_password
+      );
+      const [updatedAdapter, updatedTests] = await Promise.all([
+        api.getIntegrationAdapterConfiguration(selected.id),
+        api.listIntegrationAdapterConnectionTests(selected.id)
+      ]);
+      setAdapter(updatedAdapter);
+      setConnectionTests(updatedTests);
+      setAdapterEditor((previous) => ({ ...previous, account_password: "" }));
+      if (result.status === "success") {
+        setNotice("ERP/WMS connection validated.");
+        setError("");
+      } else {
+        setNotice("");
+        setError(`Connection test recorded: ${result.error_code || "failed"}.`);
+      }
+    } catch (reason) {
+      setAdapterEditor((previous) => ({ ...previous, account_password: "" }));
+      setError(reason instanceof Error ? reason.message : "Unable to test the adapter connection.");
+    }
+  };
+
   return (
     <ManagerShell
       title="External integrations"
@@ -268,7 +366,13 @@ export default function IntegrationsPage() {
         { label: "Integrations", value: integrations.length },
         { label: "Active", value: integrations.filter((item) => item.is_active).length },
         { label: "Failed events", value: logs.filter((item) => item.status === "failed").length },
-        { label: "Parity readiness", value: parity ? `${parity.readiness_score}%` : "—" }
+        { label: "Parity readiness", value: parity ? `${parity.readiness_score}%` : "—" },
+        {
+          label: "Adapter validation",
+          value: adapter?.latest_test
+            ? (adapter.latest_test.current ? adapter.latest_test.status : "stale")
+            : (adapter ? "not tested" : "—")
+        }
       ]}
     >
       {notice && <p className="notice notice-success" role="status">{notice}</p>}
@@ -407,6 +511,196 @@ export default function IntegrationsPage() {
               <p className="notice">Managers may inspect mappings and sync logs. Only administrators can create, edit, deactivate, or rotate keys.</p>
             )}
           </section>
+
+          {adapter && (selected.provider === "erp" || selected.provider === "wms") && (
+            <section className="card">
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+                <div>
+                  <h3 style={{ marginBottom: 4 }}>ERP/WMS adapter</h3>
+                  <p className="muted" style={{ marginTop: 0 }}>
+                    HTTPS-only REST or OData connection profile. Credentials are encrypted server-side and never returned to this browser.
+                  </p>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <strong style={{ fontSize: 22 }}>
+                    {adapter.latest_test
+                      ? (adapter.latest_test.current ? adapter.latest_test.status : "stale evidence")
+                      : "not tested"}
+                  </strong>
+                  <div className="muted">configuration v{adapter.version}</div>
+                </div>
+              </div>
+
+              {adapter.latest_test && (
+                <div className={`notice ${adapter.latest_test.status === "failed" || !adapter.latest_test.current ? "notice-error" : "notice-success"}`}>
+                  <strong>{adapter.latest_test.current ? "Current test" : "Historical test"}:</strong>{" "}
+                  {adapter.latest_test.status} · {adapter.latest_test.latency_ms} ms · {adapter.latest_test.protocol_signal}
+                  {adapter.latest_test.response_status_code ? ` · HTTP ${adapter.latest_test.response_status_code}` : ""}
+                  {adapter.latest_test.error_code ? ` · ${adapter.latest_test.error_code}` : ""}
+                  {` · ${new Date(adapter.latest_test.tested_at).toLocaleString()}`}
+                </div>
+              )}
+
+              {isAdmin ? (
+                <>
+                  <div className="two-col">
+                    <label>
+                      Protocol
+                      <select
+                        value={adapterEditor.protocol}
+                        onChange={(event) => setAdapterEditor((previous) => ({ ...previous, protocol: event.target.value as IntegrationAdapterProtocol }))}
+                      >
+                        <option value="rest_json">REST / JSON</option>
+                        <option value="odata_v4">OData v4</option>
+                      </select>
+                    </label>
+                    <label>
+                      Authentication
+                      <select
+                        value={adapterEditor.auth_type}
+                        onChange={(event) => setAdapterEditor((previous) => ({
+                          ...previous,
+                          auth_type: event.target.value as IntegrationAdapterAuthType,
+                          credential_secret: ""
+                        }))}
+                      >
+                        <option value="none">None</option>
+                        <option value="bearer">Bearer token</option>
+                        <option value="basic">Basic username/password</option>
+                        <option value="api_key_header">API key header</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label>
+                    HTTPS base URL
+                    <input
+                      value={adapterEditor.base_url}
+                      onChange={(event) => setAdapterEditor((previous) => ({ ...previous, base_url: event.target.value }))}
+                      placeholder="https://erp.example.com/api"
+                      required
+                    />
+                  </label>
+                  <div className="two-col">
+                    <label>
+                      Connection test path
+                      <input
+                        value={adapterEditor.health_path}
+                        onChange={(event) => setAdapterEditor((previous) => ({ ...previous, health_path: event.target.value }))}
+                        placeholder={adapterEditor.protocol === "odata_v4" ? "/$metadata" : "/health"}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Timeout (seconds)
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={adapterEditor.timeout_seconds}
+                        onChange={(event) => setAdapterEditor((previous) => ({ ...previous, timeout_seconds: Number(event.target.value) }))}
+                      />
+                    </label>
+                  </div>
+                  {adapterEditor.auth_type === "basic" && (
+                    <label>
+                      Service-account username
+                      <input
+                        value={adapterEditor.auth_username}
+                        onChange={(event) => setAdapterEditor((previous) => ({ ...previous, auth_username: event.target.value }))}
+                        autoComplete="off"
+                      />
+                    </label>
+                  )}
+                  {adapterEditor.auth_type === "api_key_header" && (
+                    <label>
+                      API key header
+                      <select
+                        value={adapterEditor.api_key_header}
+                        onChange={(event) => setAdapterEditor((previous) => ({ ...previous, api_key_header: event.target.value }))}
+                      >
+                        <option value="x-api-key">X-API-Key</option>
+                        <option value="api-key">API-Key</option>
+                        <option value="x-auth-token">X-Auth-Token</option>
+                        <option value="x-api-token">X-API-Token</option>
+                      </select>
+                    </label>
+                  )}
+                  {adapterEditor.auth_type !== "none" && (
+                    <label>
+                      {adapter.has_credentials ? "New credential (leave blank to preserve current)" : "Credential"}
+                      <input
+                        type="password"
+                        value={adapterEditor.credential_secret}
+                        onChange={(event) => setAdapterEditor((previous) => ({ ...previous, credential_secret: event.target.value }))}
+                        autoComplete="new-password"
+                        placeholder={adapter.has_credentials ? "Stored securely — enter only to rotate" : "Required before saving"}
+                      />
+                    </label>
+                  )}
+                  <label>
+                    Current account password
+                    <input
+                      type="password"
+                      value={adapterEditor.account_password}
+                      onChange={(event) => setAdapterEditor((previous) => ({ ...previous, account_password: event.target.value }))}
+                      autoComplete="current-password"
+                      required
+                    />
+                  </label>
+                  <div className="two-col">
+                    <button type="button" onClick={() => void saveAdapterConfiguration()}>
+                      Save encrypted configuration
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void testAdapterConnection()}
+                      disabled={!adapter.persisted}
+                    >
+                      Test current connection
+                    </button>
+                  </div>
+                  <p className="muted">
+                    Saving a change invalidates earlier connection evidence. Testing never follows redirects and stores no response body.
+                  </p>
+                </>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <tbody>
+                      <tr><th>Protocol</th><td>{adapter.protocol}</td></tr>
+                      <tr><th>Base URL</th><td><code>{adapter.base_url || "Not configured"}</code></td></tr>
+                      <tr><th>Authentication</th><td>{adapter.auth_type} · {adapter.has_credentials ? "credential configured" : "no credential"}</td></tr>
+                      <tr><th>Timeout</th><td>{adapter.timeout_seconds} seconds</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <h4>Connection evidence</h4>
+              {connectionTests.length === 0 ? (
+                <div className="empty-state">No governed connection tests recorded.</div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Time</th><th>Version</th><th>Status</th><th>HTTP</th><th>Latency</th><th>Protocol signal</th><th>Evidence</th></tr></thead>
+                    <tbody>
+                      {connectionTests.map((test) => (
+                        <tr key={test.id}>
+                          <td>{new Date(test.tested_at).toLocaleString()}</td>
+                          <td>v{test.configuration_version}{test.current ? " · current" : " · stale"}</td>
+                          <td>{test.status}{test.error_code ? ` · ${test.error_code}` : ""}</td>
+                          <td>{test.response_status_code || "—"}</td>
+                          <td>{test.latency_ms} ms</td>
+                          <td>{test.protocol_signal}</td>
+                          <td><code>{test.evidence_fingerprint.slice(0, 12)}…</code></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
 
           {parity && (
             <section className="card">

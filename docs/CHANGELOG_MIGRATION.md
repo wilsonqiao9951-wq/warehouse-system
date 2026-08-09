@@ -1,5 +1,24 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260808_0065 - Governed ERP/WMS adapter connections
+
+- Added one tenant-scoped REST/JSON or OData v4 adapter configuration per ERP
+  or WMS integration, with normalized HTTPS endpoint/path, controlled
+  authentication metadata, timeout, responsible actors, and optimistic version.
+- Encrypts bearer, Basic-password, and allowlisted API-key-header credentials
+  with dedicated rotating AES-256-GCM keys and authenticated tenant/integration
+  context. Ciphertext is excluded from customer export/restore payloads.
+- Added append-only connection-test evidence containing configuration version,
+  safe HTTP status, bounded latency, controlled protocol signal/error code,
+  actor/server time, and SHA-256 evidence fingerprint. External response bodies
+  and raw exception messages are never retained.
+- Connection validation requires administrator permission and current account
+  password, rejects inactive/non-ERP/WMS integrations, blocks local/private DNS
+  destinations, disables redirects, and caps time and response sampling.
+- Enabled and forced PostgreSQL row-level security for configuration and test
+  evidence tables. Downgrade removes only adapter configuration/evidence and
+  does not change integrations, mappings, work orders, or inventory.
+
 ## 20260808_0064 - Governed integration parity contracts
 
 - Added one tenant-scoped, versioned AppSheet/Google Sheets parallel-run

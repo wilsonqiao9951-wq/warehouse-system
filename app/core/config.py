@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     max_import_upload_bytes: int = 5 * 1024 * 1024
     integration_delivery_enabled: bool = True
     integration_delivery_poll_seconds: int = 30
+    integration_credential_encryption_keys: str = ""
+    integration_connection_timeout_seconds: int = 10
+    integration_connection_max_response_bytes: int = 65536
     custom_domain_dns_resolver_url: str = "https://cloudflare-dns.com/dns-query"
     custom_domain_verification_cooldown_seconds: int = 30
     billing_reconciliation_enabled: bool = True

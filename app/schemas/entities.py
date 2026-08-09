@@ -1197,6 +1197,102 @@ class IntegrationParityContractRead(BaseModel):
     updated_at: datetime | None = None
 
 
+IntegrationAdapterProtocol = Literal["rest_json", "odata_v4"]
+IntegrationAdapterAuthType = Literal["none", "bearer", "basic", "api_key_header"]
+
+
+class IntegrationAdapterConfigurationUpsert(BaseModel):
+    expected_version: int = Field(ge=0)
+    protocol: IntegrationAdapterProtocol = "rest_json"
+    base_url: str = Field(min_length=1, max_length=1000)
+    health_path: str = Field(default="/", min_length=1, max_length=500)
+    auth_type: IntegrationAdapterAuthType = "none"
+    auth_username: str | None = Field(default=None, max_length=255)
+    api_key_header: str | None = Field(default=None, max_length=80)
+    credential_secret: str | None = Field(default=None, min_length=1, max_length=4096)
+    timeout_seconds: int = Field(default=10, ge=1, le=30)
+    account_password: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("base_url", "health_path")
+    @classmethod
+    def normalize_required_adapter_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Adapter URL and health path cannot be blank")
+        return cleaned
+
+    @field_validator("auth_username", "api_key_header")
+    @classmethod
+    def normalize_optional_adapter_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @model_validator(mode="after")
+    def validate_auth_metadata(self):
+        if self.auth_type == "none":
+            if self.auth_username or self.api_key_header or self.credential_secret:
+                raise ValueError("Unauthenticated adapters cannot include credential fields")
+        elif self.auth_type == "basic":
+            if not self.auth_username:
+                raise ValueError("Basic authentication requires a username")
+            if self.api_key_header:
+                raise ValueError("Basic authentication cannot include an API key header")
+        elif self.auth_type == "api_key_header":
+            if not self.api_key_header:
+                raise ValueError("API key authentication requires a header name")
+            if self.auth_username:
+                raise ValueError("API key authentication cannot include a username")
+        elif self.auth_username or self.api_key_header:
+            raise ValueError("Bearer authentication cannot include username or API key header")
+        return self
+
+
+class IntegrationAdapterConnectionTestRequest(BaseModel):
+    expected_version: int = Field(ge=0)
+    account_password: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class IntegrationConnectionTestRead(BaseModel):
+    id: int
+    organization_id: int
+    integration_id: int
+    configuration_id: int
+    configuration_version: int = Field(ge=0)
+    current: bool
+    status: Literal["success", "failed"]
+    response_status_code: int | None = None
+    latency_ms: int = Field(ge=0)
+    protocol_confirmed: bool
+    protocol_signal: str
+    error_code: str | None = None
+    evidence_fingerprint: str
+    tested_by: int | None = None
+    tested_at: datetime
+
+
+class IntegrationAdapterConfigurationRead(BaseModel):
+    id: int | None = None
+    persisted: bool
+    organization_id: int
+    integration_id: int
+    protocol: IntegrationAdapterProtocol
+    base_url: str
+    health_path: str
+    auth_type: IntegrationAdapterAuthType
+    auth_username: str | None = None
+    api_key_header: str | None = None
+    has_credentials: bool
+    credential_updated_at: datetime | None = None
+    timeout_seconds: int = Field(ge=1, le=30)
+    version: int = Field(ge=0)
+    latest_test: IntegrationConnectionTestRead | None = None
+    created_by: int | None = None
+    updated_by: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class ExternalIntegrationRead(BaseModel):
     id: int
     organization_id: int

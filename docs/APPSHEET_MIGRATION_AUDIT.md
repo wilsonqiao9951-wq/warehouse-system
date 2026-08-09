@@ -55,8 +55,10 @@ Status legend:
 
 ### Export / Integration
 - `Implemented` Inventory Excel export
-- `Partial` AppSheet/REST inbound work-order Webhook, API keys, field mapping, source links, idempotency, and sync logs are implemented; outbound status/parts callbacks remain
-- `Unknown` Other AppSheet external integrations (Google Sheets automations, Gmail, ERP sync)
+- `Implemented` AppSheet/REST inbound work-order Webhook, API keys, field mapping, source links, idempotency, sync logs, and signed/retryable status/completion/parts callbacks
+- `Implemented` AppSheet/Google Sheets versioned parallel-run contracts and readiness gaps
+- `Implemented` Secure vendor-neutral ERP/WMS REST/JSON and OData v4 adapter profiles with encrypted credentials and governed connection-test evidence
+- `Unknown` Customer-specific Gmail, ERP, WMS, and other external field/business mappings pending real-system discovery
 - `Unknown` Existing reporting schedule/distribution requirements
 
 ---

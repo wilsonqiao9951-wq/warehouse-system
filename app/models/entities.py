@@ -1997,6 +1997,17 @@ class ExternalIntegration(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    adapter_configuration = relationship(
+        "IntegrationAdapterConfiguration",
+        back_populates="integration",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+    connection_tests = relationship(
+        "IntegrationConnectionTest",
+        back_populates="integration",
+        cascade="all, delete-orphan",
+    )
 
 
 class IntegrationParityContract(Base):
@@ -2068,6 +2079,143 @@ class IntegrationParityContract(Base):
     )
 
     integration = relationship("ExternalIntegration", back_populates="parity_contract")
+
+
+class IntegrationAdapterConfiguration(Base):
+    __tablename__ = "integration_adapter_configurations"
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id",
+            name="uq_integration_adapter_configuration_integration",
+        ),
+        CheckConstraint(
+            "protocol IN ('rest_json', 'odata_v4')",
+            name="ck_integration_adapter_configuration_protocol",
+        ),
+        CheckConstraint(
+            "auth_type IN ('none', 'bearer', 'basic', 'api_key_header')",
+            name="ck_integration_adapter_configuration_auth_type",
+        ),
+        CheckConstraint(
+            "(auth_type = 'none' AND auth_username IS NULL AND api_key_header IS NULL "
+            "AND credential_ciphertext IS NULL) OR "
+            "(auth_type = 'bearer' AND auth_username IS NULL AND api_key_header IS NULL) OR "
+            "(auth_type = 'basic' AND auth_username IS NOT NULL AND api_key_header IS NULL) OR "
+            "(auth_type = 'api_key_header' AND auth_username IS NULL AND api_key_header IS NOT NULL)",
+            name="ck_integration_adapter_configuration_auth_metadata",
+        ),
+        CheckConstraint(
+            "timeout_seconds >= 1 AND timeout_seconds <= 30",
+            name="ck_integration_adapter_configuration_timeout",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_integration_adapter_configuration_version_non_negative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    integration_id: Mapped[int] = mapped_column(
+        ForeignKey("external_integrations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    protocol: Mapped[str] = mapped_column(String(30), nullable=False)
+    base_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    health_path: Mapped[str] = mapped_column(String(500), default="/", nullable=False)
+    auth_type: Mapped[str] = mapped_column(String(30), default="none", nullable=False)
+    auth_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    api_key_header: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    credential_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    credential_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=10, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    integration = relationship("ExternalIntegration", back_populates="adapter_configuration")
+    connection_tests = relationship(
+        "IntegrationConnectionTest",
+        back_populates="configuration",
+        cascade="all, delete-orphan",
+    )
+
+
+class IntegrationConnectionTest(Base):
+    __tablename__ = "integration_connection_tests"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('success', 'failed')",
+            name="ck_integration_connection_test_status",
+        ),
+        CheckConstraint(
+            "configuration_version >= 0",
+            name="ck_integration_connection_test_version_non_negative",
+        ),
+        CheckConstraint(
+            "latency_ms >= 0",
+            name="ck_integration_connection_test_latency_non_negative",
+        ),
+        CheckConstraint(
+            "length(evidence_fingerprint) = 64",
+            name="ck_integration_connection_test_fingerprint",
+        ),
+        CheckConstraint(
+            "response_status_code IS NULL OR "
+            "(response_status_code >= 100 AND response_status_code <= 599)",
+            name="ck_integration_connection_test_http_status",
+        ),
+        CheckConstraint(
+            "(status = 'success' AND protocol_confirmed = true AND error_code IS NULL) OR "
+            "(status = 'failed' AND error_code IS NOT NULL)",
+            name="ck_integration_connection_test_result",
+        ),
+        Index(
+            "ix_integration_connection_test_org_integration_time",
+            "organization_id",
+            "integration_id",
+            "tested_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    integration_id: Mapped[int] = mapped_column(
+        ForeignKey("external_integrations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    configuration_id: Mapped[int] = mapped_column(
+        ForeignKey("integration_adapter_configurations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    configuration_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    response_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    protocol_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    protocol_signal: Mapped[str] = mapped_column(String(40), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    tested_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    tested_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    integration = relationship("ExternalIntegration", back_populates="connection_tests")
+    configuration = relationship(
+        "IntegrationAdapterConfiguration", back_populates="connection_tests"
+    )
 
 
 class ExternalWorkOrderLink(Base):
