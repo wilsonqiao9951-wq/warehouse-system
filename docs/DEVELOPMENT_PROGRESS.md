@@ -8,8 +8,9 @@
 
 ## 2026-08-09 - Governed pilot, UAT, and internal decision evidence
 
-Status: implemented locally on `codex/pilot-governance-evidence`; publication
-and PostgreSQL CI verification are in progress.
+Status: implemented and published as stacked draft PR #43 on
+`codex/pilot-governance-evidence`. Feature commit `240b323` and GitHub Actions
+run #83 passed every required job.
 
 Delivered:
 
@@ -51,6 +52,11 @@ Local verification:
   Python/npm dependency audits report no known vulnerabilities; Python
   compilation, production configuration, Compose configuration, and diff
   integrity checks pass.
+- GitHub Actions #83 passed backend, frontend, and private-deployment. The
+  authoritative deployment job verified PostgreSQL 16 migration `0069`,
+  Alembic zero drift, forced RLS, worker/operations checks, scale and disaster-
+  recovery rehearsals, Compose configuration, and API/Web/recovery image
+  builds.
 
 ## 2026-08-08 - AppSheet parallel-run discrepancy reconciliation
 
