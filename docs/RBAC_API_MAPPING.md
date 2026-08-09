@@ -218,6 +218,23 @@ differences, actor, reason, and server time are retained. Exact retries against
 unchanged internal state return the prior evidence row. See
 [`INTEGRATION_PARALLEL_RECONCILIATION.md`](INTEGRATION_PARALLEL_RECONCILIATION.md).
 
+## Pilot governance and internal Go/No-Go evidence
+
+| Operation | Engineer | Manager | Organization admin | Warehouse |
+| --- | ---: | ---: | ---: | ---: |
+| Read campaigns and aggregate gates | Allow; own detailed evidence only | Allow | Allow | Allow; own detailed evidence only |
+| Create/transition a campaign | Deny | Allow; password on transition | Allow; password on transition | Deny |
+| Record training/UAT evidence | Own account and server role only; password | Own account and server role only; password | Own account and server role only; password | Own account and server role only; password |
+| Report an issue | Allow | Allow | Allow | Allow |
+| Resolve an issue | Deny | Allow; password + version + reason | Allow; password + version + reason | Deny |
+| Record final No-Go | Deny | Deny | Allow; password + version + reason | Deny |
+| Record final Go | Deny | Deny | Allow only after every server gate passes | Deny |
+
+Campaign, attestation, and issue reads/writes carry explicit organization
+predicates and forced PostgreSQL RLS. The request never chooses the attesting
+user or role. A technical Go is immutable internal evidence, not customer
+commercial/legal acceptance. See [`PILOT_GOVERNANCE.md`](PILOT_GOVERNANCE.md).
+
 ## ERP/WMS adapter connections
 
 | Operation | Engineer | Manager | Organization admin | Warehouse |

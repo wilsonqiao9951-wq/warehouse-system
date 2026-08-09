@@ -163,6 +163,7 @@ are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 - `GET /api/work-orders/{id}/service-intelligence` returns read-only, tenant-scoped fault metrics, ranked published exact-model guidance, and explained similar completed jobs. See [`docs/SERVICE_INTELLIGENCE.md`](docs/SERVICE_INTELLIGENCE.md).
 - `POST /api/external/v1/work-orders` accepts API-key-authenticated, idempotent AppSheet/REST work-order intake. Administrators manage credentials and mappings under `/api/integrations`; see [`docs/EXTERNAL_INTEGRATIONS.md`](docs/EXTERNAL_INTEGRATIONS.md).
 - `POST /api/integrations/{id}/parallel-reconciliations` password-confirms an administrator or delegated `integrations.manage` operator, compares a bounded canonical AppSheet/Google Sheets snapshot with explicit tenant-scoped work-order, part-use, and inventory evidence, and retains hashes/counts/bounded differences instead of the raw snapshot. See [`docs/INTEGRATION_PARALLEL_RECONCILIATION.md`](docs/INTEGRATION_PARALLEL_RECONCILIATION.md).
+- `/api/pilot/campaigns` governs a single live tenant pilot through authenticated role training/UAT attestations, severity-versioned issue closure, and administrator-only internal Go/No-Go evidence. A Go decision requires all four operational roles, no open severity-1 issue, and a matched reconciliation created during the campaign; it is not customer legal acceptance. See [`docs/PILOT_GOVERNANCE.md`](docs/PILOT_GOVERNANCE.md).
 - `POST /api/organization/data-exports` creates a password-confirmed tenant backup ZIP with JSONL records, referenced local evidence files, secret redaction, and a checksum manifest; see [`docs/CUSTOMER_DATA_EXPORTS.md`](docs/CUSTOMER_DATA_EXPORTS.md).
 - `POST /api/organization/data-restores/rehearsals` validates a backup and records a dry-run before separate approval, exact-archive application, and rollback; see [`docs/CONTROLLED_DATA_RESTORES.md`](docs/CONTROLLED_DATA_RESTORES.md).
 - `GET /api/audit-logs/search` and `/summary` require effective `audit.read`; password-confirmed `POST /api/audit-logs/export` requires `audit.export` and returns a formula-safe, SHA-256-recorded CSV. See [`docs/AUDIT_LOGS.md`](docs/AUDIT_LOGS.md).
@@ -248,7 +249,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260808_0068` (tenant-isolated append-only integration parallel-run reconciliation evidence).
+- Current schema head: `20260809_0069` (tenant-isolated governed pilot/UAT and internal decision evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

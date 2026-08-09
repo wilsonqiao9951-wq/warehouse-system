@@ -1340,6 +1340,164 @@ class PilotChecklistRead(BaseModel):
     latest_reconciliation_at: datetime | None = None
 
 
+PilotCampaignStatus = Literal["draft", "active", "decision_pending", "go", "no_go"]
+PilotRole = Literal["admin", "manager", "warehouse", "engineer"]
+PilotAttestationType = Literal["training", "uat"]
+PilotAttestationResult = Literal["passed", "failed"]
+PilotIssueSeverity = Literal["sev1", "sev2", "sev3"]
+
+
+class PilotCampaignCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    planned_start: date
+    planned_end: date
+
+    @field_validator("name")
+    @classmethod
+    def normalize_pilot_name(cls, value: str) -> str:
+        cleaned = " ".join(value.strip().split())
+        if not cleaned:
+            raise ValueError("Pilot name cannot be blank")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.planned_start > self.planned_end:
+            raise ValueError("planned_start must be on or before planned_end")
+        if (self.planned_end - self.planned_start).days > 90:
+            raise ValueError("Pilot window cannot exceed 90 days")
+        return self
+
+
+class PilotCampaignTransition(BaseModel):
+    expected_version: int = Field(ge=0)
+    target_status: Literal["active", "decision_pending"]
+    account_password: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_transition_reason(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
+
+class PilotAttestationCreate(BaseModel):
+    attestation_type: PilotAttestationType
+    result: PilotAttestationResult
+    completed_items: list[str] = Field(default_factory=list, max_length=30)
+    note: str = Field(min_length=3, max_length=500)
+    account_password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("completed_items")
+    @classmethod
+    def normalize_completed_items(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value]
+        if any(not item or len(item) > 80 for item in cleaned):
+            raise ValueError("Completed item codes must be 1-80 characters")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("Completed item codes must be unique")
+        return sorted(cleaned)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_attestation_note(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
+
+class PilotIssueCreate(BaseModel):
+    severity: PilotIssueSeverity
+    title: str = Field(min_length=3, max_length=200)
+    detail: str = Field(min_length=3, max_length=1000)
+
+    @field_validator("title", "detail")
+    @classmethod
+    def normalize_issue_text(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
+
+class PilotIssueResolve(BaseModel):
+    expected_version: int = Field(ge=0)
+    resolution_reason: str = Field(min_length=3, max_length=500)
+    account_password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("resolution_reason")
+    @classmethod
+    def normalize_resolution_reason(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
+
+class PilotDecisionCreate(BaseModel):
+    expected_version: int = Field(ge=0)
+    decision: Literal["go", "no_go"]
+    reason: str = Field(min_length=3, max_length=500)
+    account_password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("reason")
+    @classmethod
+    def normalize_decision_reason(cls, value: str) -> str:
+        return " ".join(value.strip().split())
+
+
+class PilotAttestationRead(BaseModel):
+    id: int
+    campaign_id: int
+    user_id: int
+    role: PilotRole
+    attestation_type: PilotAttestationType
+    result: PilotAttestationResult
+    completed_items: list[str]
+    required_items: list[str]
+    evidence_fingerprint: str
+    note: str
+    created_at: datetime
+
+
+class PilotIssueRead(BaseModel):
+    id: int
+    campaign_id: int
+    severity: PilotIssueSeverity
+    title: str
+    detail: str
+    status: Literal["open", "resolved"]
+    version: int
+    reported_by: int
+    resolved_by: int | None = None
+    resolution_reason: str | None = None
+    resolved_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PilotCampaignRead(BaseModel):
+    id: int
+    organization_id: int
+    name: str
+    planned_start: date
+    planned_end: date
+    status: PilotCampaignStatus
+    version: int
+    started_at: datetime | None = None
+    decision_by: int | None = None
+    decided_at: datetime | None = None
+    decision_reason: str | None = None
+    decision_fingerprint: str | None = None
+    created_by: int
+    updated_by: int
+    created_at: datetime
+    updated_at: datetime
+    required_items: dict[PilotRole, dict[PilotAttestationType, list[str]]]
+    latest_attestations: list[PilotAttestationRead]
+    issues: list[PilotIssueRead]
+    gates: dict[str, bool]
+    gate_reasons: list[str]
+    latest_reconciliation_id: int | None = None
+    latest_reconciliation_status: Literal["matched", "differences"] | None = None
+    can_manage: bool
+    can_attest: bool
+    can_resolve_issues: bool
+    can_decide: bool
+
+
 IntegrationAdapterProtocol = Literal["rest_json", "odata_v4"]
 IntegrationAdapterAuthType = Literal["none", "bearer", "basic", "api_key_header"]
 

@@ -57,7 +57,7 @@ Recommended naming:
 
 ### 4.1 Technician Daily Job Flow
 
-1. Login/select technician role and user ID  
+1. Sign in with the technician's own email/password on the registered phone
 2. Open the shared work-order pool; confirm other engineers' progress is read-only
 3. Claim an available work order on the registered phone
 4. Open `Today` or `My Jobs` and select the claimed work order
@@ -90,7 +90,7 @@ Expected result:
 
 ### 4.3 Warehouse Inventory Transfer
 
-1. Login/select warehouse role  
+1. Sign in with the warehouse employee's own email/password
 2. Open `Inventory`  
 3. Review stock and low stock alerts  
 4. Create transfer transaction (main -> van / van -> main)  
@@ -185,7 +185,7 @@ Stop pilot immediately if any of these occur:
 ## 7) Known Risks
 
 - Inventory mismatch between transactions and expected physical stock
-- User role confusion (wrong role/user ID during testing)
+- Shared credentials, stale sessions, or an unregistered engineer phone
 - Mobile usability friction in field conditions
 - Incomplete job data before completion
 - Duplicate work orders due to import/manual entry overlap
@@ -225,6 +225,9 @@ Risk controls:
 
 ## 9) Pilot Success Criteria
 
+Record role training/UAT and issue evidence in `/pilot-checklist`; the Markdown
+boxes below are operating prompts, not the authoritative sign-off record.
+
 Pilot is considered successful if all are met:
 
 - [ ] 90%+ work orders completed in system
@@ -256,6 +259,12 @@ After 3-day pilot, complete decision checklist:
 Decision:
 - **Go**: Expand to next technician group / broader deployment
 - **No-Go**: Continue AppSheet primary flow, fix gaps, re-run pilot
+
+The organization administrator records the internal decision in Pilot
+Governance. `Go` is server-blocked until every operational role has passed
+training and UAT, no sev1 issue remains open, and a matched parallel
+reconciliation exists within the campaign window. Customer-specific and legal
+acceptance remains separate.
 
 ---
 

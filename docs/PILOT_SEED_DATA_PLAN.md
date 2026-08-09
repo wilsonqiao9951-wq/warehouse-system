@@ -18,7 +18,7 @@
 
 **注意**
 
-- 前端当前通过 **角色下拉 + `X-User-Id`** 与后端用户 ID 绑定；种子用户创建后，将 **数字 ID** 发给每人一页纸，避免选错角色导致 403（`RBAC_ENFORCE=true` 时）。
+- 为每位试点员工创建独立邮箱账号并通过已验证邀请投递；角色由服务器保存，不向员工分发数字 ID。工程师还需在本人手机完成设备注册，禁止共享账号或注册设备。
 
 ---
 
@@ -105,7 +105,7 @@
 2. **经理**：Work Orders 筛选、打开 Details、看利润/异常报表、Pilot Checklist。  
 3. **仓库**：Inventory 低库存、Parts Usage 从 Main 扣料（若流程允许）、导出 Excel。  
 4. **离线/弱网**（可选）：见 `docs/REAL_DEVICE_TEST_PLAN.md`。  
-5. **RBAC**：用错误 `X-User-Id` 访问他人 Van 数据应失败（`RBAC_ENFORCE=true`）。
+5. **RBAC**：用另一账号访问不属于自己的 Van 写入或工单 claim 应失败；同组织工单进度只读可见不等于可修改。
 
 ---
 
