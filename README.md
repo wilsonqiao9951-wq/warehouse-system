@@ -12,6 +12,8 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Shared engineer work-order pool with atomic claiming
 - Account- and registered-device-bound field execution
 - Password re-verification and exact engineer/device completion attribution
+- Immutable work-order photo/video evidence with team visibility, owner-phone
+  write control, private authenticated delivery, and completion freeze
 - HttpOnly secure browser sessions with session-bound CSRF proof and standalone Bearer compatibility
 - Structured work-order learning data for faults, outcomes, first-time fix, rework, and server-measured duration
 - Governed machine service knowledge with published faults, repair steps, tools, cautions, media, and verified field evidence
@@ -160,6 +162,7 @@ are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 - `GET /api/machine-knowledge` gives every operational role tenant-scoped published machine guidance; managers curate drafts and administrators publish/archive entries through the governed endpoints documented in [`docs/MACHINE_KNOWLEDGE_BASE.md`](docs/MACHINE_KNOWLEDGE_BASE.md).
 - `POST /api/machine-knowledge/{id}/drafts/from-work-order` creates review-only fault, repair, and used-part drafts without duplicating prior captures.
 - `POST /api/machine-knowledge/{id}/media` stores validated field photos/videos outside the public upload mount; `GET /api/machine-knowledge/media/{entry_id}` enforces tenant, role, profile, and publication state.
+- `GET/POST /api/work-orders/{id}/media` provides append-only field photo/video evidence: all same-tenant operational roles may read, while only the active claimant on the bound phone or an administrator may upload before evidence freeze. See [`docs/WORK_ORDER_MEDIA_EVIDENCE.md`](docs/WORK_ORDER_MEDIA_EVIDENCE.md).
 - `GET /api/work-orders/{id}/service-intelligence` returns read-only, tenant-scoped fault metrics, ranked published exact-model guidance, and explained similar completed jobs. See [`docs/SERVICE_INTELLIGENCE.md`](docs/SERVICE_INTELLIGENCE.md).
 - `POST /api/external/v1/work-orders` accepts API-key-authenticated, idempotent AppSheet/REST work-order intake. Administrators manage credentials and mappings under `/api/integrations`; see [`docs/EXTERNAL_INTEGRATIONS.md`](docs/EXTERNAL_INTEGRATIONS.md).
 - `POST /api/integrations/{id}/parallel-reconciliations` password-confirms an administrator or delegated `integrations.manage` operator, compares a bounded canonical AppSheet/Google Sheets snapshot with explicit tenant-scoped work-order, part-use, and inventory evidence, and retains hashes/counts/bounded differences instead of the raw snapshot. See [`docs/INTEGRATION_PARALLEL_RECONCILIATION.md`](docs/INTEGRATION_PARALLEL_RECONCILIATION.md).
@@ -249,7 +252,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260809_0069` (tenant-isolated governed pilot/UAT and internal decision evidence).
+- Current schema head: `20260809_0070` (tenant-isolated immutable work-order photo/video evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

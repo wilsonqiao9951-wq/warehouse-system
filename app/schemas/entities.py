@@ -3110,6 +3110,25 @@ class QCPictureRead(QCPictureCreate):
         from_attributes = True
 
 
+class WorkOrderMediaRead(BaseModel):
+    id: int
+    organization_id: int
+    work_order_id: int
+    category: str
+    caption: str | None
+    media_type: str
+    mime_type: str
+    size_bytes: int
+    file_sha256: str
+    original_filename: str | None
+    client_request_id: str
+    created_by: int | None
+    created_device_id: int | None
+    claim_version: int
+    content_url: str
+    created_at: datetime
+
+
 class LowStockEvaluationRead(BaseModel):
     scanned: int = Field(ge=0)
     below_threshold: int = Field(ge=0)

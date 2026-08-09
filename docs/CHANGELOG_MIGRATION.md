@@ -1,5 +1,25 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260809_0070 - Immutable work-order field media evidence
+
+- Adds append-only, tenant-owned work-order photo/video rows with category,
+  caption, signature-derived type/MIME, bytes, SHA-256, random private storage
+  key, sanitized source name, authenticated account/device, claim generation,
+  client request ID, fingerprint, and server time.
+- Gives every same-tenant operational role authenticated read access while
+  limiting upload to the active claimant on the bound phone/current claim or an
+  administrator. Pending-approval and completed jobs reject new evidence.
+- Adds exact retry idempotency, private non-public delivery, path/size/hash
+  integrity checks, upload and per-work-order limits, audit redaction, explicit
+  tenant predicates, and forced PostgreSQL RLS.
+- Adds responsive camera/library photo/video UI. Completion-photo rules accept
+  a field photo or legacy QC picture, but not video alone.
+- Includes rows and private files in portable exports, retains immutable
+  evidence outside controlled-restore mutation, and extends archive
+  compatibility through `0070`.
+
+See [`WORK_ORDER_MEDIA_EVIDENCE.md`](WORK_ORDER_MEDIA_EVIDENCE.md).
+
 ## 20260809_0069 - Governed pilot, UAT, and internal decision evidence
 
 - Adds tenant-owned pilot campaigns with a versioned

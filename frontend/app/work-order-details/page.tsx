@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, resolveUploadedImageUrl } from "@/lib/api";
 import { isOfflineMediaMarker } from "@/lib/offline-media";
-import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderForm, WorkOrderFormAction, WorkOrderFormValue, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
+import { CompletionPolicy, JobStatus, Part, QCPicture, ReturnEquipment, User, WorkOrder, WorkOrderForm, WorkOrderFormAction, WorkOrderFormValue, WorkOrderMedia, WorkOrderMediaCategory, WorkOrderPart, WorkOrderServiceContext, WorkOrderServiceIntelligence, WorkOrderVoiceNote } from "@/types";
 import { SignaturePad } from "@/components/signature-pad";
 import { VoiceRecorder } from "@/components/voice-recorder";
 
@@ -19,6 +19,7 @@ export default function WorkOrderDetailsPage() {
   const [selectedWorkOrderId, setSelectedWorkOrderId] = useState(initialId);
   const [jobStatusRows, setJobStatusRows] = useState<JobStatus[]>([]);
   const [qcPictures, setQcPictures] = useState<QCPicture[]>([]);
+  const [workOrderMedia, setWorkOrderMedia] = useState<WorkOrderMedia[]>([]);
   const [returnEquipments, setReturnEquipments] = useState<ReturnEquipment[]>([]);
   const [woParts, setWoParts] = useState<WorkOrderPart[]>([]);
   const [voiceNotes, setVoiceNotes] = useState<WorkOrderVoiceNote[]>([]);
@@ -40,12 +41,21 @@ export default function WorkOrderDetailsPage() {
 
   const qcCameraInputId = useId();
   const qcLibraryInputId = useId();
+  const fieldMediaCameraInputId = useId();
+  const fieldMediaLibraryInputId = useId();
   const [statusInput, setStatusInput] = useState("in_progress");
   const [qcForm, setQcForm] = useState({ image_url: "" });
   const [qcPhotoFile, setQcPhotoFile] = useState<File | null>(null);
   const [qcPhotoPreview, setQcPhotoPreview] = useState("");
   const [qcUploadPct, setQcUploadPct] = useState(0);
   const [qcBusy, setQcBusy] = useState(false);
+  const [fieldMediaFile, setFieldMediaFile] = useState<File | null>(null);
+  const [fieldMediaPreview, setFieldMediaPreview] = useState("");
+  const [fieldMediaBusy, setFieldMediaBusy] = useState(false);
+  const [fieldMediaForm, setFieldMediaForm] = useState<{
+    category: WorkOrderMediaCategory;
+    caption: string;
+  }>({ category: "before", caption: "" });
   const [retForm, setRetForm] = useState({ equipment_type: "", quantity: "1" });
   const [completion, setCompletion] = useState({
     repairResult: "",
@@ -74,9 +84,21 @@ export default function WorkOrderDetailsPage() {
     });
   };
 
+  const setFieldMediaFromFile = (file: File | null) => {
+    setFieldMediaFile(file);
+    setFieldMediaPreview((prev) => {
+      revokeQcPreview(prev);
+      return file ? URL.createObjectURL(file) : "";
+    });
+  };
+
   useEffect(() => {
     return () => revokeQcPreview(qcPhotoPreview);
   }, [qcPhotoPreview]);
+
+  useEffect(() => {
+    return () => revokeQcPreview(fieldMediaPreview);
+  }, [fieldMediaPreview]);
 
   useEffect(() => {
     setRole(window.localStorage.getItem("opf_role") || "");
@@ -140,15 +162,17 @@ export default function WorkOrderDetailsPage() {
   const reloadDetails = useCallback(async () => {
     if (!currentWorkOrderId) return;
     try {
-      const [statuses, pictures, equipments, allParts, notes] = await Promise.all([
+      const [statuses, pictures, media, equipments, allParts, notes] = await Promise.all([
         api.listJobStatus(currentWorkOrderId),
         api.listQCPictures(currentWorkOrderId),
+        api.listWorkOrderMedia(currentWorkOrderId).catch(() => [] as WorkOrderMedia[]),
         api.listReturnEquipments(currentWorkOrderId),
         api.listWorkOrderParts({ limit: 100, work_order_id: currentWorkOrderId }).catch(() => [] as WorkOrderPart[]),
         api.listVoiceNotes(currentWorkOrderId)
       ]);
       setJobStatusRows(statuses);
       setQcPictures(pictures);
+      setWorkOrderMedia(media);
       setReturnEquipments(equipments);
       setWoParts(allParts);
       setVoiceNotes(notes);
@@ -263,7 +287,11 @@ export default function WorkOrderDetailsPage() {
     const missing: string[] = [];
     if (completionPolicy?.require_repair_result && !completion.repairResult.trim()) missing.push("repair result");
     if (completionPolicy?.require_customer_signature && (!completion.signatureName.trim() || !completion.signatureData)) missing.push("customer signature");
-    if (completionPolicy?.require_completion_photo && qcPictures.length === 0) missing.push("field photo");
+    if (
+      completionPolicy?.require_completion_photo
+      && qcPictures.length === 0
+      && !workOrderMedia.some((item) => item.media_type === "photo")
+    ) missing.push("field photo");
     if (completionPolicy?.require_parts_usage && woParts.length === 0) missing.push("part usage");
     if (completionPolicy?.require_all_checklist_items && !(completion.equipmentSafe && completion.siteClean && completion.customerBriefed)) missing.push("field checklist");
     if (dynamicForm?.missing_required_fields.length) {
@@ -480,6 +508,46 @@ export default function WorkOrderDetailsPage() {
     }
   };
 
+  const onCreateFieldMedia = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!currentWorkOrderId || !canEdit) return;
+    if (!fieldMediaFile) {
+      setNotice({ type: "error", text: "Take a photo or choose a photo/video first." });
+      return;
+    }
+    try {
+      setFieldMediaBusy(true);
+      await api.createWorkOrderMedia(currentWorkOrderId, {
+        file: fieldMediaFile,
+        category: fieldMediaForm.category,
+        caption: fieldMediaForm.caption,
+        clientRequestId: `field-media-${crypto.randomUUID()}`
+      });
+      setFieldMediaFromFile(null);
+      setFieldMediaForm({ category: "before", caption: "" });
+      setNotice({ type: "success", text: "Private field media evidence added." });
+      void reloadDetails();
+    } catch (err) {
+      setNotice({
+        type: "error",
+        text: err instanceof Error ? err.message : "Failed to add field media."
+      });
+    } finally {
+      setFieldMediaBusy(false);
+    }
+  };
+
+  const onOpenFieldMedia = async (media: WorkOrderMedia) => {
+    try {
+      await api.openWorkOrderMedia(media);
+    } catch (err) {
+      setNotice({
+        type: "error",
+        text: err instanceof Error ? err.message : "Failed to open field media."
+      });
+    }
+  };
+
   const onCreateReturnEquipment = async (e: FormEvent) => {
     e.preventDefault();
     if (!currentWorkOrderId || !retForm.equipment_type.trim() || !canEdit) return;
@@ -504,6 +572,14 @@ export default function WorkOrderDetailsPage() {
   const sortedStatuses = useMemo(
     () => [...jobStatusRows].sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp))),
     [jobStatusRows]
+  );
+
+  const fieldMediaPreviewIsVideo = Boolean(
+    fieldMediaFile
+    && (
+      fieldMediaFile.type.startsWith("video/")
+      || /\.(mp4|mov|webm)$/i.test(fieldMediaFile.name)
+    )
   );
 
   const jobDescription = [selectedWorkOrder?.description, selectedWorkOrder?.problem_description]
@@ -1190,7 +1266,170 @@ export default function WorkOrderDetailsPage() {
       </div>
 
       <div className="card">
-        <h3 className="section-title">QC pictures</h3>
+        <h3 className="section-title">Field media evidence</h3>
+        <p className="muted" style={{ fontSize: 14, marginTop: 0 }}>
+          Private, account-attributed photos and videos. Everyone on the team can review them;
+          only the job owner on the bound phone or an administrator can add evidence.
+        </p>
+        <form onSubmit={onCreateFieldMedia}>
+          <input
+            id={fieldMediaCameraInputId}
+            className="visually-hidden"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            disabled={evidenceFrozen || fieldMediaBusy}
+            onChange={(event) => {
+              setFieldMediaFromFile(event.target.files?.[0] || null);
+              event.target.value = "";
+            }}
+          />
+          <input
+            id={fieldMediaLibraryInputId}
+            className="visually-hidden"
+            type="file"
+            accept="image/*,video/mp4,video/quicktime,video/webm"
+            disabled={evidenceFrozen || fieldMediaBusy}
+            onChange={(event) => {
+              setFieldMediaFromFile(event.target.files?.[0] || null);
+              event.target.value = "";
+            }}
+          />
+          <div className="photo-upload-actions" style={{ marginBottom: 12 }}>
+            <label
+              htmlFor={fieldMediaCameraInputId}
+              style={{
+                opacity: evidenceFrozen || fieldMediaBusy ? 0.5 : 1,
+                pointerEvents: evidenceFrozen || fieldMediaBusy ? "none" : "auto"
+              }}
+            >
+              Take field photo
+            </label>
+            <label
+              htmlFor={fieldMediaLibraryInputId}
+              style={{
+                opacity: evidenceFrozen || fieldMediaBusy ? 0.5 : 1,
+                pointerEvents: evidenceFrozen || fieldMediaBusy ? "none" : "auto"
+              }}
+            >
+              Choose photo / video
+            </label>
+            {fieldMediaFile && (
+              <button
+                type="button"
+                className="photo-upload-clear"
+                disabled={evidenceFrozen || fieldMediaBusy}
+                onClick={() => setFieldMediaFromFile(null)}
+              >
+                Remove selection
+              </button>
+            )}
+          </div>
+          <div className="form-grid" style={{ marginBottom: 10 }}>
+            <label>
+              Evidence category
+              <select
+                value={fieldMediaForm.category}
+                disabled={evidenceFrozen || fieldMediaBusy}
+                onChange={(event) => setFieldMediaForm((previous) => ({
+                  ...previous,
+                  category: event.target.value as WorkOrderMediaCategory
+                }))}
+              >
+                <option value="arrival">Arrival</option>
+                <option value="before">Before repair</option>
+                <option value="during">During repair</option>
+                <option value="after">After repair</option>
+                <option value="damage">Damage</option>
+                <option value="serial_label">Serial / label</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label>
+              Caption (optional)
+              <input
+                maxLength={500}
+                value={fieldMediaForm.caption}
+                disabled={evidenceFrozen || fieldMediaBusy}
+                onChange={(event) => setFieldMediaForm((previous) => ({
+                  ...previous,
+                  caption: event.target.value
+                }))}
+                placeholder="What does this evidence show?"
+              />
+            </label>
+          </div>
+          {fieldMediaPreview && (
+            <div style={{ marginBottom: 12 }}>
+              {fieldMediaPreviewIsVideo ? (
+                <video
+                  src={fieldMediaPreview}
+                  controls
+                  style={{ width: "100%", maxWidth: 480, maxHeight: 280, borderRadius: 10 }}
+                />
+              ) : (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={fieldMediaPreview}
+                  alt="Selected field evidence"
+                  style={{ width: "100%", maxWidth: 480, maxHeight: 280, objectFit: "contain", borderRadius: 10, border: "1px solid var(--border)" }}
+                />
+              )}
+            </div>
+          )}
+          <button type="submit" disabled={evidenceFrozen || fieldMediaBusy || !fieldMediaFile}>
+            {fieldMediaBusy ? "Uploading…" : "Add private field evidence"}
+          </button>
+          {!canEdit && (
+            <p className="muted" style={{ marginBottom: 0, fontSize: 13 }}>
+              Read-only: this work order is owned by another engineer or is frozen.
+            </p>
+          )}
+        </form>
+
+        {workOrderMedia.length === 0 ? (
+          <div className="empty-state" style={{ marginTop: 12 }}>
+            No governed field photos or videos yet.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 12,
+              marginTop: 14
+            }}
+          >
+            {workOrderMedia.map((media) => (
+              <div key={media.id} className="job-card" style={{ margin: 0 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                  <strong>{media.media_type === "photo" ? "Photo" : "Video"}</strong>
+                  <span className="badge">{media.category.replace("_", " ")}</span>
+                </div>
+                {media.caption && <p style={{ margin: "8px 0" }}>{media.caption}</p>}
+                <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
+                  {(media.size_bytes / (1024 * 1024)).toFixed(2)} MiB · claim {media.claim_version}
+                  <br />
+                  {users.find((user) => user.id === media.created_by)?.name || "Administrator"} · {new Date(media.created_at).toLocaleString()}
+                  <br />
+                  SHA-256 {media.file_sha256.slice(0, 12)}…
+                </div>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  style={{ marginTop: 10 }}
+                  onClick={() => void onOpenFieldMedia(media)}
+                >
+                  Open authenticated media
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3 className="section-title">Legacy QC pictures</h3>
         <p className="muted" style={{ fontSize: 14, marginTop: 0 }}>
           Use camera or library (uploads to server), or paste a direct image URL.
         </p>

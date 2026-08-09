@@ -72,6 +72,7 @@ from app.models import (
     UserRole,
     Warehouse,
     WorkOrder,
+    WorkOrderMedia,
     WorkOrderPart,
     WorkOrderVoiceNote,
 )
@@ -5106,10 +5107,26 @@ def _validate_completion_evidence(db: Session, item: WorkOrder, policy: dict) ->
             or not all(type(checklist[key]) is bool and checklist[key] for key in required_keys)
         ):
             missing.append("completed_checklist")
-    if policy.get("require_completion_photo") and not db.scalar(
-        select(QCPicture.id).where(QCPicture.work_order_id == item.id).limit(1)
-    ):
-        missing.append("completion_photo")
+    if policy.get("require_completion_photo"):
+        legacy_photo = db.scalar(
+            select(QCPicture.id)
+            .where(
+                QCPicture.organization_id == item.organization_id,
+                QCPicture.work_order_id == item.id,
+            )
+            .limit(1)
+        )
+        governed_photo = db.scalar(
+            select(WorkOrderMedia.id)
+            .where(
+                WorkOrderMedia.organization_id == item.organization_id,
+                WorkOrderMedia.work_order_id == item.id,
+                WorkOrderMedia.media_type == "photo",
+            )
+            .limit(1)
+        )
+        if not legacy_photo and not governed_photo:
+            missing.append("completion_photo")
     if policy.get("require_parts_usage") and not db.scalar(
         select(WorkOrderPart.id).where(WorkOrderPart.work_order_id == item.id).limit(1)
     ):

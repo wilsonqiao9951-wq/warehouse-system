@@ -6,6 +6,49 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-09 - Immutable work-order field media evidence
+
+Status: implemented locally on `codex/work-order-media-evidence`; publication
+and GitHub CI verification pending.
+
+Delivered:
+
+- Added tenant-owned, append-only work-order photo/video evidence with
+  categories, optional captions, file-signature type detection, size and
+  SHA-256 evidence, random private storage, sanitized source names,
+  authenticated account/device attribution, claim generation, server time,
+  and exact client-request idempotency.
+- Kept the team work-order model: every same-tenant operational role can read
+  progress and authenticated media, while only the active claimant engineer on
+  the bound phone/current claim or an administrator can upload. Other
+  engineers, managers, and warehouse users cannot modify evidence.
+- Added pending-approval/completion freeze, no update/delete API, private path/
+  byte/hash verification, direct-public-URL denial, audit redaction, explicit
+  organization predicates, and forced PostgreSQL RLS through migration `0070`.
+- Added responsive camera/library photo/video capture, local preview,
+  category/caption selection, authenticated opening, and evidence metadata to
+  the work-order mobile screen. Completion-photo policy now accepts a field
+  photo or legacy QC picture, but not video alone.
+- Included new rows/private files in portable exports while keeping immutable
+  operational evidence outside controlled-restore mutation. Field media stays
+  online-only and does not automatically publish to knowledge, label AI,
+  mutate inventory, or write to AppSheet.
+
+Local verification:
+
+- All 319 backend tests passed; the focused media/completion/RLS/recovery suite
+  passed 22 tests.
+- Fresh base-to-`0070`, `0070 -> 0069 -> 0070`, configured database upgrade,
+  and Alembic model zero-drift checks passed.
+- The configured database was backed up as
+  `openpartsflow.pre-0070-20260809-012008.db` (2,002,944 bytes; SHA-256
+  `B6DACB761707BA4B10DAFA6AA4CAC6CC0B3A3698EFBCCEE26F5B97A6539BE60F`)
+  before upgrading to `0070`.
+- Frontend ESLint and the Next.js production build passed for all 48 routes.
+  Python requirement/full-environment and npm full/production audits reported
+  no known vulnerabilities; compilation, production configuration, Compose
+  configuration, and diff integrity checks passed.
+
 ## 2026-08-09 - Governed pilot, UAT, and internal decision evidence
 
 Status: implemented and published as stacked draft PR #43 on

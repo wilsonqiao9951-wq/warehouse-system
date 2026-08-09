@@ -29,6 +29,8 @@ OpenPartsFlow separates visibility, field execution, and management. Frontend ca
 | Claim an available work order | Allow with verified Bearer device | Idempotent on same device | Deny | Deny | Deny |
 | Edit field data | Deny | Allow with current claim version | Deny | Allow with audit | Deny |
 | Start/pause/add evidence/use parts | Deny | Allow with current claim version | Deny | Allow with audit | Deny |
+| Upload work-order field photo/video | Deny | Allow with current claim version | Deny | Allow with audit | Deny |
+| View work-order field photo/video | Allow | Allow | Allow | Allow | Allow in existing scoped read context |
 | Request or directly complete | Deny | Allow with current password verification | Deny | Deny | Deny |
 | Approve/reject completion | Deny | Deny | Allow | Allow | Deny |
 | Release an active claim | Deny | Deny | Allow with reason | Allow with reason | Deny |
@@ -63,6 +65,7 @@ The following writes use the owner-or-administrator edit guard, except completio
 - deprecated `POST /api/work-order-parts`
 - work-order photo and voice-note uploads
 - QC picture, job-status, and return-equipment creation
+- append-only work-order field photo/video upload
 
 For an engineer request the guard requires:
 
@@ -74,6 +77,14 @@ For an engineer request the guard requires:
 6. `X-Claim-Version == work_order.claim_version`.
 
 Administrators may correct an unlocked work order through these edit routes, and every change is attributed to the administrator in the audit log. Administrators cannot request or directly complete a work order. The API overrides client attribution fields such as parts `user_id` and photo `uploaded_by` with the authenticated actor.
+
+Work-order field media is append-only and freezes at pending approval or
+completion. Its private content endpoint repeats tenant/work-order read scope
+and checks the stored path, byte count, and SHA-256 before delivery. See
+[`WORK_ORDER_MEDIA_EVIDENCE.md`](WORK_ORDER_MEDIA_EVIDENCE.md).
+The accountable uploader remains visible to the team, while internal device
+record IDs and original phone file names are redacted from peer/warehouse
+responses.
 
 ## Completion attribution
 
