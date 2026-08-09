@@ -7,7 +7,12 @@ import pytest
 
 from scripts import platform_recovery
 from scripts.platform_recovery import DatabaseTarget, RecoveryError
-from scripts.verify_scale_performance import _percentile, _plan_nodes
+from scripts.verify_scale_performance import (
+    ScaleVerificationError,
+    _next_id,
+    _percentile,
+    _plan_nodes,
+)
 from app.services.data_restores import RESTORE_SCHEMA_COMPATIBILITY
 
 
@@ -212,6 +217,26 @@ def test_scale_percentile_and_plan_flattening():
         }
     )
     assert [node["Node Type"] for node in nodes] == ["Limit", "Index Scan"]
+
+
+def test_scale_seed_allocates_ids_without_advancing_postgres_sequences():
+    class Result:
+        @staticmethod
+        def scalar_one():
+            return 42
+
+    class SessionStub:
+        statement = ""
+
+        def execute(self, statement):
+            self.statement = str(statement)
+            return Result()
+
+    session = SessionStub()
+    assert _next_id(session, "organizations") == 42
+    assert session.statement == "SELECT COALESCE(MAX(id), 0) + 1 FROM organizations"
+    with pytest.raises(ScaleVerificationError, match="Unsupported scale seed table"):
+        _next_id(session, "not_a_real_table")
 
 
 def test_portable_restore_compatibility_continues_through_scale_revision():

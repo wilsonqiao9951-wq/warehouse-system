@@ -21,6 +21,30 @@ class ScaleVerificationError(RuntimeError):
     pass
 
 
+_SCALE_ID_TABLES = frozenset(
+    {
+        "organizations",
+        "users",
+        "inventory_regions",
+        "warehouses",
+        "parts",
+        "work_orders",
+        "work_order_parts",
+        "inventory_transactions",
+    }
+)
+
+
+def _next_id(session: Session, table: str) -> int:
+    if table not in _SCALE_ID_TABLES:
+        raise ScaleVerificationError(f"Unsupported scale seed table: {table}")
+    return int(
+        session.execute(
+            text(f"SELECT COALESCE(MAX(id), 0) + 1 FROM {table}")
+        ).scalar_one()
+    )
+
+
 def _percentile(values: list[float], percentile: float) -> float:
     if not values:
         raise ScaleVerificationError("No latency samples were collected")
@@ -82,13 +106,16 @@ def _assert_local_postgres() -> None:
 
 def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, int]:
     suffix = uuid4().hex[:12]
+    organization_id = _next_id(session, "organizations")
     primary = Organization(
+        id=organization_id,
         name="Scale verification primary",
         slug=f"scale-primary-{suffix}",
         max_users=max(50, 100),
         max_warehouses=20,
     )
     noise = Organization(
+        id=organization_id + 1,
         name="Scale verification noise",
         slug=f"scale-noise-{suffix}",
         max_users=max(50, 100),
@@ -97,12 +124,14 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
     session.add_all([primary, noise])
     session.flush()
     engineer = User(
+        id=_next_id(session, "users"),
         organization_id=primary.id,
         name="Scale engineer",
         email=f"scale-engineer-{suffix}@example.invalid",
         role=UserRole.ENGINEER,
     )
     region = InventoryRegion(
+        id=_next_id(session, "inventory_regions"),
         organization_id=primary.id,
         code="PRIMARY",
         name="Primary",
@@ -112,12 +141,14 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
     session.add_all([engineer, region])
     session.flush()
     warehouse = Warehouse(
+        id=_next_id(session, "warehouses"),
         organization_id=primary.id,
         code="SCALE",
         name="Scale warehouse",
         region_id=region.id,
     )
     part = Part(
+        id=_next_id(session, "parts"),
         organization_id=primary.id,
         part_number=f"SCALE-{suffix}",
         name="Scale verification part",
@@ -126,8 +157,11 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
     session.add_all([warehouse, part])
     session.flush()
 
+    work_order_start = _next_id(session, "work_orders")
+    work_order_part_start = _next_id(session, "work_order_parts")
+    inventory_transaction_start = _next_id(session, "inventory_transactions")
     common_columns = """
-        organization_id, form_version, form_data_json, claim_version,
+        id, organization_id, form_version, form_data_json, claim_version,
         ticket_number, schedule_date, job_type, machine_type,
         assigned_user_id, engineer_id, completed_by_id,
         revenue, labor_cost, status, completed_at, final_outcome,
@@ -138,7 +172,7 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
         text(
             f"""
             INSERT INTO work_orders ({common_columns})
-            SELECT :organization_id, 0, '{{}}', 0,
+            SELECT :work_order_start + value - 1, :organization_id, 0, '{{}}', 0,
                    :prefix || '-' || value::text,
                    CURRENT_DATE - ((value % 180)::int),
                    CASE WHEN value % 2 = 0 THEN 'preventive' ELSE 'repair' END,
@@ -154,6 +188,7 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
         ),
         {
             "organization_id": primary.id,
+            "work_order_start": work_order_start,
             "engineer_id": engineer.id,
             "prefix": f"SCALE-{suffix}",
             "work_orders": work_orders,
@@ -163,7 +198,8 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
         text(
             f"""
             INSERT INTO work_orders ({common_columns})
-            SELECT :organization_id, 0, '{{}}', 0,
+            SELECT :work_order_start + :work_orders + value - 1,
+                   :organization_id, 0, '{{}}', 0,
                    :prefix || '-' || value::text,
                    CURRENT_DATE - ((value % 180)::int),
                    'noise', 'NOISE', NULL, NULL, NULL,
@@ -175,6 +211,7 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
         ),
         {
             "organization_id": noise.id,
+            "work_order_start": work_order_start,
             "prefix": f"NOISE-{suffix}",
             "work_orders": work_orders,
         },
@@ -183,19 +220,22 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
         text(
             """
             INSERT INTO work_order_parts (
-                organization_id, work_order_id, part_id, warehouse_id, user_id,
+                id, organization_id, work_order_id, part_id, warehouse_id, user_id,
                 quantity, unit_cost, total_cost, installed, old_part_returned,
                 created_at, updated_at
             )
-            SELECT wo.organization_id, wo.id, :part_id, :warehouse_id, :engineer_id,
+            SELECT :work_order_part_start
+                       + ROW_NUMBER() OVER (ORDER BY wo.id, series.value) - 1,
+                   wo.organization_id, wo.id, :part_id, :warehouse_id, :engineer_id,
                    1, 1.0, 1.0, 'yes', 'no', wo.created_at, CURRENT_TIMESTAMP
             FROM work_orders AS wo
-            CROSS JOIN generate_series(1, 2)
+            CROSS JOIN generate_series(1, 2) AS series(value)
             WHERE wo.organization_id = :organization_id
             """
         ),
         {
             "organization_id": primary.id,
+            "work_order_part_start": work_order_part_start,
             "part_id": part.id,
             "warehouse_id": warehouse.id,
             "engineer_id": engineer.id,
@@ -206,11 +246,13 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
         text(
             """
             INSERT INTO inventory_transactions (
-                organization_id, part_id, transaction_type, quantity,
+                id, organization_id, part_id, transaction_type, quantity,
                 from_warehouse_id, work_order_id, user_id, unit_cost,
                 created_at, updated_at
             )
-            SELECT wo.organization_id, :part_id, 'WORK_ORDER_USED', -1,
+            SELECT :inventory_transaction_start
+                       + ROW_NUMBER() OVER (ORDER BY wo.id, series.value) - 1,
+                   wo.organization_id, :part_id, 'WORK_ORDER_USED', -1,
                    :warehouse_id, wo.id, :engineer_id, 1.0,
                    wo.created_at + (series.value * INTERVAL '1 second'), CURRENT_TIMESTAMP
             FROM work_orders AS wo
@@ -221,6 +263,7 @@ def _seed(session: Session, work_orders: int, transactions: int) -> dict[str, in
         ),
         {
             "organization_id": primary.id,
+            "inventory_transaction_start": inventory_transaction_start,
             "part_id": part.id,
             "warehouse_id": warehouse.id,
             "engineer_id": engineer.id,
@@ -255,7 +298,11 @@ def verify_scale(
     results: list[dict] = []
     with engine.connect() as connection:
         transaction = connection.begin()
-        session = Session(bind=connection, info={"rls_platform_access": True})
+        session = Session(
+            bind=connection,
+            join_transaction_mode="create_savepoint",
+            info={"rls_platform_access": True},
+        )
         try:
             seed = _seed(session, work_orders, transactions)
             queries = (
