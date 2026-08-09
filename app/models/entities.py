@@ -2290,6 +2290,153 @@ class IntegrationParallelReconciliation(Base):
     creator = relationship("User")
 
 
+class PilotCampaign(Base):
+    __tablename__ = "pilot_campaigns"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'active', 'decision_pending', 'go', 'no_go')",
+            name="ck_pilot_campaigns_status",
+        ),
+        CheckConstraint(
+            "planned_start <= planned_end",
+            name="ck_pilot_campaigns_planned_window",
+        ),
+        CheckConstraint("version >= 0", name="ck_pilot_campaigns_version"),
+        CheckConstraint(
+            "decision_fingerprint IS NULL OR length(decision_fingerprint) = 64",
+            name="ck_pilot_campaigns_decision_fingerprint",
+        ),
+        Index(
+            "ix_pilot_campaigns_org_status_time",
+            "organization_id",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_pilot_campaigns_one_live_per_org",
+            "organization_id",
+            unique=True,
+            postgresql_where=text("status IN ('active', 'decision_pending')"),
+            sqlite_where=text("status IN ('active', 'decision_pending')"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    planned_start: Mapped[date] = mapped_column(Date, nullable=False)
+    planned_end: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), default="draft", nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    updated_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    decision_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class PilotAttestation(Base):
+    __tablename__ = "pilot_attestations"
+    __table_args__ = (
+        CheckConstraint(
+            "attestation_type IN ('training', 'uat')",
+            name="ck_pilot_attestations_type",
+        ),
+        CheckConstraint(
+            "result IN ('passed', 'failed')",
+            name="ck_pilot_attestations_result",
+        ),
+        CheckConstraint(
+            "role IN ('admin', 'manager', 'warehouse', 'engineer')",
+            name="ck_pilot_attestations_role",
+        ),
+        CheckConstraint(
+            "length(evidence_fingerprint) = 64",
+            name="ck_pilot_attestations_fingerprint",
+        ),
+        UniqueConstraint(
+            "campaign_id",
+            "user_id",
+            "attestation_type",
+            "evidence_fingerprint",
+            name="uq_pilot_attestations_exact_evidence",
+        ),
+        Index(
+            "ix_pilot_attestations_org_campaign_time",
+            "organization_id",
+            "campaign_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("pilot_campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    attestation_type: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    result: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    completed_items_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    note: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PilotIssue(Base):
+    __tablename__ = "pilot_issues"
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('sev1', 'sev2', 'sev3')",
+            name="ck_pilot_issues_severity",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'resolved')",
+            name="ck_pilot_issues_status",
+        ),
+        CheckConstraint("version >= 0", name="ck_pilot_issues_version"),
+        Index(
+            "ix_pilot_issues_org_campaign_status",
+            "organization_id",
+            "campaign_id",
+            "status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("pilot_campaigns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    severity: Mapped[str] = mapped_column(String(8), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    detail: Mapped[str] = mapped_column(String(1000), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="open", nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reported_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    resolved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    resolution_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class IntegrationAdapterConfiguration(Base):
     __tablename__ = "integration_adapter_configurations"
     __table_args__ = (

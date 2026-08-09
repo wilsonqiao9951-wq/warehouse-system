@@ -25,7 +25,7 @@
 
 ## 角色与导航
 
-- [ ] **Technician**：底栏顺序为 Today → Map → My Jobs → My Van → Profile；可切换 `X-User-Id` 后请求带头
+- [ ] **Technician**：底栏顺序为 Today → Map → My Jobs → My Van → Profile；登录账号、注册设备和 claim 变化后权限即时更新
 - [ ] **Manager / Admin**：顶栏含 Dashboard、Work Orders、Calendar、Map、Inventory、Employees、Reports、Pilot、Settings 等
 - [ ] **Warehouse**：可访问 Parts Usage、Inventory 等预期页面
 
@@ -56,4 +56,4 @@
 ## 回归（桌面 Manager）
 
 - [ ] Work Orders 表格编辑、保存、分页、URL 查询参数同步
-- [ ] 与 FastAPI 联调：RBAC、`X-User-Id` 拒绝场景有可读错误
+- [ ] 与 FastAPI 联调：登录、RBAC、注册设备和 claim 拒绝场景有可读错误且不泄露他人数据

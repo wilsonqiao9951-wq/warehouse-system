@@ -260,3 +260,42 @@ def test_portable_restore_compatibility_continues_through_scale_revision():
         "20260808_0066",
         "20260808_0067",
     } <= compatible
+
+
+def test_portable_restore_compatibility_continues_through_pilot_governance_revision():
+    compatible = RESTORE_SCHEMA_COMPATIBILITY["20260809_0069"]
+    assert {
+        "20260808_0067",
+        "20260808_0068",
+        "20260809_0069",
+    } <= compatible
+
+
+def test_atomic_replace_retries_transient_permission_error(monkeypatch, tmp_path):
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    calls = []
+
+    def transient_replace(received_source, received_target):
+        calls.append((received_source, received_target))
+        if len(calls) < 3:
+            raise PermissionError("transient scanner lock")
+
+    monkeypatch.setattr(platform_recovery.os, "replace", transient_replace)
+    monkeypatch.setattr(platform_recovery.time, "sleep", lambda _seconds: None)
+    platform_recovery._atomic_replace(source, target)
+    assert calls == [(source, target), (source, target), (source, target)]
+
+
+def test_atomic_replace_preserves_persistent_permission_failure(monkeypatch, tmp_path):
+    calls = []
+
+    def denied_replace(source, target):
+        calls.append((source, target))
+        raise PermissionError("persistent denial")
+
+    monkeypatch.setattr(platform_recovery.os, "replace", denied_replace)
+    monkeypatch.setattr(platform_recovery.time, "sleep", lambda _seconds: None)
+    with pytest.raises(PermissionError, match="persistent denial"):
+        platform_recovery._atomic_replace(tmp_path / "source", tmp_path / "target")
+    assert len(calls) == 6

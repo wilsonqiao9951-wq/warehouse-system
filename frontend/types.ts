@@ -2379,6 +2379,69 @@ export interface PilotChecklist {
   latest_reconciliation_at?: string | null;
 }
 
+export type PilotRole = "admin" | "manager" | "warehouse" | "engineer";
+export type PilotAttestationType = "training" | "uat";
+
+export interface PilotAttestation {
+  id: number;
+  campaign_id: number;
+  user_id: number;
+  role: PilotRole;
+  attestation_type: PilotAttestationType;
+  result: "passed" | "failed";
+  completed_items: string[];
+  required_items: string[];
+  evidence_fingerprint: string;
+  note: string;
+  created_at: string;
+}
+
+export interface PilotIssue {
+  id: number;
+  campaign_id: number;
+  severity: "sev1" | "sev2" | "sev3";
+  title: string;
+  detail: string;
+  status: "open" | "resolved";
+  version: number;
+  reported_by: number;
+  resolved_by?: number | null;
+  resolution_reason?: string | null;
+  resolved_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PilotCampaign {
+  id: number;
+  organization_id: number;
+  name: string;
+  planned_start: string;
+  planned_end: string;
+  status: "draft" | "active" | "decision_pending" | "go" | "no_go";
+  version: number;
+  started_at?: string | null;
+  decision_by?: number | null;
+  decided_at?: string | null;
+  decision_reason?: string | null;
+  decision_fingerprint?: string | null;
+  created_by: number;
+  updated_by: number;
+  created_at: string;
+  updated_at: string;
+  required_items: Record<PilotRole, Record<PilotAttestationType, string[]>>;
+  latest_attestations: PilotAttestation[];
+  issues: PilotIssue[];
+  gates: Record<string, boolean>;
+  gate_reasons: string[];
+  latest_reconciliation_id?: number | null;
+  latest_reconciliation_status?: "matched" | "differences" | null;
+  can_manage: boolean;
+  can_attest: boolean;
+  can_resolve_issues: boolean;
+  can_decide: boolean;
+}
+
 export interface StockBalance {
   part_id: number;
   part_number: string;

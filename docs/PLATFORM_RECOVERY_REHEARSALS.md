@@ -31,6 +31,11 @@ retention.
 
 ## Create a recovery point
 
+Recovery-point and restored-volume publication uses same-filesystem atomic
+replacement. Because Windows antivirus/indexing can briefly hold a newly
+written directory, `PermissionError` is retried six times with a short bounded
+backoff; persistent permission failures still abort and clean the staging path.
+
 Create `PLATFORM_RECOVERY_ROOT` and `PLATFORM_RECOVERY_REPORT_ROOT` on the
 encrypted backup target and make them writable by UID/GID `10001`. Close user
 writes at the gateway before starting. Then run:

@@ -6,6 +6,52 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-09 - Governed pilot, UAT, and internal decision evidence
+
+Status: implemented locally on `codex/pilot-governance-evidence`; publication
+and PostgreSQL CI verification are in progress.
+
+Delivered:
+
+- Added tenant-owned pilot campaigns with the versioned
+  `draft -> active -> decision_pending -> go|no_go` workflow. Critical
+  transitions require the signed-in account's current password, an expected
+  version, a reason, actor identity, and server time.
+- Added append-only, role-derived training and UAT attestations for admin,
+  manager, warehouse, and engineer accounts. Users cannot attest for another
+  account or role, passing evidence requires every fixed item, and exact retries
+  are SHA-256 idempotent.
+- Added live pilot issue reporting plus password-confirmed, versioned
+  manager/admin resolution. A technical `go` requires passed training and UAT
+  evidence for every operational role, no open severity-1 issue, and a matched
+  reconciliation created after campaign start against the active integration's
+  current ready parity contract.
+- Added a responsive `/pilot-checklist` governance workspace, role-sensitive
+  evidence disclosure, aggregate gates, append-only decision snapshots, tenant
+  predicates, forced PostgreSQL RLS, migration `0069`, and portable-export
+  custody without allowing restore mutation of governance evidence.
+- Removed obsolete documentation that instructed staff to simulate identity by
+  sending `X-User-Id`; current training and pilot procedures use real account
+  login and current-password confirmation.
+- Hardened recovery-point atomic publication with bounded retry for transient
+  Windows file-lock `PermissionError` failures while preserving fail-closed
+  behavior for all other errors.
+
+Local verification:
+
+- All 315 backend tests pass, including two direct atomic-publication retry
+  regressions. The final focused pilot/recovery suite passes 14 tests.
+- Fresh base-to-`0069`, `0069 -> 0068 -> 0069`, and Alembic model zero-drift
+  checks pass on isolated SQLite databases.
+- The configured local database was backed up as
+  `openpartsflow.pre-0069-20260809-004453.db` (1,900,544 bytes; SHA-256
+  `E5F9BD39B3CB56CC273DA64683591416DBB2A756055F3C2057164F6FE2AE526E`)
+  and upgraded to `0069` with no model drift.
+- Frontend ESLint and the Next.js production build pass for all 48 routes.
+  Python/npm dependency audits report no known vulnerabilities; Python
+  compilation, production configuration, Compose configuration, and diff
+  integrity checks pass.
+
 ## 2026-08-08 - AppSheet parallel-run discrepancy reconciliation
 
 Status: implemented and published as stacked draft PR #42 on

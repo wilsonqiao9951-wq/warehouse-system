@@ -54,6 +54,7 @@ import {
   StripeRefundResult,
   UserPermissionMatrix,
   PilotChecklist,
+  PilotCampaign,
   Part,
   PartRecognitionCandidate,
   PartRecognitionConfiguration,
@@ -2381,6 +2382,30 @@ export const api = {
     body: JSON.stringify(payload)
   }),
   getPilotChecklist: () => request<PilotChecklist>("/pilot/checklist"),
+  listPilotCampaigns: () => request<PilotCampaign[]>("/pilot/campaigns"),
+  createPilotCampaign: (payload: { name: string; planned_start: string; planned_end: string }) =>
+    request<PilotCampaign>("/pilot/campaigns", { method: "POST", body: JSON.stringify(payload) }),
+  transitionPilotCampaign: (
+    campaignId: number,
+    payload: { expected_version: number; target_status: "active" | "decision_pending"; account_password: string; reason: string }
+  ) => request<PilotCampaign>(`/pilot/campaigns/${campaignId}/transitions`, { method: "POST", body: JSON.stringify(payload) }),
+  attestPilotCampaign: (
+    campaignId: number,
+    payload: { attestation_type: "training" | "uat"; result: "passed" | "failed"; completed_items: string[]; note: string; account_password: string }
+  ) => request<PilotCampaign>(`/pilot/campaigns/${campaignId}/attestations`, { method: "POST", body: JSON.stringify(payload) }),
+  createPilotIssue: (
+    campaignId: number,
+    payload: { severity: "sev1" | "sev2" | "sev3"; title: string; detail: string }
+  ) => request<PilotCampaign>(`/pilot/campaigns/${campaignId}/issues`, { method: "POST", body: JSON.stringify(payload) }),
+  resolvePilotIssue: (
+    campaignId: number,
+    issueId: number,
+    payload: { expected_version: number; resolution_reason: string; account_password: string }
+  ) => request<PilotCampaign>(`/pilot/campaigns/${campaignId}/issues/${issueId}/resolve`, { method: "POST", body: JSON.stringify(payload) }),
+  decidePilotCampaign: (
+    campaignId: number,
+    payload: { expected_version: number; decision: "go" | "no_go"; reason: string; account_password: string }
+  ) => request<PilotCampaign>(`/pilot/campaigns/${campaignId}/decision`, { method: "POST", body: JSON.stringify(payload) }),
   listWorkOrderParts: (params?: { limit?: number; work_order_id?: number }) => {
     const q = new URLSearchParams();
     q.set("limit", String(Math.min(100, Math.max(1, params?.limit ?? 100))));

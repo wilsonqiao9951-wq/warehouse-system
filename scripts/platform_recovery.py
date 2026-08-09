@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -27,6 +28,18 @@ MAX_MANIFEST_BYTES = 32 * 1024 * 1024
 
 class RecoveryError(RuntimeError):
     """A safe, operator-facing recovery failure."""
+
+
+def _atomic_replace(source: Path, target: Path) -> None:
+    """Publish atomically while tolerating brief Windows scanner locks."""
+    for attempt in range(6):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 @dataclass(frozen=True)
@@ -104,7 +117,7 @@ def _write_json(path: Path, value: Any) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        _atomic_replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -382,7 +395,7 @@ def create_recovery_point(
             encoding="ascii",
             newline="\n",
         )
-        os.replace(temporary_path, final_path)
+        _atomic_replace(temporary_path, final_path)
         return {
             "status": "created",
             "recovery_point_id": recovery_point_id,
@@ -666,7 +679,7 @@ def restore_recovery_point(
         if revision != manifest["schema_revision"] or counts != expected_counts:
             raise RecoveryError("Restored database evidence does not match the recovery point")
         for name, target in target_roots.items():
-            os.replace(staging[name], target)
+            _atomic_replace(staging[name], target)
             staging.pop(name)
         completed_at = _utc_now()
         report = {

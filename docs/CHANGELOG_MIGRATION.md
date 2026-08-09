@@ -1,5 +1,27 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260809_0069 - Governed pilot, UAT, and internal decision evidence
+
+- Adds tenant-owned pilot campaigns with a versioned
+  `draft -> active -> decision_pending -> go|no_go` lifecycle and one-live-
+  campaign database constraint.
+- Adds append-only, current-password-confirmed training/UAT attestations. The
+  server derives the actor role and fixed checklist, rejects role substitution,
+  and fingerprints exact evidence for idempotent retries.
+- Adds severity-versioned pilot issues that any operational participant can
+  report and only managers/administrators can resolve with password, reason,
+  actor, and server time.
+- Requires all four role training/UAT gates, no open sev1, and a matched
+  reconciliation created after campaign start before administrator `go`.
+  Terminal evidence stores only canonical IDs/hashes/counts/gates, not issue
+  text, raw AppSheet rows, passwords, tokens, or media.
+- Adds forced PostgreSQL RLS to all three tables, shared tenant registry/export
+  coverage, controlled-restore compatibility through `0069`, responsive Pilot
+  Governance UI, tests, and current authentication documentation.
+- Adds bounded retry for transient atomic-publication `PermissionError` while
+  preserving hard failure and staging cleanup after six attempts; this prevents
+  Windows scanner locks from destabilizing recovery-point publication.
+
 ## 20260808_0068 - Integration parallel-run reconciliation evidence
 
 - Adds tenant-scoped, append-only AppSheet/Google Sheets reconciliation runs

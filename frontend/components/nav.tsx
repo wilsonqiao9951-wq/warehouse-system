@@ -39,7 +39,7 @@ const links: NavLink[] = [
   { href: "/agent", label: "Operations Agent", roles: ["manager", "admin"], permission: "agent.use" },
   { href: "/audit-logs", label: "Audit Logs", roles: ["manager", "admin"], permission: "audit.read" },
   { href: "/backups", label: "Backups", roles: ["admin"] },
-  { href: "/pilot-checklist", label: "Pilot Checklist", roles: ["manager", "admin"] },
+  { href: "/pilot-checklist", label: "Pilot Governance", roles: ["engineer", "warehouse", "manager", "admin"] },
   { href: "/settings", label: "Settings", roles: ["manager", "admin"] },
   { href: "/work-order-templates", label: "Job Forms", roles: ["manager", "admin"] },
   { href: "/form-actions", label: "Form Actions", roles: ["warehouse", "manager", "admin"] },
