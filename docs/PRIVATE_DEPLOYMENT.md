@@ -180,6 +180,27 @@ retain its manifest and SHA-256 as an application-level recovery artifact.
 Infrastructure backups must be encrypted, access-controlled, copied off-host,
 and tested by restoring into an isolated environment. Record measured RPO/RTO.
 
+OpenPartsFlow provides a non-root PostgreSQL 16 recovery tool image and explicit
+Compose `recovery` profile. Set `PLATFORM_RECOVERY_ROOT` and
+`PLATFORM_RECOVERY_REPORT_ROOT` to encrypted off-host bind mounts owned by
+UID/GID `10001`. Close user writes, then create a complete recovery point:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.production.yml \
+  --profile recovery run --rm recovery-backup
+```
+
+Use the migration-owner credential with `BYPASSRLS`; the restricted API role is
+refused because it cannot prove a complete multi-tenant database dump.
+
+At least quarterly and before a high-risk upgrade, restore that point into a
+new empty database and temporary evidence roots in an isolated environment.
+The rehearsal refuses the source database, validates every manifest/archive/
+file hash before restore, verifies exact schema and table counts after restore,
+and emits a privacy-safe RPO/RTO report. Follow
+[`PLATFORM_RECOVERY_REHEARSALS.md`](PLATFORM_RECOVERY_REHEARSALS.md) for the
+target variables, report verification, cleanup, and CI scale gate.
+
 Do not restore a volume snapshot independently from its database recovery point:
 database references and evidence files must remain consistent.
 

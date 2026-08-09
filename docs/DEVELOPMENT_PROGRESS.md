@@ -6,6 +6,74 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-08 - Platform recovery and repeatable scale rehearsals
+
+Status: implemented, published as stacked draft PR #41, and verified by GitHub
+Actions run #79. Backend, frontend, PostgreSQL 16 scale/recovery, production
+configuration, Compose, and API/Web/recovery image jobs all passed.
+
+Delivered:
+
+- Added one complete platform recovery point for PostgreSQL plus public,
+  protected, and controlled-restore rollback evidence after user writes close.
+- Added canonical manifest and archive/file SHA-256 evidence, exact Alembic and
+  table row counts, atomic recovery-point publication, and secret/path/value
+  exclusion from operator output.
+- Added an isolated restore workflow that refuses the source or non-empty target,
+  validates every artifact before mutation, restores PostgreSQL/evidence to new
+  targets, and verifies exact schema, row, file, byte, and hash evidence.
+- Added privacy-safe measured RPO/RTO rehearsal reports and explicit budget
+  verification, plus an automatic PostgreSQL 16 CI rehearsal that always drops
+  its unique target database.
+- Added a non-root, capability-free PostgreSQL 16 recovery image and opt-in
+  Compose recovery profile with read-only source evidence mounts and encrypted
+  off-host bind-root configuration.
+- Added a loopback-only, rolled-back PostgreSQL scale gate covering 40,000 work
+  orders across two tenants, 40,000 part-use rows, 80,000 inventory movements,
+  required-index catalog evidence, indexed query plans without sequential scans,
+  and p50/p95 regression evidence.
+- Added migration `0067` with tenant-led work-order, inventory-ledger, and
+  engineer part-use pagination/range indexes. Restored missing portable-schema
+  compatibility continuity through revisions `0065`, `0066`, and `0067`.
+
+Verification:
+
+- Eight recovery safety, RLS-privilege, hash, isolation, report-budget, scale-
+  helper/index-catalog, and portable-compatibility tests pass; the final focused
+  recovery/deployment suite passes 60 tests and both scripts compile.
+- Configured SQLite upgraded from `0066` to `0067`; fresh base-to-head,
+  `0067 -> 0066 -> 0067`, and Alembic model zero-drift checks passed.
+- Backed up the local `0066` database as
+  `openpartsflow.pre-0067-20260808-224406.db` (1,839,104 bytes; SHA-256
+  `CBF113AB1BC258E360383DCCA59ACE833352210A043AC2716E441570DDBCB913`)
+  before upgrading to `0067`.
+- All 305 pre-publication backend tests passed after extending the private-
+  deployment contract for the two opt-in recovery services. GitHub's final
+  backend job passed all 307 tests after the two CI hardening regressions were
+  added.
+- Frontend ESLint, standalone TypeScript, and the Next.js production build pass
+  for all 47 static routes.
+- Python dependency consistency and requirement/full-environment vulnerability
+  audits plus full/production npm audits report no known vulnerabilities.
+  Production configuration, Compose topology, Python compilation, and diff
+  integrity checks pass. Local Docker Desktop and PostgreSQL client utilities
+  were unavailable, so GitHub's PostgreSQL 16 and recovery-image gates supplied
+  the authoritative real rehearsal.
+- GitHub Actions run #79 passed the complete private-deployment job. The scale
+  transaction inserted 20,000 target plus 20,000 noise work orders, 40,000
+  part-use rows, and 80,000 inventory transactions, then rolled back. All five
+  queries used indexes with p95 between 0.611 ms and 3.482 ms under the broad
+  750 ms regression budget.
+- The isolated PostgreSQL recovery completed at schema `20260808_0067` with
+  measured RPO 0.003 seconds and RTO 3.803 seconds, verified two database rows
+  and three evidence files, and dropped the isolated database. Compose rendered
+  and the API, Web, and recovery-backup images built successfully.
+- The first two CI attempts exposed a lagging seeded sequence and an overly
+  rigid exact-index-name assertion. Scale seed rows now use explicit
+  transaction-local identifiers without advancing sequences; the plan gate
+  separately proves every `0067` index exists while allowing PostgreSQL's safe
+  cost-based choice among indexed plans.
+
 ## 2026-08-08 - Signed SLA alert delivery and production observability
 
 Status: implemented, published as draft PR #40, and verified by GitHub Actions

@@ -1941,6 +1941,13 @@ class WorkOrder(Base):
         ),
         Index("ix_work_orders_org_created_at", "organization_id", "created_at"),
         Index("ix_work_orders_org_completed_at", "organization_id", "completed_at"),
+        Index("ix_work_orders_org_id", "organization_id", "id"),
+        Index(
+            "ix_work_orders_org_schedule_id",
+            "organization_id",
+            "schedule_date",
+            "id",
+        ),
         Index(
             "ix_work_orders_org_completed_by_at",
             "organization_id",
@@ -2467,6 +2474,11 @@ class InventoryTransaction(Base):
             "created_at",
         ),
         Index(
+            "ix_inventory_transactions_org_id",
+            "organization_id",
+            "id",
+        ),
+        Index(
             "ix_inventory_tx_org_type_created",
             "organization_id",
             "transaction_type",
@@ -2548,6 +2560,13 @@ class WorkOrderPart(Base):
             "ix_work_order_parts_org_work_order",
             "organization_id",
             "work_order_id",
+        ),
+        Index("ix_work_order_parts_org_id", "organization_id", "id"),
+        Index(
+            "ix_work_order_parts_org_user_id",
+            "organization_id",
+            "user_id",
+            "id",
         ),
     )
 

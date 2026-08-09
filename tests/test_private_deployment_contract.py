@@ -16,16 +16,27 @@ def test_ci_verifies_postgres_worker_lease_election_and_schema_drift():
     assert "alembic check" in workflow
     assert "python -m scripts.verify_postgres_rls" in workflow
     assert "python -m scripts.verify_worker_leases" in workflow
+    assert "python -m scripts.verify_scale_performance --confirm-isolated-ci" in workflow
+    assert "python -m scripts.verify_disaster_recovery --confirm-isolated-ci" in workflow
 
 
 def test_production_compose_keeps_data_private_and_migrations_one_shot():
     compose = yaml.safe_load((ROOT / "docker-compose.production.yml").read_text(encoding="utf-8"))
     services = compose["services"]
 
-    assert set(services) == {"db", "migrate", "api", "web"}
+    assert set(services) == {
+        "db",
+        "migrate",
+        "api",
+        "web",
+        "recovery-backup",
+        "recovery-rehearsal",
+    }
     assert "ports" not in services["db"]
     assert "ports" not in services["api"]
     assert "ports" not in services["migrate"]
+    assert "ports" not in services["recovery-backup"]
+    assert "ports" not in services["recovery-rehearsal"]
     assert services["web"]["ports"] == ["${OPENPARTSFLOW_PORT:-8080}:8080"]
     assert compose["networks"]["data"]["internal"] is True
     assert services["db"]["networks"] == ["data"]
@@ -61,13 +72,24 @@ def test_production_compose_keeps_data_private_and_migrations_one_shot():
     assert services["api"]["depends_on"]["migrate"]["condition"] == "service_completed_successfully"
     assert services["web"]["depends_on"]["api"]["condition"] == "service_healthy"
     assert services["web"]["build"]["args"]["NEXT_PUBLIC_AUTH_SESSION_MODE"] == "${PUBLIC_AUTH_SESSION_MODE:-auto}"
+    assert services["recovery-backup"]["profiles"] == ["recovery"]
+    assert services["recovery-rehearsal"]["profiles"] == ["recovery"]
+    assert services["recovery-backup"]["environment"]["DATABASE_URL"].startswith(
+        "${MIGRATION_DATABASE_URL:"
+    )
+    assert "uploads:/source/public:ro" in services["recovery-backup"]["volumes"]
+    assert any(
+        value.endswith(":/recovery:ro")
+        for value in services["recovery-rehearsal"]["volumes"]
+    )
+    assert any(value.startswith("/target:") for value in services["recovery-rehearsal"]["tmpfs"])
 
 
 def test_runtime_services_are_non_root_read_only_and_have_explicit_writes():
     compose = yaml.safe_load((ROOT / "docker-compose.production.yml").read_text(encoding="utf-8"))
     services = compose["services"]
 
-    for service_name in ("migrate", "api"):
+    for service_name in ("migrate", "api", "recovery-backup", "recovery-rehearsal"):
         service = services[service_name]
         assert service["user"] == "10001:10001"
         assert service["read_only"] is True

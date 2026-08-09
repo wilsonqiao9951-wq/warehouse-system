@@ -164,6 +164,87 @@ services:
       - edge
     logging: *bounded-logging
 
+  recovery-backup:
+    image: openpartsflow-recovery:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile.recovery
+    profiles: ["recovery"]
+    read_only: true
+    user: "10001:10001"
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set MIGRATION_DATABASE_URL in .env.production}
+      VCS_REF: ${VCS_REF:-unknown}
+    command:
+      - create
+      - --output-root
+      - /recovery
+      - --public-root
+      - /source/public
+      - --private-root
+      - /source/private
+      - --rollback-root
+      - /source/rollback
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/source/public:ro
+      - private_uploads:/source/private:ro
+      - restore_rollbacks:/source/rollback:ro
+      - ${PLATFORM_RECOVERY_ROOT:?Set PLATFORM_RECOVERY_ROOT in .env.production}:/recovery
+    networks:
+      - data
+    restart: "no"
+    logging: *bounded-logging
+
+  recovery-rehearsal:
+    image: openpartsflow-recovery:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile.recovery
+    profiles: ["recovery"]
+    read_only: true
+    user: "10001:10001"
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set MIGRATION_DATABASE_URL in .env.production}
+      TARGET_DATABASE_URL: ${TARGET_DATABASE_URL:-}
+    command:
+      - restore-rehearsal
+      - --recovery-point
+      - ${RECOVERY_POINT_PATH:-/recovery/CHANGE_ME}
+      - --target-public-root
+      - /target/public
+      - --target-private-root
+      - /target/private
+      - --target-rollback-root
+      - /target/rollback
+      - --report
+      - ${RECOVERY_REPORT_PATH:-/reports/rehearsal-report.json}
+      - --confirm-isolated-rehearsal
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ${PLATFORM_RECOVERY_ROOT:?Set PLATFORM_RECOVERY_ROOT in .env.production}:/recovery:ro
+      - ${PLATFORM_RECOVERY_REPORT_ROOT:?Set PLATFORM_RECOVERY_REPORT_ROOT in .env.production}:/reports
+    tmpfs:
+      - /target:size=2048m,mode=0700,uid=10001,gid=10001
+    networks:
+      - data
+    restart: "no"
+    logging: *bounded-logging
+
 volumes:
   postgres_data:
   uploads:
