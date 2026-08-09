@@ -67,6 +67,7 @@ jobs:
       POSTGRES_PASSWORD: ci-postgres-password
       JWT_SECRET_KEY: ci-only-jwt-secret-with-at-least-32-characters
       MFA_ENCRYPTION_KEYS: AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=
+      INTEGRATION_CREDENTIAL_ENCRYPTION_KEYS: ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8=
       FRONTEND_PUBLIC_URL: https://parts.example.test
       CORS_EXTRA_ORIGINS: https://parts.example.test
       DATA_EXPORT_PUBLIC_FILES_ROOT: /app/data/uploads

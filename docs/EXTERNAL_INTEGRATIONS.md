@@ -170,6 +170,12 @@ API key rotation also rotates the signing key. Update the external receiver befo
 
 Successful HTTP `2xx` responses mark a delivery processed. Network failures and non-`2xx` responses retry after 1 minute, 5 minutes, 30 minutes, 2 hours, and 6 hours. Five failed attempts move the event to `failed`; an administrator can requeue it from the integration workspace. The application worker polls due deliveries every `INTEGRATION_DELIVERY_POLL_SECONDS` while `INTEGRATION_DELIVERY_ENABLED=true`.
 
+ERP and WMS integrations can additionally use encrypted REST/JSON or OData v4
+connection profiles and append-only validation evidence. This validation is
+administrator-initiated and does not bypass work-order ownership, device,
+completion, or inventory-custody controls. See
+[`ERP_WMS_ADAPTERS.md`](ERP_WMS_ADAPTERS.md).
+
 If a worker or host stops after claiming a row, the platform operations console
 detects the row after `OPERATIONS_STALE_PROCESSING_MINUTES`. A platform
 administrator can password-confirm a bounded requeue after verifying that the

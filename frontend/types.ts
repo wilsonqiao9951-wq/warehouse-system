@@ -718,6 +718,49 @@ export interface IntegrationParityContract {
   updated_at?: string | null;
 }
 
+export type IntegrationAdapterProtocol = "rest_json" | "odata_v4";
+export type IntegrationAdapterAuthType = "none" | "bearer" | "basic" | "api_key_header";
+
+export interface IntegrationConnectionTest {
+  id: number;
+  organization_id: number;
+  integration_id: number;
+  configuration_id: number;
+  configuration_version: number;
+  current: boolean;
+  status: "success" | "failed";
+  response_status_code?: number | null;
+  latency_ms: number;
+  protocol_confirmed: boolean;
+  protocol_signal: string;
+  error_code?: string | null;
+  evidence_fingerprint: string;
+  tested_by?: number | null;
+  tested_at: string;
+}
+
+export interface IntegrationAdapterConfiguration {
+  id?: number | null;
+  persisted: boolean;
+  organization_id: number;
+  integration_id: number;
+  protocol: IntegrationAdapterProtocol;
+  base_url: string;
+  health_path: string;
+  auth_type: IntegrationAdapterAuthType;
+  auth_username?: string | null;
+  api_key_header?: string | null;
+  has_credentials: boolean;
+  credential_updated_at?: string | null;
+  timeout_seconds: number;
+  version: number;
+  latest_test?: IntegrationConnectionTest | null;
+  created_by?: number | null;
+  updated_by?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface ImportBatch {
   id: number;
   organization_id: number;

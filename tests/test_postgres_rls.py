@@ -68,12 +68,18 @@ def test_postgres_rls_migration_covers_every_tenant_model():
         "20260808_0064_add_integration_parity_contracts.py",
         "openpartsflow_integration_parity_migration",
     )
+    integration_adapters = _migration_module(
+        "20260808_0065_add_erp_wms_adapters.py",
+        "openpartsflow_integration_adapter_migration",
+    )
     model_tables = {model.__tablename__ for model in TENANT_MODELS}
     secured_tables = set(baseline.TENANT_TABLES) | {
         profit_snapshots.TABLE_NAME,
         low_stock_rules.RULE_TABLE,
         *part_usage_reviews.TENANT_TABLES,
         integration_parity.TABLE_NAME,
+        integration_adapters.CONFIG_TABLE,
+        integration_adapters.TEST_TABLE,
     }
     assert secured_tables == model_tables
     assert len(secured_tables) == len(model_tables)
@@ -83,6 +89,7 @@ def test_postgres_rls_migration_covers_every_tenant_model():
         low_stock_rules,
         part_usage_reviews,
         integration_parity,
+        integration_adapters,
     ):
         assert "platform_access" in migration.POLICY_EXPRESSION
         assert "organization_id" in migration.POLICY_EXPRESSION

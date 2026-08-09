@@ -193,6 +193,23 @@ allowlist; inventory/recommendation fields are read-only, and ownership, device,
 signature, approval, financial, and inventory mutation fields cannot be added.
 See [`INTEGRATION_PARITY_CONTRACTS.md`](INTEGRATION_PARITY_CONTRACTS.md).
 
+## ERP/WMS adapter connections
+
+| Operation | Engineer | Manager | Organization admin | Warehouse |
+| --- | ---: | ---: | ---: | ---: |
+| Read adapter metadata and connection evidence | Deny by default | Allow with `integrations.read` | Allow | Deny by default |
+| Save endpoint/authentication metadata | Deny | Deny | Allow with `integrations.manage` and current password | Deny |
+| Add or rotate an encrypted credential | Deny | Deny | Allow with `integrations.manage` and current password | Deny |
+| Execute and record a connection test | Deny | Deny | Allow with `integrations.manage` and current password | Deny |
+
+Only `erp` and `wms` integrations can configure adapters. Every read/write is
+tenant-scoped and both adapter tables have forced PostgreSQL RLS. Secrets use a
+dedicated rotating AES-256-GCM key set and are excluded from responses, audit,
+exports, and restores. Validation accepts HTTPS only, rejects private/reserved
+literal and resolved addresses, never follows redirects, and stores only
+controlled status evidence—not response bodies or raw exceptions. See
+[`ERP_WMS_ADAPTERS.md`](ERP_WMS_ADAPTERS.md).
+
 ## Enterprise operations analytics
 
 | Operation | Engineer | Manager | Organization admin | Warehouse |

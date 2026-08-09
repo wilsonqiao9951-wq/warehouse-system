@@ -144,6 +144,13 @@ def validate_deployment_settings(config: Settings = settings) -> None:
     from app.services.mfa import mfa_configuration_errors
 
     errors.extend(mfa_configuration_errors(config, required=True))
+    from app.services.integration_adapters import (
+        integration_credential_configuration_errors,
+    )
+
+    errors.extend(
+        integration_credential_configuration_errors(config, required=True)
+    )
 
     try:
         database = make_url(config.database_url)

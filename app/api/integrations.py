@@ -9,19 +9,24 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db, set_tenant_database_scope
 from app.core.permissions import INTEGRATIONS_MANAGE, INTEGRATIONS_READ
 from app.core.rbac import Actor, get_current_actor, require_permission
+from app.core.security import verify_password
 from app.models import (
     AuditLog,
     ExternalIntegration,
     ExternalSyncLog,
     ExternalWorkOrderLink,
+    IntegrationAdapterConfiguration,
+    IntegrationConnectionTest,
     IntegrationParityContract,
     Organization,
     Part,
     Warehouse,
     WorkOrder,
+    User,
 )
 from app.schemas import (
     ExternalInventoryBalanceRead,
@@ -30,6 +35,10 @@ from app.schemas import (
     ExternalIntegrationRotate,
     ExternalIntegrationSecretRead,
     ExternalIntegrationUpdate,
+    IntegrationAdapterConfigurationRead,
+    IntegrationAdapterConfigurationUpsert,
+    IntegrationAdapterConnectionTestRequest,
+    IntegrationConnectionTestRead,
     IntegrationParityContractRead,
     IntegrationParityContractUpsert,
     ExternalPartRecommendationRead,
@@ -57,10 +66,36 @@ from app.services.integration_parity import (
     parity_contract_read,
     stored_parity_payload,
 )
+from app.services.integration_adapters import (
+    IntegrationCredentialConfigurationError,
+    adapter_configuration_read,
+    connection_evidence_fingerprint,
+    connection_test_read,
+    decrypt_integration_credential,
+    encrypt_integration_credential,
+    normalize_adapter_base_url,
+    normalize_api_key_header,
+    normalize_health_path,
+    probe_adapter_connection,
+)
 from app.services.recommendations import build_part_recommendations
 
 
 router = APIRouter()
+
+
+def _require_account_reauthentication(
+    db: Session,
+    actor: Actor,
+    password: str | None,
+) -> None:
+    if actor.auth_method == "test":
+        return
+    if actor.auth_method not in {"bearer", "cookie"} or actor.user_id is None:
+        raise HTTPException(status_code=401, detail="Authenticated session required")
+    user = db.get(User, actor.user_id)
+    if not password or not user or not verify_password(password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Account password verification failed")
 
 
 def _integration_or_404(db: Session, integration_id: int) -> ExternalIntegration:
@@ -68,6 +103,33 @@ def _integration_or_404(db: Session, integration_id: int) -> ExternalIntegration
     if not integration:
         raise HTTPException(status_code=404, detail="Integration not found")
     return integration
+
+
+def _adapter_integration_or_422(
+    db: Session, integration_id: int
+) -> ExternalIntegration:
+    integration = _integration_or_404(db, integration_id)
+    if integration.provider not in {"erp", "wms"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Adapter connections are available only for ERP and WMS integrations",
+        )
+    return integration
+
+
+def _latest_connection_test(
+    db: Session,
+    integration_id: int,
+) -> IntegrationConnectionTest | None:
+    return db.scalar(
+        select(IntegrationConnectionTest)
+        .where(IntegrationConnectionTest.integration_id == integration_id)
+        .order_by(
+            IntegrationConnectionTest.tested_at.desc(),
+            IntegrationConnectionTest.id.desc(),
+        )
+        .limit(1)
+    )
 
 
 def _audit_integration(
@@ -372,6 +434,284 @@ def save_integration_parity_contract(
     db.commit()
     db.refresh(contract)
     return parity_contract_read(integration, contract)
+
+
+@router.get(
+    "/integrations/{integration_id}/adapter",
+    response_model=IntegrationAdapterConfigurationRead,
+)
+def get_integration_adapter_configuration(
+    integration_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_READ)
+    integration = _adapter_integration_or_422(db, integration_id)
+    configuration = db.scalar(
+        select(IntegrationAdapterConfiguration).where(
+            IntegrationAdapterConfiguration.integration_id == integration.id
+        )
+    )
+    if configuration is None:
+        return IntegrationAdapterConfigurationRead(
+            persisted=False,
+            organization_id=actor.organization_id,
+            integration_id=integration.id,
+            protocol="rest_json",
+            base_url="",
+            health_path="/",
+            auth_type="none",
+            has_credentials=False,
+            timeout_seconds=settings.integration_connection_timeout_seconds,
+            version=0,
+        )
+    return adapter_configuration_read(
+        configuration,
+        _latest_connection_test(db, integration.id),
+    )
+
+
+@router.put(
+    "/integrations/{integration_id}/adapter",
+    response_model=IntegrationAdapterConfigurationRead,
+)
+def save_integration_adapter_configuration(
+    integration_id: int,
+    payload: IntegrationAdapterConfigurationUpsert,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_MANAGE)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    integration = db.scalar(
+        select(ExternalIntegration)
+        .where(ExternalIntegration.id == integration_id)
+        .with_for_update()
+    )
+    if integration is None:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    if integration.provider not in {"erp", "wms"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Adapter connections are available only for ERP and WMS integrations",
+        )
+    if payload.timeout_seconds > settings.integration_connection_timeout_seconds:
+        raise HTTPException(
+            status_code=422,
+            detail="Adapter timeout exceeds the deployment connection-timeout limit",
+        )
+    configuration = db.scalar(
+        select(IntegrationAdapterConfiguration).where(
+            IntegrationAdapterConfiguration.integration_id == integration.id
+        )
+    )
+    previous_auth_type = configuration.auth_type if configuration else None
+    if configuration is None:
+        if payload.expected_version != 0:
+            raise HTTPException(status_code=409, detail="Adapter configuration version is stale")
+        configuration = IntegrationAdapterConfiguration(
+            organization_id=actor.organization_id,
+            integration_id=integration.id,
+            protocol=payload.protocol,
+            base_url=normalize_adapter_base_url(payload.base_url),
+            health_path=normalize_health_path(payload.health_path),
+            auth_type=payload.auth_type,
+            timeout_seconds=payload.timeout_seconds,
+            created_by=actor.user_id,
+            updated_by=actor.user_id,
+        )
+        db.add(configuration)
+        action = "create_integration_adapter_configuration"
+    else:
+        if configuration.version != payload.expected_version:
+            raise HTTPException(status_code=409, detail="Adapter configuration version is stale")
+        configuration.version += 1
+        configuration.protocol = payload.protocol
+        configuration.base_url = normalize_adapter_base_url(payload.base_url)
+        configuration.health_path = normalize_health_path(payload.health_path)
+        configuration.auth_type = payload.auth_type
+        configuration.timeout_seconds = payload.timeout_seconds
+        configuration.updated_by = actor.user_id
+        action = "update_integration_adapter_configuration"
+
+    configuration.auth_username = (
+        payload.auth_username.strip() if payload.auth_username else None
+    )
+    configuration.api_key_header = normalize_api_key_header(payload.api_key_header)
+    if payload.auth_type == "none":
+        configuration.credential_ciphertext = None
+        configuration.credential_updated_at = None
+    elif payload.credential_secret is not None:
+        try:
+            configuration.credential_ciphertext = encrypt_integration_credential(
+                payload.credential_secret,
+                organization_id=actor.organization_id,
+                integration_id=integration.id,
+                auth_type=payload.auth_type,
+            )
+        except IntegrationCredentialConfigurationError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Integration credential protection is not configured",
+            ) from exc
+        configuration.credential_updated_at = datetime.utcnow()
+    elif not configuration.credential_ciphertext or previous_auth_type != payload.auth_type:
+        raise HTTPException(
+            status_code=422,
+            detail="A new credential is required for the selected authentication type",
+        )
+    db.add(configuration)
+    db.flush()
+    _audit_integration(
+        db,
+        actor,
+        action,
+        integration,
+        {
+            "adapter_configuration_id": configuration.id,
+            "protocol": configuration.protocol,
+            "auth_type": configuration.auth_type,
+            "credential_rotated": payload.credential_secret is not None,
+            "new_version": configuration.version,
+        },
+    )
+    db.commit()
+    db.refresh(configuration)
+    return adapter_configuration_read(
+        configuration,
+        _latest_connection_test(db, integration.id),
+    )
+
+
+@router.post(
+    "/integrations/{integration_id}/adapter/test",
+    response_model=IntegrationConnectionTestRead,
+)
+def test_integration_adapter_connection(
+    integration_id: int,
+    payload: IntegrationAdapterConnectionTestRequest,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_MANAGE)
+    _require_account_reauthentication(db, actor, payload.account_password)
+    integration = _adapter_integration_or_422(db, integration_id)
+    if not integration.is_active:
+        raise HTTPException(status_code=409, detail="Inactive integrations cannot be tested")
+    configuration = db.scalar(
+        select(IntegrationAdapterConfiguration).where(
+            IntegrationAdapterConfiguration.integration_id == integration.id
+        )
+    )
+    if configuration is None:
+        raise HTTPException(status_code=404, detail="Adapter configuration not found")
+    if configuration.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Adapter configuration version is stale")
+    credential: str | None = None
+    if configuration.auth_type != "none":
+        if not configuration.credential_ciphertext:
+            raise HTTPException(status_code=422, detail="Adapter credentials are not configured")
+        try:
+            credential = decrypt_integration_credential(
+                configuration.credential_ciphertext,
+                organization_id=configuration.organization_id,
+                integration_id=configuration.integration_id,
+                auth_type=configuration.auth_type,
+            )
+        except IntegrationCredentialConfigurationError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Integration credentials are unavailable",
+            ) from exc
+    result = probe_adapter_connection(configuration, credential)
+
+    current_configuration = db.scalar(
+        select(IntegrationAdapterConfiguration)
+        .where(IntegrationAdapterConfiguration.id == configuration.id)
+        .with_for_update()
+    )
+    if (
+        current_configuration is None
+        or current_configuration.version != payload.expected_version
+    ):
+        raise HTTPException(status_code=409, detail="Adapter configuration changed during testing")
+    tested_at = datetime.utcnow()
+    row = IntegrationConnectionTest(
+        organization_id=actor.organization_id,
+        integration_id=integration.id,
+        configuration_id=current_configuration.id,
+        configuration_version=current_configuration.version,
+        status=result.status,
+        response_status_code=result.response_status_code,
+        latency_ms=result.latency_ms,
+        protocol_confirmed=result.protocol_confirmed,
+        protocol_signal=result.protocol_signal,
+        error_code=result.error_code,
+        evidence_fingerprint=connection_evidence_fingerprint(
+            current_configuration,
+            result,
+            tested_at,
+            actor.user_id,
+        ),
+        tested_by=actor.user_id,
+        tested_at=tested_at,
+    )
+    db.add(row)
+    db.flush()
+    _audit_integration(
+        db,
+        actor,
+        "test_integration_adapter_connection",
+        integration,
+        {
+            "adapter_configuration_id": current_configuration.id,
+            "configuration_version": current_configuration.version,
+            "connection_test_id": row.id,
+            "status": row.status,
+            "response_status_code": row.response_status_code,
+            "latency_ms": row.latency_ms,
+            "protocol_confirmed": row.protocol_confirmed,
+            "protocol_signal": row.protocol_signal,
+            "error_code": row.error_code,
+            "evidence_fingerprint": row.evidence_fingerprint,
+        },
+    )
+    db.commit()
+    db.refresh(row)
+    return connection_test_read(row, current_version=current_configuration.version)
+
+
+@router.get(
+    "/integrations/{integration_id}/adapter/tests",
+    response_model=list[IntegrationConnectionTestRead],
+)
+def list_integration_adapter_connection_tests(
+    integration_id: int,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_READ)
+    integration = _adapter_integration_or_422(db, integration_id)
+    configuration = db.scalar(
+        select(IntegrationAdapterConfiguration).where(
+            IntegrationAdapterConfiguration.integration_id == integration.id
+        )
+    )
+    current_version = configuration.version if configuration else None
+    rows = db.scalars(
+        select(IntegrationConnectionTest)
+        .where(IntegrationConnectionTest.integration_id == integration.id)
+        .order_by(
+            IntegrationConnectionTest.tested_at.desc(),
+            IntegrationConnectionTest.id.desc(),
+        )
+        .limit(limit)
+    ).all()
+    return [
+        connection_test_read(row, current_version=current_version)
+        for row in rows
+    ]
 
 
 @router.post(

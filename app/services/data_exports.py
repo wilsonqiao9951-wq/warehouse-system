@@ -39,6 +39,7 @@ SENSITIVE_COLUMNS: dict[str, set[str]] = {
         "source_fingerprint",
     },
     "external_integrations": {"api_key_hash"},
+    "integration_adapter_configurations": {"credential_ciphertext"},
     "organization_domains": {"verification_token", "verification_value"},
 }
 PUBLIC_FILE_REFERENCE = re.compile(r"/uploads/[A-Za-z0-9._~%+@/-]+")

@@ -6,9 +6,63 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-08 - ERP/WMS adapters and governed connection validation
+
+Status: implemented; all local release gates passed and GitHub publication is
+in progress.
+
+Delivered:
+
+- Replaced the previous `erp`/`wms` provider labels with a concrete,
+  tenant-scoped adapter profile supporting vendor-neutral REST/JSON and OData
+  v4 connectivity without claiming unimplemented vendor business semantics.
+- Added normalized HTTPS base URL and relative test path, controlled
+  authentication mode and header allowlist, bounded timeout, optimistic version,
+  responsible actor/time, and current/stale validation status.
+- Added dedicated rotating AES-256-GCM credential protection for bearer tokens,
+  Basic passwords, and API keys. Plaintext/ciphertext never appears in reads,
+  audit metadata, connection evidence, or customer export/restore data.
+- Added password-confirmed administrator save/rotation and connection testing;
+  managers retain read-only inspection and engineers remain denied.
+- Added DNS and literal-IP private/reserved-network rejection, TLS connections
+  pinned to pre-validated public IPs to close DNS rebinding, no redirects,
+  bounded response sampling, controlled failure codes, and protocol confirmation
+  for OData v4.
+- Added append-only connection evidence with configuration version, current/stale
+  status, safe HTTP/latency/protocol fields, actor/server time, and SHA-256
+  fingerprint. No external response body or raw transport exception is retained.
+- Extended the integration workbench with encrypted profile management, current
+  validation state, testing, and evidence history.
+- Added migration `0065`, forced PostgreSQL RLS on both new tenant tables,
+  restore/export secret boundaries, production key validation, RBAC mapping,
+  tests, and operating guidance.
+
+Verification so far:
+
+- Credential encryption/rotation/tamper detection, pinned-TLS SSRF blocking, versioning,
+  success evidence, stale evidence, provider restrictions, account
+  reauthentication, role denial, tenant isolation, export exclusion, and audit
+  redaction pass together with parity, integration, RLS, and deployment
+  regressions (51 final focused tests).
+- Configured SQLite upgraded from `0064` to `0065`; fresh base-to-head,
+  `0065 -> 0064 -> 0065`, and Alembic model zero-drift checks passed.
+- All 285 backend tests passed. Frontend ESLint, standalone TypeScript, and
+  Next.js production build passed for all 47 static routes.
+- Python dependency consistency and requirement/full-environment vulnerability
+  audits, full/production npm audits, production configuration, and Compose
+  topology passed with no known vulnerabilities. Local Docker Desktop was not
+  running, so GitHub's private-deployment job remains authoritative for
+  PostgreSQL/RLS and API/web image builds.
+- Backed up the local `0064` database as
+  `openpartsflow.pre-0065-20260808-212617.db` (1,732,608 bytes; SHA-256
+  `7B6059AA7DCF28E75F5C13221A4F07131FD84E6BB0A531D2CB65AA586F48EF02`)
+  before upgrading to `0065`.
+
 ## 2026-08-08 - AppSheet and Google Sheets parallel-run contracts
 
-Status: implemented; release verification in progress.
+Status: implemented, published as draft PR #38, and verified by GitHub Actions
+run #73. Backend, frontend, private PostgreSQL/RLS, dependency, and production
+API/Web image jobs all passed.
 
 Delivered:
 

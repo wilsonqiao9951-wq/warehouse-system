@@ -13,6 +13,10 @@ import {
   ExternalIntegrationProvider,
   ExternalIntegrationSecret,
   ExternalSyncLog,
+  IntegrationAdapterAuthType,
+  IntegrationAdapterConfiguration,
+  IntegrationAdapterProtocol,
+  IntegrationConnectionTest,
   IntegrationParityAutomation,
   IntegrationParityCapability,
   IntegrationParityContract,
@@ -1499,6 +1503,36 @@ export const api = {
     method: "PUT",
     body: JSON.stringify(payload)
   }),
+  getIntegrationAdapterConfiguration: (integrationId: number) =>
+    request<IntegrationAdapterConfiguration>(`/integrations/${integrationId}/adapter`),
+  saveIntegrationAdapterConfiguration: (
+    integrationId: number,
+    payload: {
+      expected_version: number;
+      protocol: IntegrationAdapterProtocol;
+      base_url: string;
+      health_path: string;
+      auth_type: IntegrationAdapterAuthType;
+      auth_username?: string | null;
+      api_key_header?: string | null;
+      credential_secret?: string;
+      timeout_seconds: number;
+      account_password: string;
+    }
+  ) => request<IntegrationAdapterConfiguration>(`/integrations/${integrationId}/adapter`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  }),
+  testIntegrationAdapterConnection: (
+    integrationId: number,
+    expectedVersion: number,
+    accountPassword: string
+  ) => request<IntegrationConnectionTest>(`/integrations/${integrationId}/adapter/test`, {
+    method: "POST",
+    body: JSON.stringify({ expected_version: expectedVersion, account_password: accountPassword })
+  }),
+  listIntegrationAdapterConnectionTests: (integrationId: number) =>
+    request<IntegrationConnectionTest[]>(`/integrations/${integrationId}/adapter/tests?limit=20`),
   previewPartsImport: (file: File) => {
     const form = new FormData();
     form.append("file", file);
