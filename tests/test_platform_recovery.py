@@ -9,6 +9,7 @@ from scripts import platform_recovery
 from scripts.platform_recovery import DatabaseTarget, RecoveryError
 from scripts.verify_scale_performance import (
     ScaleVerificationError,
+    _missing_required_indexes,
     _next_id,
     _percentile,
     _plan_nodes,
@@ -237,6 +238,18 @@ def test_scale_seed_allocates_ids_without_advancing_postgres_sequences():
     assert session.statement == "SELECT COALESCE(MAX(id), 0) + 1 FROM organizations"
     with pytest.raises(ScaleVerificationError, match="Unsupported scale seed table"):
         _next_id(session, "not_a_real_table")
+
+
+def test_scale_gate_requires_every_migration_index():
+    available = {
+        "ix_work_orders_org_id",
+        "ix_work_orders_org_schedule_id",
+        "ix_inventory_transactions_org_id",
+        "ix_work_order_parts_org_id",
+    }
+    assert _missing_required_indexes(available) == [
+        "ix_work_order_parts_org_user_id"
+    ]
 
 
 def test_portable_restore_compatibility_continues_through_scale_revision():
