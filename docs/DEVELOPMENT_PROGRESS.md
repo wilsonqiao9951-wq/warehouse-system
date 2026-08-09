@@ -8,8 +8,9 @@
 
 ## 2026-08-09 - Immutable work-order field media evidence
 
-Status: implemented locally on `codex/work-order-media-evidence`; publication
-and GitHub CI verification pending.
+Status: implemented and published as stacked draft PR #44 on
+`codex/work-order-media-evidence`. Feature commit `c949c1a` and GitHub Actions
+run #85 passed every required job.
 
 Delivered:
 
@@ -48,6 +49,11 @@ Local verification:
   Python requirement/full-environment and npm full/production audits reported
   no known vulnerabilities; compilation, production configuration, Compose
   configuration, and diff integrity checks passed.
+- GitHub Actions #85 passed backend, frontend, and private-deployment. The
+  authoritative deployment job verified PostgreSQL 16 migration `0070`, zero
+  drift, forced tenant RLS, worker/operations/alert checks, scale and disaster-
+  recovery rehearsals, Compose configuration, and API/Web/recovery image
+  builds.
 
 ## 2026-08-09 - Governed pilot, UAT, and internal decision evidence
 
