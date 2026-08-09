@@ -8,8 +8,9 @@
 
 ## 2026-08-08 - Signed SLA alert delivery and production observability
 
-Status: implemented; all local release gates passed and GitHub publication is
-in progress.
+Status: implemented, published as draft PR #40, and verified by GitHub Actions
+run #75. Backend, frontend, private PostgreSQL, dependency, production
+configuration, Compose, and API/Web image jobs all passed.
 
 Delivered:
 
@@ -48,13 +49,15 @@ Verification so far:
   no known vulnerabilities.
 - Production configuration with signed alert delivery enabled, Compose topology,
   Python compilation, the repeatable operations-alert verifier, and diff
-  integrity checks pass. Local Docker Desktop is unavailable, so GitHub's
-  private-deployment job remains authoritative for PostgreSQL verification and
-  API/Web image builds.
+  integrity checks pass. GitHub Actions #75 then authoritatively passed the
+  PostgreSQL 16 migration/zero-drift, RLS, worker lease, operations history,
+  operations-alert event verification, and API/Web image-build gates.
 - Backed up the local `0065` database as
   `openpartsflow.pre-0066-20260808-220807.db` (1,789,952 bytes; SHA-256
   `097F9823BAD1A3C42457FD7B1293AC1CF2EB476C62E165D5358A7BE15A18F4E7`)
   before upgrading to `0066`.
+- Functional commit `b781ffe` is pushed on `codex/sla-alert-delivery`; draft PR
+  #40 is correctly stacked on PR #39 and is mergeable.
 
 ## 2026-08-08 - ERP/WMS adapters and governed connection validation
 
