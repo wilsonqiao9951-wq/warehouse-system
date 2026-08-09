@@ -22,6 +22,8 @@ import {
   IntegrationParityAutomation,
   IntegrationParityCapability,
   IntegrationParityContract,
+  IntegrationParallelReconciliation,
+  IntegrationParallelSnapshot,
   IntegrationParityTable,
   JobStatus,
   LowStockAlert,
@@ -1523,6 +1525,17 @@ export const api = {
     method: "PUT",
     body: JSON.stringify(payload)
   }),
+  listIntegrationParallelReconciliations: (integrationId: number) =>
+    request<IntegrationParallelReconciliation[]>(
+      `/integrations/${integrationId}/parallel-reconciliations?limit=50`
+    ),
+  createIntegrationParallelReconciliation: (
+    integrationId: number,
+    payload: IntegrationParallelSnapshot & { reason: string; account_password: string }
+  ) => request<IntegrationParallelReconciliation>(
+    `/integrations/${integrationId}/parallel-reconciliations`,
+    { method: "POST", body: JSON.stringify(payload) }
+  ),
   getIntegrationAdapterConfiguration: (integrationId: number) =>
     request<IntegrationAdapterConfiguration>(`/integrations/${integrationId}/adapter`),
   saveIntegrationAdapterConfiguration: (

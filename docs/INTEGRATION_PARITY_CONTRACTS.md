@@ -72,8 +72,16 @@ names are rejected. The database table has forced PostgreSQL row-level security.
    fields unmapped instead of inventing a canonical field.
 4. Describe every Bot or automation and save. Resolve all blocking gaps.
 5. Download the fingerprinted JSON contract for customer sign-off.
-6. Run both systems for one or two operating cycles and reconcile work orders,
-   status, used parts, and inventory before cutover.
+6. Export the canonical work-order status, aggregated part-usage, and non-zero
+   warehouse inventory snapshot for the controlled window.
+7. Open `/integration-reconciliation`, submit the matching source revision with
+   current-account password verification, and investigate every difference.
+8. Repeat for one or two operating cycles and retain a matched run before the
+   separate business go/no-go decision.
+
+The reconciliation endpoint, exact comparison semantics, retained evidence,
+and privacy boundary are documented in
+[`INTEGRATION_PARALLEL_RECONCILIATION.md`](INTEGRATION_PARALLEL_RECONCILIATION.md).
 
 Real customer metadata, formulas, security filters, attachment rules, volumes,
 and business acceptance remain external inputs. The workbench makes those

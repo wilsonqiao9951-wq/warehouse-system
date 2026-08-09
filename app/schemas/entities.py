@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import base64
 import binascii
 import json
@@ -1195,6 +1195,149 @@ class IntegrationParityContractRead(BaseModel):
     validated_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class IntegrationParallelWorkOrderSnapshot(BaseModel):
+    external_id: str = Field(min_length=1, max_length=255)
+    status: str = Field(min_length=1, max_length=50)
+
+    @field_validator("external_id", "status")
+    @classmethod
+    def normalize_parallel_work_order_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Parallel-run work-order fields cannot be blank")
+        return cleaned
+
+
+class IntegrationParallelPartUsageSnapshot(BaseModel):
+    external_work_order_id: str = Field(min_length=1, max_length=255)
+    part_number: str = Field(min_length=1, max_length=120)
+    quantity: int
+
+    @field_validator("external_work_order_id", "part_number")
+    @classmethod
+    def normalize_parallel_usage_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Parallel-run part-usage keys cannot be blank")
+        return cleaned
+
+
+class IntegrationParallelInventorySnapshot(BaseModel):
+    warehouse_code: str = Field(min_length=1, max_length=50)
+    part_number: str = Field(min_length=1, max_length=120)
+    quantity: int
+
+    @field_validator("warehouse_code", "part_number")
+    @classmethod
+    def normalize_parallel_inventory_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Parallel-run inventory keys cannot be blank")
+        return cleaned
+
+
+class IntegrationParallelReconciliationCreate(BaseModel):
+    source_revision: str = Field(min_length=1, max_length=160)
+    observed_from: datetime
+    observed_to: datetime
+    work_orders: list[IntegrationParallelWorkOrderSnapshot] = Field(max_length=5000)
+    part_usage: list[IntegrationParallelPartUsageSnapshot] = Field(max_length=10000)
+    inventory: list[IntegrationParallelInventorySnapshot] = Field(max_length=10000)
+    reason: str = Field(min_length=3, max_length=500)
+    account_password: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("source_revision", "reason")
+    @classmethod
+    def normalize_parallel_reconciliation_text(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Parallel-run evidence text cannot be blank")
+        return cleaned
+
+    @model_validator(mode="after")
+    def validate_parallel_observation_window(self):
+        def comparable(value: datetime) -> datetime:
+            if value.tzinfo is None:
+                return value
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+        observed_from = comparable(self.observed_from)
+        observed_to = comparable(self.observed_to)
+        if observed_from > observed_to:
+            raise ValueError("observed_from cannot be after observed_to")
+        if observed_to - observed_from > timedelta(days=366):
+            raise ValueError("Parallel-run evidence window cannot exceed 366 days")
+        return self
+
+
+class IntegrationParallelObjectCountRead(BaseModel):
+    external: int = Field(ge=0)
+    openpartsflow: int = Field(ge=0)
+    matched: int = Field(ge=0)
+    discrepancies: int = Field(ge=0)
+
+
+class IntegrationParallelDiscrepancyRead(BaseModel):
+    object_type: Literal["work_order", "part_usage", "inventory"]
+    key: str
+    field: str
+    openpartsflow_value: str | int | None = None
+    external_value: str | int | None = None
+    reason: Literal["missing_external", "missing_openpartsflow", "value_mismatch"]
+
+
+class IntegrationParallelReconciliationRead(BaseModel):
+    id: int
+    organization_id: int
+    integration_id: int
+    contract_id: int
+    source_revision: str
+    contract_fingerprint: str
+    snapshot_fingerprint: str
+    evidence_fingerprint: str
+    observed_from: datetime
+    observed_to: datetime
+    status: Literal["matched", "differences"]
+    input_record_count: int = Field(ge=0)
+    matched_record_count: int = Field(ge=0)
+    discrepancy_count: int = Field(ge=0)
+    object_counts: dict[
+        Literal["work_orders", "part_usage", "inventory"],
+        IntegrationParallelObjectCountRead,
+    ]
+    discrepancies: list[IntegrationParallelDiscrepancyRead]
+    truncated: bool
+    reason: str
+    created_by: int | None = None
+    created_at: datetime
+
+
+class PilotChecklistRead(BaseModel):
+    system_health: Literal["ok", "degraded"]
+    readiness_status: Literal["ready", "attention", "blocked"]
+    readiness_reasons: list[str]
+    total_users: int = Field(ge=0)
+    total_work_orders: int = Field(ge=0)
+    total_parts: int = Field(ge=0)
+    total_inventory_transactions: int = Field(ge=0)
+    low_stock_alert_count: int = Field(ge=0)
+    abnormal_usage_alert_count: int = Field(ge=0)
+    active_integration_count: int = Field(ge=0)
+    ready_parity_contract_count: int = Field(ge=0)
+    integration_parallel_readiness: Literal[
+        "not_configured",
+        "contract_required",
+        "evidence_required",
+        "differences",
+        "matched",
+    ]
+    latest_reconciliation_id: int | None = None
+    latest_reconciliation_integration_id: int | None = None
+    latest_reconciliation_status: Literal["matched", "differences"] | None = None
+    latest_reconciliation_discrepancy_count: int = Field(default=0, ge=0)
+    latest_reconciliation_at: datetime | None = None
 
 
 IntegrationAdapterProtocol = Literal["rest_json", "odata_v4"]

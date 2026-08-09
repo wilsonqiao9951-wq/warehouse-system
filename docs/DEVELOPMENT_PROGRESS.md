@@ -6,6 +6,51 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-08 - AppSheet parallel-run discrepancy reconciliation
+
+Status: implementation and local verification complete on
+`codex/integration-parallel-reconciliation`; publication and GitHub CI are the
+remaining batch gates.
+
+Delivered:
+
+- Added append-only, tenant-owned comparison evidence for AppSheet and Google
+  Sheets integrations with ready-contract and exact source-revision gates.
+- Added canonical work-order status, aggregated part-usage, and current
+  non-zero inventory comparison; duplicate keys and over-366-day windows fail
+  closed.
+- Added contract/source/evidence SHA-256 fingerprints, exact retry idempotency,
+  complete aggregate counts, at most 500 safe discrepancy rows, actor, reason,
+  and server time without retaining the raw source snapshot or password.
+- Added `integrations.read` history/detail and password-confirmed
+  `integrations.manage` execution APIs plus forced PostgreSQL RLS and explicit
+  organization predicates on all new comparisons and reads.
+- Added the `/integration-reconciliation` workbench for canonical JSON/file
+  intake, contract readiness, append-only history, aggregate evidence, and
+  bounded discrepancy review.
+- Rebuilt Pilot Checklist with explicit tenant count predicates, integration
+  readiness evidence, and a fix for its pre-existing direct-call pagination
+  500 error.
+- Added migration `0068` and controlled restore compatibility through `0068`.
+
+Verification:
+
+- 13 focused integration, parity-contract, RLS, and multitenancy tests pass.
+- All 310 backend tests pass after redirecting pytest's temporary directory
+  around a local Windows Temp ACL failure; the initial 289-pass/21-setup-error
+  run contained no functional assertion failure.
+- Fresh base-to-`0068`, `0068 -> 0067 -> 0068`, and Alembic model zero-drift
+  checks pass on an isolated SQLite database.
+- Backed up the configured local `0067` database as
+  `openpartsflow.pre-0068-20260808-235915.db` (1,859,584 bytes; SHA-256
+  `8BE72678ACC9F6F56A50FB9668BD77F97686CF5051E43DE3E83766E8289D621A`)
+  before upgrading it to `0068`; the post-upgrade Alembic model check reports
+  no drift.
+- Frontend ESLint and the Next.js production build pass for all 48 static
+  routes, including `/integration-reconciliation`.
+- Python requirements and full/production npm dependency audits report no
+  known vulnerabilities. Python compilation and Git diff integrity checks pass.
+
 ## 2026-08-08 - Platform recovery and repeatable scale rehearsals
 
 Status: implemented, published as stacked draft PR #41, and verified by GitHub

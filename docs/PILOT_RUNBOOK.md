@@ -29,6 +29,9 @@ Before Day 1, confirm all items:
 - [ ] Excel export/import endpoints tested
 - [ ] Pilot support owner assigned (who responds to issues)
 - [ ] Daily backup/export owner assigned
+- [ ] AppSheet/Google Sheets integration is active and its parity contract is `ready`
+- [ ] Canonical snapshot export procedure is rehearsed without customer names, descriptions, media, or credentials
+- [ ] Administrator records a password-confirmed parallel reconciliation and resolves every difference
 
 ---
 
@@ -55,18 +58,20 @@ Recommended naming:
 ### 4.1 Technician Daily Job Flow
 
 1. Login/select technician role and user ID  
-2. Open `Today` or `My Jobs`  
-3. Open assigned work order  
-4. Tap `Start Job` (status should become `IN_PROGRESS`)  
-5. Add job status updates  
-6. Add parts used  
-7. Upload QC pictures  
-8. Add returned equipment (if applicable)  
-9. Tap `Complete Job` (status should become `COMPLETED`)  
-10. Verify record is locked after completion
+2. Open the shared work-order pool; confirm other engineers' progress is read-only
+3. Claim an available work order on the registered phone
+4. Open `Today` or `My Jobs` and select the claimed work order
+5. Tap `Start Job` (status should become `IN_PROGRESS`)
+6. Add job status updates
+7. Add parts used
+8. Upload QC pictures
+9. Add returned equipment (if applicable)
+10. Tap `Complete Job` with the current account password
+11. Verify exact engineer/device attribution and the post-completion lock
 
 Expected result:
-- Only assigned jobs visible
+- Same-organization jobs and progress are visible, but only the active claimant
+  on the bound device can modify field data
 - All actions saved with timestamps
 - No post-completion edits allowed
 
@@ -101,10 +106,13 @@ Expected result:
 2. Validate restricted access per role  
 3. Confirm audit logs capture key actions  
 4. Confirm pilot checklist page health metrics are available
+5. Open `Parallel Run`, verify the source revision, submit the controlled
+   canonical snapshot, and review work-order/part-usage/inventory differences
 
 Expected result:
 - RBAC boundaries enforced
 - No unauthorized access to sensitive data
+- Evidence is tenant-scoped and the raw source snapshot/password is not retained
 
 ---
 
@@ -137,6 +145,13 @@ Expected result:
 ### Abnormal Alert Review
 - Manager checks abnormal usage report daily
 - Investigates flagged work orders
+
+### Parallel Reconciliation
+- Administrator exports the canonical AppSheet/Google Sheets snapshot for the
+  agreed observation window
+- Records the comparison under `Parallel Run` with current-account password
+- Manager reviews the append-only counts and bounded differences
+- Any mismatch blocks cutover until explained, corrected, and re-run
 
 ---
 
@@ -220,6 +235,8 @@ Pilot is considered successful if all are met:
 
 Additional recommended target:
 - [ ] No unresolved severity-1 issue at end of pilot day 3
+- [ ] Latest controlled parallel reconciliation is `matched`
+- [ ] Customer-specific formulas, Bots, security filters, attachments, and scheduled reports have separate signed acceptance evidence
 
 ---
 
@@ -234,6 +251,7 @@ After 3-day pilot, complete decision checklist:
 - [ ] Manager reporting accuracy acceptable
 - [ ] Rollback readiness documented
 - [ ] Support plan ready for wider rollout
+- [ ] Latest Pilot Checklist uses tenant-scoped counts and links to current parallel-run evidence
 
 Decision:
 - **Go**: Expand to next technician group / broader deployment

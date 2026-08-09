@@ -201,6 +201,23 @@ allowlist; inventory/recommendation fields are read-only, and ownership, device,
 signature, approval, financial, and inventory mutation fields cannot be added.
 See [`INTEGRATION_PARITY_CONTRACTS.md`](INTEGRATION_PARITY_CONTRACTS.md).
 
+## Integration parallel reconciliation evidence
+
+| Operation | Engineer | Manager | Organization admin | Warehouse |
+| --- | ---: | ---: | ---: | ---: |
+| List/detail reconciliation evidence | Deny by default | Allow with `integrations.read` | Allow | Deny by default |
+| Submit a canonical snapshot and create evidence | Deny | Deny by default | Allow with `integrations.manage` and current password | Deny |
+| Update/delete prior evidence | Deny | Deny | Deny | Deny |
+
+Execution requires an active AppSheet/Google Sheets integration, a persisted
+`ready` contract, and exact source revision. Human reads/writes and every
+comparison query have explicit organization predicates in addition to ORM
+tenant enforcement and forced PostgreSQL RLS. Passwords and the full source
+snapshot are discarded. Only hashes, aggregate counts, bounded canonical
+differences, actor, reason, and server time are retained. Exact retries against
+unchanged internal state return the prior evidence row. See
+[`INTEGRATION_PARALLEL_RECONCILIATION.md`](INTEGRATION_PARALLEL_RECONCILIATION.md).
+
 ## ERP/WMS adapter connections
 
 | Operation | Engineer | Manager | Organization admin | Warehouse |

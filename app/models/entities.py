@@ -2116,6 +2116,11 @@ class ExternalIntegration(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    parallel_reconciliations = relationship(
+        "IntegrationParallelReconciliation",
+        back_populates="integration",
+        cascade="all, delete-orphan",
+    )
     adapter_configuration = relationship(
         "IntegrationAdapterConfiguration",
         back_populates="integration",
@@ -2198,6 +2203,91 @@ class IntegrationParityContract(Base):
     )
 
     integration = relationship("ExternalIntegration", back_populates="parity_contract")
+    parallel_reconciliations = relationship(
+        "IntegrationParallelReconciliation",
+        back_populates="contract",
+    )
+
+
+class IntegrationParallelReconciliation(Base):
+    __tablename__ = "integration_parallel_reconciliations"
+    __table_args__ = (
+        UniqueConstraint(
+            "integration_id",
+            "evidence_fingerprint",
+            name="uq_integration_parallel_reconciliation_evidence",
+        ),
+        CheckConstraint(
+            "status IN ('matched', 'differences')",
+            name="ck_integration_parallel_reconciliation_status",
+        ),
+        CheckConstraint(
+            "input_record_count >= 0 AND matched_record_count >= 0 "
+            "AND discrepancy_count >= 0",
+            name="ck_integration_parallel_reconciliation_counts",
+        ),
+        CheckConstraint(
+            "observed_from <= observed_to",
+            name="ck_integration_parallel_reconciliation_window",
+        ),
+        CheckConstraint(
+            "length(contract_fingerprint) = 64 "
+            "AND length(snapshot_fingerprint) = 64 "
+            "AND length(evidence_fingerprint) = 64",
+            name="ck_integration_parallel_reconciliation_fingerprints",
+        ),
+        Index(
+            "ix_integration_parallel_reconciliation_org_integration_time",
+            "organization_id",
+            "integration_id",
+            "created_at",
+        ),
+        Index(
+            "ix_integration_parallel_reconciliation_org_status_time",
+            "organization_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    integration_id: Mapped[int] = mapped_column(
+        ForeignKey("external_integrations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    contract_id: Mapped[int] = mapped_column(
+        ForeignKey("integration_parity_contracts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    source_revision: Mapped[str] = mapped_column(String(160), nullable=False)
+    contract_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    snapshot_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    observed_from: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    observed_to: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    input_record_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    matched_record_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    discrepancy_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    object_counts_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    discrepancies_json: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    truncated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    integration = relationship(
+        "ExternalIntegration", back_populates="parallel_reconciliations"
+    )
+    contract = relationship(
+        "IntegrationParityContract", back_populates="parallel_reconciliations"
+    )
+    creator = relationship("User")
 
 
 class IntegrationAdapterConfiguration(Base):

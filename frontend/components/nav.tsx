@@ -45,6 +45,7 @@ const links: NavLink[] = [
   { href: "/form-actions", label: "Form Actions", roles: ["warehouse", "manager", "admin"] },
   { href: "/sync-conflicts", label: "Sync Conflicts", roles: ["admin"] },
   { href: "/integrations", label: "Integrations", roles: ["manager", "admin"], permission: "integrations.read" },
+  { href: "/integration-reconciliation", label: "Parallel Run", roles: ["manager", "admin"], permission: "integrations.read" },
   { href: "/platform", label: "Customers", roles: ["admin"], platformOnly: true, exact: true },
   { href: "/platform/operations", label: "Operations", roles: ["admin"], platformOnly: true },
   { href: "/parts-usage", label: "Parts Usage", roles: ["warehouse", "admin"] },

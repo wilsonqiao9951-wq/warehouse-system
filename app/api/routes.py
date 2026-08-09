@@ -39,6 +39,9 @@ from app.models import (
     CompletionPolicy,
     Customer,
     Equipment,
+    ExternalIntegration,
+    IntegrationParallelReconciliation,
+    IntegrationParityContract,
     InventoryTransaction,
     InventoryNotification,
     InventoryCountLine,
@@ -159,6 +162,7 @@ from app.schemas import (
     OrganizationSettingsRead,
     OrganizationUpdate,
     PasswordSet,
+    PilotChecklistRead,
     PasswordResetComplete,
     PasswordResetConfigurationRead,
     PasswordResetRequest,
@@ -8108,11 +8112,20 @@ def abnormal_usage_report(
     return part_usage_review_reads(db, rows)
 
 
-@router.get("/pilot/checklist")
+@router.get("/pilot/checklist", response_model=PilotChecklistRead)
 def pilot_checklist(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
-    low_stock = low_stock_alerts(db=db, actor=actor)
-    abnormal = abnormal_usage_report(response=Response(), db=db, actor=actor)
+    low_stock = low_stock_alerts(skip=0, limit=500, db=db, actor=actor)
+    abnormal = abnormal_usage_report(
+        response=Response(),
+        status="active",
+        severity=None,
+        engineer_id=None,
+        skip=0,
+        limit=500,
+        db=db,
+        actor=actor,
+    )
     runtime = operations_monitor.snapshot(
         window_seconds=settings.operations_request_window_seconds
     )
@@ -8120,12 +8133,91 @@ def pilot_checklist(db: Session = Depends(get_db), actor: Actor = Depends(get_cu
         worker["enabled"] and worker["status"] in {"error", "stale"}
         for worker in runtime["workers"]
     )
+    organization_id = actor.organization_id
+    active_integration_count = db.scalar(
+        select(func.count(ExternalIntegration.id)).where(
+            ExternalIntegration.organization_id == organization_id,
+            ExternalIntegration.is_active.is_(True),
+        )
+    ) or 0
+    ready_parity_contract_count = db.scalar(
+        select(func.count(IntegrationParityContract.id)).where(
+            IntegrationParityContract.organization_id == organization_id,
+            IntegrationParityContract.readiness_status == "ready",
+        )
+    ) or 0
+    latest_reconciliation = db.scalar(
+        select(IntegrationParallelReconciliation)
+        .where(IntegrationParallelReconciliation.organization_id == organization_id)
+        .order_by(
+            IntegrationParallelReconciliation.created_at.desc(),
+            IntegrationParallelReconciliation.id.desc(),
+        )
+        .limit(1)
+    )
+    if not active_integration_count:
+        integration_readiness = "not_configured"
+    elif not ready_parity_contract_count:
+        integration_readiness = "contract_required"
+    elif latest_reconciliation is None:
+        integration_readiness = "evidence_required"
+    else:
+        integration_readiness = latest_reconciliation.status
+
+    readiness_reasons: list[str] = []
+    if degraded:
+        readiness_reasons.append("One or more background workers are degraded or stale.")
+    if low_stock:
+        readiness_reasons.append(f"{len(low_stock)} low-stock alerts require review.")
+    if abnormal:
+        readiness_reasons.append(f"{len(abnormal)} abnormal-usage alerts require review.")
+    if integration_readiness == "not_configured":
+        readiness_reasons.append("No active external integration is configured.")
+    elif integration_readiness == "contract_required":
+        readiness_reasons.append("No active integration has a ready parity contract.")
+    elif integration_readiness == "evidence_required":
+        readiness_reasons.append("A parallel-run reconciliation has not been recorded.")
+    elif integration_readiness == "differences":
+        readiness_reasons.append(
+            f"The latest parallel run has {latest_reconciliation.discrepancy_count} discrepancies."
+        )
+    readiness_status = (
+        "blocked"
+        if degraded
+        else "attention"
+        if readiness_reasons
+        else "ready"
+    )
     return {
         "system_health": "degraded" if degraded else "ok",
-        "total_users": db.scalar(select(func.count(User.id))) or 0,
-        "total_work_orders": db.scalar(select(func.count(WorkOrder.id))) or 0,
-        "total_parts": db.scalar(select(func.count(Part.id))) or 0,
-        "total_inventory_transactions": db.scalar(select(func.count(InventoryTransaction.id))) or 0,
+        "readiness_status": readiness_status,
+        "readiness_reasons": readiness_reasons,
+        "total_users": db.scalar(
+            select(func.count(User.id)).where(User.organization_id == organization_id)
+        ) or 0,
+        "total_work_orders": db.scalar(
+            select(func.count(WorkOrder.id)).where(WorkOrder.organization_id == organization_id)
+        ) or 0,
+        "total_parts": db.scalar(
+            select(func.count(Part.id)).where(Part.organization_id == organization_id)
+        ) or 0,
+        "total_inventory_transactions": db.scalar(
+            select(func.count(InventoryTransaction.id)).where(
+                InventoryTransaction.organization_id == organization_id
+            )
+        ) or 0,
         "low_stock_alert_count": len(low_stock),
         "abnormal_usage_alert_count": len(abnormal),
+        "active_integration_count": active_integration_count,
+        "ready_parity_contract_count": ready_parity_contract_count,
+        "integration_parallel_readiness": integration_readiness,
+        "latest_reconciliation_id": latest_reconciliation.id if latest_reconciliation else None,
+        "latest_reconciliation_integration_id": (
+            latest_reconciliation.integration_id if latest_reconciliation else None
+        ),
+        "latest_reconciliation_status": latest_reconciliation.status if latest_reconciliation else None,
+        "latest_reconciliation_discrepancy_count": (
+            latest_reconciliation.discrepancy_count if latest_reconciliation else 0
+        ),
+        "latest_reconciliation_at": latest_reconciliation.created_at if latest_reconciliation else None,
     }
