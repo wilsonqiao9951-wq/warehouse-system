@@ -300,9 +300,12 @@ After Phase 1 sign-off, release improvements in controlled increments:
 - `Implemented` Versioned alert acknowledgment and evidence-gated closure with accountable actors, replenishment linkage, history, and audit logs
 
 6. Abnormal parts usage detection
-- Baseline model by ticket type/machine/store
-- Flag anomalies (quantity spikes, unusual part combinations, off-hour usage)
-- Add review queue for manager validation
+- `Implemented` Fingerprinted, tenant-scoped baseline model with ticket/job,
+  machine, store, fallback scopes, sample coverage, P90 and threshold evidence
+- `Implemented` Quantity-spike, unusual-combination, and region-local off-hour
+  signals that cannot mutate inventory
+- `Implemented` Versioned manager review queue with acknowledgement,
+  confirm/dismiss decisions, actor/time/reason evidence, and audit logs
 
 ---
 

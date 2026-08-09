@@ -32,6 +32,7 @@ const links: NavLink[] = [
   { href: "/part-observation", label: "Photo Memory", roles: ["warehouse", "manager", "admin", "engineer"] },
   { href: "/employees", label: "Employees", roles: ["manager", "admin"], permission: "users.read" },
   { href: "/reports", label: "Reports", roles: ["manager", "admin"], permission: "reports.read" },
+  { href: "/abnormal-usage", label: "Usage Reviews", roles: ["manager", "admin"], permission: "reports.read" },
   { href: "/analytics", label: "Analytics", roles: ["manager", "admin"], permission: "reports.read" },
   { href: "/profit-snapshots", label: "Profit Snapshots", roles: ["manager", "admin"], permission: "reports.read" },
   { href: "/performance", label: "Performance", roles: ["manager", "admin", "engineer"] },

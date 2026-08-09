@@ -98,7 +98,8 @@ def test_work_order_filters_low_stock_and_abnormal_reports(client, seed_inventor
     abnormal = client.get("/api/reports/abnormal-usage")
     assert abnormal.status_code == 200
     if abnormal.json():
-        assert any("90th percentile" in row["reason"] or "historical average" in row["reason"] for row in abnormal.json())
+        assert all(row["status"] in {"pending", "acknowledged"} for row in abnormal.json())
+        assert all(row["reason_codes"] and row["source_fingerprint"] for row in abnormal.json())
 
 
 def test_completion_rejects_invalid_signature_data(client):

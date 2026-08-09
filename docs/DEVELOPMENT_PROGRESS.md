@@ -6,9 +6,58 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
-## 2026-08-08 - Governed low-stock threshold rules and alert evidence
+## 2026-08-08 - Abnormal part-usage baselines and manager review queue
 
 Status: implemented; release verification in progress.
+
+Delivered:
+
+- Replaced the transient global-cost report with persisted, tenant-scoped
+  baselines for job/machine/store, job/machine, machine, job, and organization
+  fallback scopes.
+- Limited quantity evidence to prior completed and locked work orders and
+  retained sample coverage, P90/deviation thresholds, context support, source
+  ranges, fingerprints, calculation versions, and timestamps.
+- Added quantity-spike, rare part-combination, and warehouse-region local
+  off-hours signals with human explanations. Signals are advisory and cannot
+  edit inventory or work-order facts.
+- Evaluated new usage inside the authenticated inventory transaction and added
+  a bounded, audited historical evaluation endpoint for existing data.
+- Added manager/admin `pending -> acknowledged -> confirmed|dismissed`
+  decisions with required notes/reasons, responsible accounts, server times,
+  exact-retry idempotency, optimistic versions, and audit evidence.
+- Added active/history, severity and engineer filters, baseline inspection, and
+  the responsive `/abnormal-usage` review workbench while preserving the
+  existing report URL.
+- Added revision `0063`, forced PostgreSQL RLS for both tables, restore/schema
+  compatibility, AppSheet parity records, and dedicated operating docs.
+
+Verification so far:
+
+- Automatic quantity spikes, rare combinations, bounded historical scans,
+  baseline evidence, state transitions, stale versions, report permissions,
+  role denial, tenant isolation, RLS coverage, and compatibility regressions
+  passed (14 targeted tests).
+- Fresh SQLite base-to-`0063`, `0063 -> 0062 -> 0063`, and Alembic model
+  zero-drift checks passed.
+- All 275 backend tests passed. Frontend ESLint, TypeScript, and Next.js
+  production build passed for all 47 static routes.
+- Python dependency consistency/vulnerability checks and full/production npm
+  audits passed with no known vulnerabilities. Production configuration and
+  Compose topology passed. Local Docker Desktop was not running, so GitHub's
+  private-deployment job is the authoritative PostgreSQL/RLS and image-build
+  gate.
+- Backed up the local `0062` database as
+  `openpartsflow.pre-0063-20260808-201604.db` (1,617,920 bytes; SHA-256
+  `4D6BD61826E2751BE37A94B8A493B1003E325C74D7BF368FEF41E65133C93902`)
+  before upgrading the configured database to `0063` and confirming zero
+  model drift.
+
+## 2026-08-08 - Governed low-stock threshold rules and alert evidence
+
+Status: implemented, published as draft PR #36, and verified by GitHub Actions
+run #71. Backend, frontend, private PostgreSQL/RLS, dependency, and production
+API/Web image jobs all passed.
 
 Delivered:
 

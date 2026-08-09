@@ -160,6 +160,24 @@ the exact owner plus generation fencing token. See
 - Administrators can correct unlocked records with their own audit attribution; managers cannot impersonate the field owner.
 - Releasing a claim invalidates the prior user's device and queued claim generation.
 
+## Abnormal part-usage governance
+
+| Operation | Engineer | Manager | Organization admin | Warehouse |
+| --- | ---: | ---: | ---: | ---: |
+| View usage review queue and baselines | Deny by default | Allow with `reports.read` | Allow | Deny by default |
+| Run bounded historical evaluation | Deny | Allow with `reports.read` | Allow | Deny |
+| Acknowledge, confirm, or dismiss | Deny | Allow with `reports.read` | Allow | Deny |
+| Change inventory through review | Deny | Deny | Deny | Deny |
+
+The ordinary shared-work-order policy is unchanged: same-organization
+engineers can see other engineers' work-order progress and part-usage facts,
+but cannot mutate a work order they do not own. The anomaly queue is separate
+management evidence. Both baseline and review queries are tenant-scoped and
+covered by forced PostgreSQL RLS. Decisions require an expected version,
+responsible account, server timestamp, and manager note/reason; exact retries
+are idempotent and stale writes return `409`. See
+[`ABNORMAL_PARTS_USAGE.md`](ABNORMAL_PARTS_USAGE.md).
+
 ## Enterprise operations analytics
 
 | Operation | Engineer | Manager | Organization admin | Warehouse |

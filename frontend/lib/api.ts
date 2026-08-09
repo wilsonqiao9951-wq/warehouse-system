@@ -83,6 +83,8 @@ import {
   WorkOrder,
   WorkOrderPart,
   AbnormalUsageRow,
+  PartUsageBaseline,
+  PartUsageEvaluation,
   AuthSecurityEvent,
   AuthLoginResult,
   AuthSession,
@@ -2256,8 +2258,42 @@ export const api = {
     account_password?: string;
   } = {}) => request<WorkOrder>(`/work-orders/${workOrderId}/complete`, { method: "POST", body: JSON.stringify(payload) }),
   getLowStockAlerts: () => request<LowStockAlert[]>("/inventory/low-stock-alerts?limit=300"),
-  getAbnormalUsage: () => request<AbnormalUsageRow[]>("/reports/abnormal-usage?limit=300")
-  ,
+  getAbnormalUsage: (params?: {
+    status?: "active" | "pending" | "acknowledged" | "confirmed" | "dismissed" | "all";
+    severity?: "low" | "medium" | "high";
+    engineer_id?: number;
+  }) => {
+    const query = new URLSearchParams({ status: params?.status ?? "active", limit: "300" });
+    if (params?.severity) query.set("severity", params.severity);
+    if (params?.engineer_id) query.set("engineer_id", String(params.engineer_id));
+    return request<AbnormalUsageRow[]>(`/reports/abnormal-usage?${query.toString()}`);
+  },
+  listPartUsageBaselines: (params?: { part_id?: number; scope?: string }) => {
+    const query = new URLSearchParams({ limit: "300" });
+    if (params?.part_id) query.set("part_id", String(params.part_id));
+    if (params?.scope) query.set("scope", params.scope);
+    return request<PartUsageBaseline[]>(`/reports/abnormal-usage/baselines?${query.toString()}`);
+  },
+  evaluateAbnormalUsage: (limit = 5000, afterId?: number) => {
+    const query = new URLSearchParams({ limit: String(Math.min(5000, Math.max(1, limit))) });
+    if (afterId) query.set("after_id", String(afterId));
+    return request<PartUsageEvaluation>(`/reports/abnormal-usage/evaluate?${query.toString()}`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+  },
+  actOnAbnormalUsage: (
+    reviewId: number,
+    payload: {
+      action: "acknowledge" | "confirm" | "dismiss";
+      expected_version: number;
+      note?: string;
+      reason?: string;
+    }
+  ) => request<AbnormalUsageRow>(`/reports/abnormal-usage/${reviewId}/actions`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }),
   getPilotChecklist: () => request<PilotChecklist>("/pilot/checklist"),
   listWorkOrderParts: (params?: { limit?: number; work_order_id?: number }) => {
     const q = new URLSearchParams();

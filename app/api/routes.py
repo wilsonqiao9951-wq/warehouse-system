@@ -53,6 +53,7 @@ from app.models import (
     Organization,
     OrganizationDomain,
     Part,
+    PartUsageReview,
     PartMachineAssociation,
     PartRecognitionAnalysis,
     PartRecognitionCandidate,
@@ -258,6 +259,7 @@ from app.services.low_stock import (
     reopen_inventory_notification,
     resolve_inventory_notification,
 )
+from app.services.abnormal_usage import evaluate_part_usage, part_usage_review_reads
 from app.services.visual_recognition import (
     VISION_PROMPT_VERSION,
     VisionConfigurationError,
@@ -5748,6 +5750,23 @@ def use_part_for_work_order(
             quantity=warehouse_quantity,
             work_order_id=work_order_id,
         )
+    anomaly = evaluate_part_usage(db, actor.organization_id, usage)
+    if anomaly.created and anomaly.review is not None:
+        _audit(
+            db,
+            actor,
+            "part_usage_anomaly_detected",
+            "part_usage_review",
+            anomaly.review.id,
+            {
+                "work_order_id": work_order_id,
+                "work_order_part_id": usage.id,
+                "part_id": payload.part_id,
+                "severity": anomaly.review.severity,
+                "reason_codes": json.loads(anomaly.review.reason_codes_json),
+                "source_fingerprint": anomaly.review.source_fingerprint,
+            },
+        )
     enqueue_work_order_event(
         db,
         work_order,
@@ -8051,79 +8070,49 @@ def low_stock_alerts(
 
 @router.get("/reports/abnormal-usage", response_model=list[AbnormalUsageRow])
 def abnormal_usage_report(
+    response: Response,
+    status: str = Query(default="active", pattern="^(active|pending|acknowledged|confirmed|dismissed|all)$"),
+    severity: str | None = Query(default=None, pattern="^(low|medium|high)$"),
+    engineer_id: int | None = Query(default=None, ge=1),
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
     require_permission(actor, REPORTS_READ)
-    work_orders = db.scalars(select(WorkOrder).order_by(WorkOrder.id.asc())).all()
-    if not work_orders:
-        return []
-    costs = sorted([get_work_order_parts_cost(db, wo.id) for wo in work_orders if get_work_order_parts_cost(db, wo.id) > 0])
-    if costs:
-        idx = min(len(costs) - 1, int(0.9 * (len(costs) - 1)))
-        p90_cost = costs[idx]
-    else:
-        p90_cost = 0.0
-
-    tech_avgs: dict[int, float] = {}
-    tech_map: dict[int, list[float]] = {}
-    for wo in work_orders:
-        if not wo.engineer_id:
-            continue
-        tech_map.setdefault(wo.engineer_id, []).append(get_work_order_parts_cost(db, wo.id))
-    for tech_id, arr in tech_map.items():
-        tech_avgs[tech_id] = (sum(arr) / len(arr)) if arr else 0.0
-
-    repeated_part_flags: dict[int, set[int]] = {}
-    usage_rows = db.scalars(select(WorkOrderPart).order_by(WorkOrderPart.created_at.asc())).all()
-    for row in usage_rows:
-        if not row.user_id:
-            continue
-        repeated_part_flags.setdefault(row.user_id, set())
-        # repeated same part usage in short period (7 days)
-        recent_count = sum(
-            1
-            for r in usage_rows
-            if r.user_id == row.user_id
-            and r.part_id == row.part_id
-            and r.created_at >= (row.created_at - timedelta(days=7))
-            and r.created_at <= row.created_at
+    response.headers["Cache-Control"] = "no-store"
+    query = select(PartUsageReview).where(
+        PartUsageReview.organization_id == actor.organization_id
+    )
+    if status == "active":
+        query = query.where(PartUsageReview.status.in_(("pending", "acknowledged")))
+    elif status != "all":
+        query = query.where(PartUsageReview.status == status)
+    if severity is not None:
+        query = query.where(PartUsageReview.severity == severity)
+    if engineer_id is not None:
+        query = query.where(PartUsageReview.engineer_id == engineer_id)
+    rows = db.scalars(
+        query.order_by(
+            case(
+                (PartUsageReview.severity == "high", 0),
+                (PartUsageReview.severity == "medium", 1),
+                else_=2,
+            ),
+            PartUsageReview.created_at.desc(),
+            PartUsageReview.id.desc(),
         )
-        if recent_count >= 3:
-            repeated_part_flags[row.user_id].add(row.work_order_id)
-
-    results: list[AbnormalUsageRow] = []
-    for wo in work_orders:
-        parts_cost = get_work_order_parts_cost(db, wo.id)
-        reasons: list[str] = []
-        if parts_cost >= p90_cost and parts_cost > 0:
-            reasons.append("Parts cost above 90th percentile")
-        if wo.engineer_id and tech_avgs.get(wo.engineer_id, 0) > 0 and parts_cost > tech_avgs[wo.engineer_id] * 1.8:
-            reasons.append("Technician parts usage above historical average")
-        if wo.engineer_id and wo.id in repeated_part_flags.get(wo.engineer_id, set()):
-            reasons.append("Repeated same-part usage in short period")
-        if reasons:
-            results.append(
-                AbnormalUsageRow(
-                    work_order_id=wo.id,
-                    ticket_number=wo.ticket_number,
-                    engineer_id=wo.engineer_id,
-                    parts_cost=parts_cost,
-                    revenue=wo.revenue,
-                    severity="high" if len(reasons) > 1 else "medium",
-                    reason="; ".join(reasons),
-                )
-            )
-    return results[skip : skip + limit]
+        .offset(skip)
+        .limit(limit)
+    ).all()
+    return part_usage_review_reads(db, rows)
 
 
 @router.get("/pilot/checklist")
 def pilot_checklist(db: Session = Depends(get_db), actor: Actor = Depends(get_current_actor)):
     require_roles(actor, UserRole.ADMIN, UserRole.MANAGER)
     low_stock = low_stock_alerts(db=db, actor=actor)
-    abnormal = abnormal_usage_report(db=db, actor=actor)
+    abnormal = abnormal_usage_report(response=Response(), db=db, actor=actor)
     runtime = operations_monitor.snapshot(
         window_seconds=settings.operations_request_window_seconds
     )
