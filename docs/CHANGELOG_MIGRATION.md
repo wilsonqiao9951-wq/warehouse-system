@@ -1,5 +1,21 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260808_0068 - Integration parallel-run reconciliation evidence
+
+- Adds tenant-scoped, append-only AppSheet/Google Sheets reconciliation runs
+  linked to a ready parity contract, with source/contract/evidence hashes,
+  observation window, safe counts, bounded discrepancies, actor, reason, and
+  server time.
+- Adds exact evidence idempotency, provider/active/revision gates, duplicate-key
+  refusal, password-confirmed `integrations.manage` execution, read-only
+  `integrations.read` history, explicit organization predicates, and forced
+  PostgreSQL RLS.
+- Adds a manager/admin workbench, tenant-safe Pilot Checklist readiness, and a
+  regression fix for Pilot Checklist's internal pagination calls.
+- Extends controlled tenant restore compatibility through `0068`; operational
+  reconciliation evidence is exported but remains protected from restore
+  mutation.
+
 ## 20260808_0067 - Scale query indexes and executable platform recovery
 
 - Adds tenant-led indexes for recent/scheduled work orders, inventory-ledger

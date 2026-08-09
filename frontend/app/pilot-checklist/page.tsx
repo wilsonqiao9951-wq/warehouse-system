@@ -30,6 +30,17 @@ export default function PilotChecklistPage() {
           </div>
         )}
         {data && (
+          <>
+          <div className={`notice ${data.readiness_status === "ready" ? "notice-success" : data.readiness_status === "blocked" ? "notice-error" : ""}`}>
+            <strong>Pilot readiness: {data.readiness_status}</strong>
+            {data.readiness_reasons.length > 0 ? (
+              <ul style={{ marginBottom: 0 }}>
+                {data.readiness_reasons.map((reason) => <li key={reason}>{reason}</li>)}
+              </ul>
+            ) : (
+              <p style={{ marginBottom: 0 }}>No operational or parallel-run exceptions are open.</p>
+            )}
+          </div>
           <div className="pilot-metric-grid">
             <div className={`pilot-metric${data.system_health !== "ok" ? " pilot-metric--alert" : ""}`}>
               <div className="muted">System health</div>
@@ -61,7 +72,21 @@ export default function PilotChecklistPage() {
               <div className="muted">Abnormal usage</div>
               <div className="metric">{data.abnormal_usage_alert_count}</div>
             </div>
+            <div className="pilot-metric">
+              <div className="muted">Active integrations</div>
+              <div className="metric">{data.active_integration_count}</div>
+            </div>
+            <div className={`pilot-metric${data.integration_parallel_readiness !== "matched" ? " pilot-metric--alert" : ""}`}>
+              <div className="muted">Parallel run</div>
+              <div className="metric" style={{ fontSize: 20 }}>{data.integration_parallel_readiness}</div>
+              <small>
+                {data.latest_reconciliation_at
+                  ? `${data.latest_reconciliation_discrepancy_count} differences · ${new Date(data.latest_reconciliation_at).toLocaleString()}`
+                  : `${data.ready_parity_contract_count} ready contracts`}
+              </small>
+            </div>
           </div>
+          </>
         )}
       </section>
     </ManagerShell>

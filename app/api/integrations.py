@@ -21,6 +21,7 @@ from app.models import (
     ExternalWorkOrderLink,
     IntegrationAdapterConfiguration,
     IntegrationConnectionTest,
+    IntegrationParallelReconciliation,
     IntegrationParityContract,
     Organization,
     Part,
@@ -39,6 +40,8 @@ from app.schemas import (
     IntegrationAdapterConfigurationUpsert,
     IntegrationAdapterConnectionTestRequest,
     IntegrationConnectionTestRead,
+    IntegrationParallelReconciliationCreate,
+    IntegrationParallelReconciliationRead,
     IntegrationParityContractRead,
     IntegrationParityContractUpsert,
     ExternalPartRecommendationRead,
@@ -65,6 +68,10 @@ from app.services.integration_parity import (
     assess_parity_contract,
     parity_contract_read,
     stored_parity_payload,
+)
+from app.services.integration_reconciliation import (
+    reconciliation_read,
+    run_parallel_reconciliation,
 )
 from app.services.integration_adapters import (
     IntegrationCredentialConfigurationError,
@@ -434,6 +441,122 @@ def save_integration_parity_contract(
     db.commit()
     db.refresh(contract)
     return parity_contract_read(integration, contract)
+
+
+@router.post(
+    "/integrations/{integration_id}/parallel-reconciliations",
+    response_model=IntegrationParallelReconciliationRead,
+)
+def create_integration_parallel_reconciliation(
+    integration_id: int,
+    payload: IntegrationParallelReconciliationCreate,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_MANAGE)
+    integration = db.scalar(
+        select(ExternalIntegration).where(
+            ExternalIntegration.id == integration_id,
+            ExternalIntegration.organization_id == actor.organization_id,
+        )
+    )
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    contract = db.scalar(
+        select(IntegrationParityContract).where(
+            IntegrationParityContract.organization_id == actor.organization_id,
+            IntegrationParityContract.integration_id == integration.id,
+        )
+    )
+    if not contract:
+        raise HTTPException(status_code=409, detail="A persisted parity contract is required")
+    _require_account_reauthentication(db, actor, payload.account_password)
+    row, created = run_parallel_reconciliation(
+        db,
+        integration,
+        contract,
+        payload,
+        organization_id=actor.organization_id,
+        actor_id=actor.user_id,
+    )
+    if created:
+        _audit_integration(
+            db,
+            actor,
+            "create_integration_parallel_reconciliation",
+            integration,
+            {
+                "reconciliation_id": row.id,
+                "status": row.status,
+                "input_record_count": row.input_record_count,
+                "matched_record_count": row.matched_record_count,
+                "discrepancy_count": row.discrepancy_count,
+                "contract_fingerprint": row.contract_fingerprint,
+                "snapshot_fingerprint": row.snapshot_fingerprint,
+                "evidence_fingerprint": row.evidence_fingerprint,
+                "truncated": row.truncated,
+            },
+        )
+        db.commit()
+        db.refresh(row)
+    return reconciliation_read(row)
+
+
+@router.get(
+    "/integrations/{integration_id}/parallel-reconciliations",
+    response_model=list[IntegrationParallelReconciliationRead],
+)
+def list_integration_parallel_reconciliations(
+    integration_id: int,
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_READ)
+    integration = db.scalar(
+        select(ExternalIntegration).where(
+            ExternalIntegration.id == integration_id,
+            ExternalIntegration.organization_id == actor.organization_id,
+        )
+    )
+    if not integration:
+        raise HTTPException(status_code=404, detail="Integration not found")
+    rows = db.scalars(
+        select(IntegrationParallelReconciliation)
+        .where(
+            IntegrationParallelReconciliation.organization_id == actor.organization_id,
+            IntegrationParallelReconciliation.integration_id == integration.id,
+        )
+        .order_by(
+            IntegrationParallelReconciliation.created_at.desc(),
+            IntegrationParallelReconciliation.id.desc(),
+        )
+        .limit(limit)
+    ).all()
+    return [reconciliation_read(row) for row in rows]
+
+
+@router.get(
+    "/integrations/{integration_id}/parallel-reconciliations/{reconciliation_id}",
+    response_model=IntegrationParallelReconciliationRead,
+)
+def get_integration_parallel_reconciliation(
+    integration_id: int,
+    reconciliation_id: int,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_permission(actor, INTEGRATIONS_READ)
+    row = db.scalar(
+        select(IntegrationParallelReconciliation).where(
+            IntegrationParallelReconciliation.id == reconciliation_id,
+            IntegrationParallelReconciliation.integration_id == integration_id,
+            IntegrationParallelReconciliation.organization_id == actor.organization_id,
+        )
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Parallel reconciliation not found")
+    return reconciliation_read(row)
 
 
 @router.get(

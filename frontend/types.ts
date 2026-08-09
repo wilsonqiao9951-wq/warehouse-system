@@ -765,6 +765,58 @@ export interface IntegrationParityContract {
   updated_at?: string | null;
 }
 
+export interface IntegrationParallelSnapshot {
+  source_revision: string;
+  observed_from: string;
+  observed_to: string;
+  work_orders: Array<{ external_id: string; status: string }>;
+  part_usage: Array<{
+    external_work_order_id: string;
+    part_number: string;
+    quantity: number;
+  }>;
+  inventory: Array<{
+    warehouse_code: string;
+    part_number: string;
+    quantity: number;
+  }>;
+}
+
+export interface IntegrationParallelReconciliation {
+  id: number;
+  organization_id: number;
+  integration_id: number;
+  contract_id: number;
+  source_revision: string;
+  contract_fingerprint: string;
+  snapshot_fingerprint: string;
+  evidence_fingerprint: string;
+  observed_from: string;
+  observed_to: string;
+  status: "matched" | "differences";
+  input_record_count: number;
+  matched_record_count: number;
+  discrepancy_count: number;
+  object_counts: Record<"work_orders" | "part_usage" | "inventory", {
+    external: number;
+    openpartsflow: number;
+    matched: number;
+    discrepancies: number;
+  }>;
+  discrepancies: Array<{
+    object_type: "work_order" | "part_usage" | "inventory";
+    key: string;
+    field: string;
+    openpartsflow_value?: string | number | null;
+    external_value?: string | number | null;
+    reason: "missing_external" | "missing_openpartsflow" | "value_mismatch";
+  }>;
+  truncated: boolean;
+  reason: string;
+  created_by?: number | null;
+  created_at: string;
+}
+
 export type IntegrationAdapterProtocol = "rest_json" | "odata_v4";
 export type IntegrationAdapterAuthType = "none" | "bearer" | "basic" | "api_key_header";
 
@@ -2304,12 +2356,27 @@ export interface PartUsageEvaluation {
 
 export interface PilotChecklist {
   system_health: string;
+  readiness_status: "ready" | "attention" | "blocked";
+  readiness_reasons: string[];
   total_users: number;
   total_work_orders: number;
   total_parts: number;
   total_inventory_transactions: number;
   low_stock_alert_count: number;
   abnormal_usage_alert_count: number;
+  active_integration_count: number;
+  ready_parity_contract_count: number;
+  integration_parallel_readiness:
+    | "not_configured"
+    | "contract_required"
+    | "evidence_required"
+    | "differences"
+    | "matched";
+  latest_reconciliation_id?: number | null;
+  latest_reconciliation_integration_id?: number | null;
+  latest_reconciliation_status?: "matched" | "differences" | null;
+  latest_reconciliation_discrepancy_count: number;
+  latest_reconciliation_at?: string | null;
 }
 
 export interface StockBalance {

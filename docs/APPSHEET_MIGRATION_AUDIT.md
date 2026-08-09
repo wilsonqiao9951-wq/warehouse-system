@@ -57,6 +57,7 @@ Status legend:
 - `Implemented` Inventory Excel export
 - `Implemented` AppSheet/REST inbound work-order Webhook, API keys, field mapping, source links, idempotency, sync logs, and signed/retryable status/completion/parts callbacks
 - `Implemented` AppSheet/Google Sheets versioned parallel-run contracts and readiness gaps
+- `Implemented` Password-confirmed, append-only work-order/part-usage/inventory parallel-run reconciliation evidence with exact tenant scoping, idempotent fingerprints, safe counts, and bounded differences
 - `Implemented` Secure vendor-neutral ERP/WMS REST/JSON and OData v4 adapter profiles with encrypted credentials and governed connection-test evidence
 - `Implemented` Durable aggregate SLA incidents and signed/idempotent/retryable on-call Webhook delivery with resolution evidence
 - `Unknown` Customer-specific Gmail, ERP, WMS, and other external field/business mappings pending real-system discovery
@@ -215,6 +216,23 @@ AppSheet feature -> OpenPartsFlow module -> API endpoint -> frontend page
   report, download, tenant isolation, and forced PostgreSQL RLS
 - Real customer tables, formulas, Bots, security filters, attachments, and
   volumes remain required discovery inputs before parity can be accepted.
+
+12. AppSheet/Google Sheets parallel-run reconciliation
+- AppSheet feature: Compare a canonical export with OpenPartsFlow before
+  cutover and retain discrepancy evidence
+- OpenPartsFlow module: Integration Parallel Reconciliation
+- API endpoint:
+  - `POST /api/integrations/{integration_id}/parallel-reconciliations`
+  - `GET /api/integrations/{integration_id}/parallel-reconciliations`
+  - `GET /api/integrations/{integration_id}/parallel-reconciliations/{id}`
+- Frontend page: `frontend/app/integration-reconciliation/page.tsx`
+- `Implemented` Ready-contract/revision gates, current-password verification,
+  explicit organization filters, append-only hashes/counts/differences,
+  duplicate-key refusal, exact replay idempotency, forced PostgreSQL RLS, and
+  tenant-safe Pilot Checklist evidence
+- Customer metadata, formulas, security filters, Bots, attachments, volume,
+  acceptance criteria, and authorized sign-off remain external inputs. A
+  matched run does not by itself authorize cutover.
 
 ---
 

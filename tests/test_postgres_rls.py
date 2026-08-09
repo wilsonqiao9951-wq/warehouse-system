@@ -72,6 +72,10 @@ def test_postgres_rls_migration_covers_every_tenant_model():
         "20260808_0065_add_erp_wms_adapters.py",
         "openpartsflow_integration_adapter_migration",
     )
+    integration_reconciliations = _migration_module(
+        "20260808_0068_add_integration_parallel_reconciliations.py",
+        "openpartsflow_integration_reconciliation_migration",
+    )
     model_tables = {model.__tablename__ for model in TENANT_MODELS}
     secured_tables = set(baseline.TENANT_TABLES) | {
         profit_snapshots.TABLE_NAME,
@@ -80,6 +84,7 @@ def test_postgres_rls_migration_covers_every_tenant_model():
         integration_parity.TABLE_NAME,
         integration_adapters.CONFIG_TABLE,
         integration_adapters.TEST_TABLE,
+        integration_reconciliations.TABLE_NAME,
     }
     assert secured_tables == model_tables
     assert len(secured_tables) == len(model_tables)
@@ -90,6 +95,7 @@ def test_postgres_rls_migration_covers_every_tenant_model():
         part_usage_reviews,
         integration_parity,
         integration_adapters,
+        integration_reconciliations,
     ):
         assert "platform_access" in migration.POLICY_EXPRESSION
         assert "organization_id" in migration.POLICY_EXPRESSION

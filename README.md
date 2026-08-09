@@ -17,7 +17,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Governed machine service knowledge with published faults, repair steps, tools, cautions, media, and verified field evidence
 - Idempotent knowledge drafts generated from completed jobs plus tenant-protected field photo/video storage
 - Explainable same-model fault analysis, published-guidance ranking, and similar completed-job retrieval on the mobile work-order screen
-- Tenant-scoped AppSheet/REST API keys, configurable inbound work-order mapping, idempotent Webhooks, synchronization logs, and fingerprinted AppSheet/Google Sheets parallel-run contracts
+- Tenant-scoped AppSheet/REST API keys, configurable inbound work-order mapping, idempotent Webhooks, synchronization logs, fingerprinted AppSheet/Google Sheets contracts, and append-only parallel-run discrepancy evidence
 - Durable UTC monthly AI/API usage metering with plan limits, atomic concurrency enforcement, and idempotent external charging
 - Verified customer domains, automatic host-based login branding, and domain-gated sender identity configuration
 - Provider-neutral signed subscription events, ordered idempotent billing evidence, and durable lifecycle notices
@@ -162,6 +162,7 @@ are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 - `POST /api/machine-knowledge/{id}/media` stores validated field photos/videos outside the public upload mount; `GET /api/machine-knowledge/media/{entry_id}` enforces tenant, role, profile, and publication state.
 - `GET /api/work-orders/{id}/service-intelligence` returns read-only, tenant-scoped fault metrics, ranked published exact-model guidance, and explained similar completed jobs. See [`docs/SERVICE_INTELLIGENCE.md`](docs/SERVICE_INTELLIGENCE.md).
 - `POST /api/external/v1/work-orders` accepts API-key-authenticated, idempotent AppSheet/REST work-order intake. Administrators manage credentials and mappings under `/api/integrations`; see [`docs/EXTERNAL_INTEGRATIONS.md`](docs/EXTERNAL_INTEGRATIONS.md).
+- `POST /api/integrations/{id}/parallel-reconciliations` password-confirms an administrator or delegated `integrations.manage` operator, compares a bounded canonical AppSheet/Google Sheets snapshot with explicit tenant-scoped work-order, part-use, and inventory evidence, and retains hashes/counts/bounded differences instead of the raw snapshot. See [`docs/INTEGRATION_PARALLEL_RECONCILIATION.md`](docs/INTEGRATION_PARALLEL_RECONCILIATION.md).
 - `POST /api/organization/data-exports` creates a password-confirmed tenant backup ZIP with JSONL records, referenced local evidence files, secret redaction, and a checksum manifest; see [`docs/CUSTOMER_DATA_EXPORTS.md`](docs/CUSTOMER_DATA_EXPORTS.md).
 - `POST /api/organization/data-restores/rehearsals` validates a backup and records a dry-run before separate approval, exact-archive application, and rollback; see [`docs/CONTROLLED_DATA_RESTORES.md`](docs/CONTROLLED_DATA_RESTORES.md).
 - `GET /api/audit-logs/search` and `/summary` require effective `audit.read`; password-confirmed `POST /api/audit-logs/export` requires `audit.export` and returns a formula-safe, SHA-256-recorded CSV. See [`docs/AUDIT_LOGS.md`](docs/AUDIT_LOGS.md).
@@ -247,7 +248,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260808_0067` (tenant-led scale query indexes for work orders, part use, and inventory ledger pagination).
+- Current schema head: `20260808_0068` (tenant-isolated append-only integration parallel-run reconciliation evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:
