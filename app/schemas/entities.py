@@ -3455,6 +3455,71 @@ class OperationsAlertRead(BaseModel):
     count: int = Field(ge=0)
 
 
+class OperationsAlertIncidentRead(BaseModel):
+    id: int
+    alert_code: str
+    severity: Literal["warning", "critical"]
+    message: str
+    status: Literal["open", "resolved"]
+    current_count: int = Field(ge=0)
+    peak_count: int = Field(ge=0)
+    observation_count: int = Field(ge=1)
+    opened_at: datetime
+    last_observed_at: datetime
+    resolved_at: datetime | None = None
+    version: int = Field(ge=0)
+
+
+class OperationsAlertDeliveryRead(BaseModel):
+    id: int
+    incident_id: int | None = None
+    event_type: Literal["triggered", "escalated", "reminder", "resolved", "test"]
+    idempotency_key: str
+    request_hash: str
+    status: Literal["pending", "processing", "sent", "failed"]
+    attempt_count: int = Field(ge=0, le=5)
+    response_status_code: int | None = Field(default=None, ge=100, le=599)
+    failure_code: str | None = None
+    next_attempt_at: datetime | None = None
+    last_attempt_at: datetime | None = None
+    sent_at: datetime | None = None
+    version: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+
+class OperationsAlertingRead(BaseModel):
+    enabled: bool
+    configured: bool
+    destination_host: str | None = None
+    minimum_severity: Literal["warning", "critical"]
+    poll_seconds: int = Field(ge=1)
+    reminder_minutes: int = Field(ge=1)
+    open_incident_count: int = Field(ge=0)
+    pending_delivery_count: int = Field(ge=0)
+    failed_delivery_count: int = Field(ge=0)
+    incidents: list[OperationsAlertIncidentRead] = Field(default_factory=list)
+    deliveries: list[OperationsAlertDeliveryRead] = Field(default_factory=list)
+
+
+class OperationsAlertAction(BaseModel):
+    account_password: str = Field(min_length=1, max_length=128)
+    reason: str = Field(min_length=3, max_length=500)
+    expected_version: int | None = Field(default=None, ge=0)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_alert_reason(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 3:
+            raise ValueError("reason must contain at least 3 non-whitespace characters")
+        return normalized
+
+
+class OperationsAlertRetryAction(OperationsAlertAction):
+    expected_version: int = Field(ge=0)
+
+
 class OperationsHistoryPointRead(BaseModel):
     bucket_at: datetime
     instances_reporting: int = Field(ge=0)

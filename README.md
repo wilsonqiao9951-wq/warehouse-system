@@ -25,6 +25,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Tenant and platform commercial usage reports with password-confirmed, audited CSV export
 - Tenant-scoped enterprise audit search, activity summaries, and password-confirmed hash-evidenced CSV export
 - Minimal live/ready probes plus platform-only live and durable privacy-safe request, worker, integration, billing, and backup operations monitoring
+- Durable aggregate SLA alert episodes with signed, idempotent, retryable on-call Webhooks and explicit recovery evidence
 - Database-elected background schedulers with generation fencing, heartbeat takeover, and multi-replica standby visibility
 - Role-compatible enterprise user access policies with explicit allow/deny/inherit overrides and complete audit evidence
 - Tenant-scoped enterprise operations analytics with reconciled KPIs, quality coverage, regional stock, and audited CSV export
@@ -161,7 +162,7 @@ are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 - `POST /api/organization/data-exports` creates a password-confirmed tenant backup ZIP with JSONL records, referenced local evidence files, secret redaction, and a checksum manifest; see [`docs/CUSTOMER_DATA_EXPORTS.md`](docs/CUSTOMER_DATA_EXPORTS.md).
 - `POST /api/organization/data-restores/rehearsals` validates a backup and records a dry-run before separate approval, exact-archive application, and rollback; see [`docs/CONTROLLED_DATA_RESTORES.md`](docs/CONTROLLED_DATA_RESTORES.md).
 - `GET /api/audit-logs/search` and `/summary` require effective `audit.read`; password-confirmed `POST /api/audit-logs/export` requires `audit.export` and returns a formula-safe, SHA-256-recorded CSV. See [`docs/AUDIT_LOGS.md`](docs/AUDIT_LOGS.md).
-- `GET /health/live` and `/health/ready` provide minimal orchestration probes; platform administrators use `GET /api/platform/operations/summary`, `GET /api/platform/operations/history`, and `/platform/operations` for live plus retained SLA-operability evidence. The retained history is self-reported, so an external probe remains authoritative. See [`docs/OPERATIONS_MONITORING.md`](docs/OPERATIONS_MONITORING.md).
+- `GET /health/live` and `/health/ready` provide minimal orchestration probes; platform administrators use the platform operations APIs and `/platform/operations` for live/history evidence plus signed alert delivery. The retained history and alerts are self-reported, so an external probe remains authoritative. See [`docs/OPERATIONS_MONITORING.md`](docs/OPERATIONS_MONITORING.md) and [`docs/SLA_ALERT_DELIVERY.md`](docs/SLA_ALERT_DELIVERY.md).
 - `GET /api/permissions/me` resolves role defaults and administrator-issued user overrides; the administrator matrix is documented in [`docs/ENTERPRISE_ACCESS_POLICIES.md`](docs/ENTERPRISE_ACCESS_POLICIES.md).
 - `GET /api/analytics/operations` returns reconciled work-order, service-quality, contribution, and regional-inventory metrics; password-confirmed `POST /api/analytics/operations/export` creates a formula-safe, digest-evidenced CSV. See [`docs/ENTERPRISE_ANALYTICS.md`](docs/ENTERPRISE_ANALYTICS.md).
 - `POST /api/agent/operations` runs a permission-controlled, read-only operating review over allowlisted tenant evidence and retains only digest-level question metadata. See [`docs/ENTERPRISE_OPERATIONS_AGENT.md`](docs/ENTERPRISE_OPERATIONS_AGENT.md).
@@ -228,6 +229,10 @@ MAX_IMAGE_UPLOAD_BYTES=10485760
 MAX_KNOWLEDGE_MEDIA_UPLOAD_BYTES=52428800
 OPERATIONS_REQUEST_WINDOW_SECONDS=300
 OPERATIONS_BACKUP_WARNING_DAYS=7
+OPERATIONS_ALERT_DELIVERY_ENABLED=false
+OPERATIONS_ALERT_WEBHOOK_URL=<public HTTPS on-call endpoint>
+OPERATIONS_ALERT_WEBHOOK_SECRET=<at least 32 random characters>
+OPERATIONS_ALERT_MIN_SEVERITY=critical
 MAX_ANALYTICS_EXPORT_ROWS=100000
 ```
 
@@ -239,7 +244,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260808_0065` (encrypted ERP/WMS adapter profiles and immutable connection-test evidence).
+- Current schema head: `20260808_0066` (durable platform alert incidents and signed delivery outbox evidence).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

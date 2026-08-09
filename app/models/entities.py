@@ -411,6 +411,118 @@ class OperationsHealthSample(Base):
     )
 
 
+class OperationsAlertIncident(Base):
+    __tablename__ = "operations_alert_incidents"
+    __table_args__ = (
+        CheckConstraint(
+            "severity IN ('warning', 'critical')",
+            name="ck_operations_alert_incident_severity",
+        ),
+        CheckConstraint(
+            "status IN ('open', 'resolved')",
+            name="ck_operations_alert_incident_status",
+        ),
+        CheckConstraint(
+            "current_count >= 0 AND peak_count >= current_count AND observation_count >= 1",
+            name="ck_operations_alert_incident_counts",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_operations_alert_incident_version_non_negative",
+        ),
+        CheckConstraint(
+            "(status = 'open' AND resolved_at IS NULL) OR "
+            "(status = 'resolved' AND resolved_at IS NOT NULL)",
+            name="ck_operations_alert_incident_resolution",
+        ),
+        Index("ix_operations_alert_incident_status", "status"),
+        Index("ix_operations_alert_incident_code", "alert_code"),
+        Index("ix_operations_alert_incident_observed", "last_observed_at"),
+        Index(
+            "uq_operations_alert_incident_active_code",
+            "alert_code",
+            unique=True,
+            sqlite_where=text("status = 'open'"),
+            postgresql_where=text("status = 'open'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    alert_code: Mapped[str] = mapped_column(String(160), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="open", nullable=False)
+    current_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    peak_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    observation_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class OperationsAlertDelivery(Base):
+    __tablename__ = "operations_alert_deliveries"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_operations_alert_delivery_idempotency"),
+        CheckConstraint(
+            "event_type IN ('triggered', 'escalated', 'reminder', 'resolved', 'test')",
+            name="ck_operations_alert_delivery_event_type",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'sent', 'failed')",
+            name="ck_operations_alert_delivery_status",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND attempt_count <= 5",
+            name="ck_operations_alert_delivery_attempt_count",
+        ),
+        CheckConstraint(
+            "response_status_code IS NULL OR "
+            "(response_status_code >= 100 AND response_status_code <= 599)",
+            name="ck_operations_alert_delivery_http_status",
+        ),
+        CheckConstraint(
+            "length(request_hash) = 64 AND length(idempotency_key) = 64",
+            name="ck_operations_alert_delivery_hashes",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_operations_alert_delivery_version_non_negative",
+        ),
+        Index("ix_operations_alert_delivery_status_due", "status", "next_attempt_at"),
+        Index("ix_operations_alert_delivery_incident", "incident_id"),
+        Index("ix_operations_alert_delivery_created", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    incident_id: Mapped[int | None] = mapped_column(
+        ForeignKey("operations_alert_incidents.id", ondelete="RESTRICT"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    response_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    incident = relationship("OperationsAlertIncident")
+
+
 class OrganizationDomain(Base):
     __tablename__ = "organization_domains"
     __table_args__ = (

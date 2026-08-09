@@ -58,6 +58,7 @@ Status legend:
 - `Implemented` AppSheet/REST inbound work-order Webhook, API keys, field mapping, source links, idempotency, sync logs, and signed/retryable status/completion/parts callbacks
 - `Implemented` AppSheet/Google Sheets versioned parallel-run contracts and readiness gaps
 - `Implemented` Secure vendor-neutral ERP/WMS REST/JSON and OData v4 adapter profiles with encrypted credentials and governed connection-test evidence
+- `Implemented` Durable aggregate SLA incidents and signed/idempotent/retryable on-call Webhook delivery with resolution evidence
 - `Unknown` Customer-specific Gmail, ERP, WMS, and other external field/business mappings pending real-system discovery
 - `Unknown` Existing reporting schedule/distribution requirements
 

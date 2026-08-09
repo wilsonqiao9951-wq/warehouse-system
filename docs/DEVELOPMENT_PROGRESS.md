@@ -6,10 +6,64 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-08 - Signed SLA alert delivery and production observability
+
+Status: implemented, published as draft PR #40, and verified by GitHub Actions
+run #75. Backend, frontend, private PostgreSQL, dependency, production
+configuration, Compose, and API/Web image jobs all passed.
+
+Delivered:
+
+- Refactored Platform Operations to use one aggregate risk collector for both
+  the live console and the alert worker, preventing threshold drift.
+- Added platform-global durable alert incidents with one active episode per
+  safe code, trigger/escalation/reminder/resolution transitions, count/peak/
+  observation evidence, server times, and optimistic versions.
+- Added a durable delivery outbox with canonical aggregate payloads, SHA-256
+  request evidence, stable idempotency, five bounded attempts, controlled safe
+  failures, terminal state, and stale-processing lease recovery.
+- Added HMAC-SHA256 Webhooks over public-address-pinned TLS with original-host
+  certificate validation, no redirects, bounded timeout/response drain, and no
+  destination response-body retention.
+- Added a database-leased alert worker for multi-replica deployments and a
+  PostgreSQL verification command for trigger/idempotency/resolution evidence.
+- Added platform-administrator-only alerting reads plus password-confirmed,
+  reason-audited signed tests and failed-delivery retries. Customer admins and
+  all operational tenant roles remain denied.
+- Extended `/platform/operations` with configuration state, incident/delivery
+  counts, recent safe delivery evidence, signed test, and versioned retry.
+- Added migration `0066`, fail-closed production configuration, Compose/CI
+  integration, receiver/runbook documentation, RBAC mapping, and tests.
+
+Verification so far:
+
+- Alert transition, signing, idempotency, retry, redaction, platform-role,
+  password, private-DNS and production-configuration focused tests pass (56
+  final focused tests together with existing operations regressions).
+- Configured SQLite upgraded from `0065` to `0066`; fresh base-to-head,
+  `0066 -> 0065 -> 0066`, and Alembic model zero-drift checks passed.
+- Frontend ESLint, standalone TypeScript, and the Next.js production build pass
+  for all 47 static routes.
+- All 298 backend tests pass. Python dependency consistency and requirement/
+  full-environment vulnerability audits plus full/production npm audits report
+  no known vulnerabilities.
+- Production configuration with signed alert delivery enabled, Compose topology,
+  Python compilation, the repeatable operations-alert verifier, and diff
+  integrity checks pass. GitHub Actions #75 then authoritatively passed the
+  PostgreSQL 16 migration/zero-drift, RLS, worker lease, operations history,
+  operations-alert event verification, and API/Web image-build gates.
+- Backed up the local `0065` database as
+  `openpartsflow.pre-0066-20260808-220807.db` (1,789,952 bytes; SHA-256
+  `097F9823BAD1A3C42457FD7B1293AC1CF2EB476C62E165D5358A7BE15A18F4E7`)
+  before upgrading to `0066`.
+- Functional commit `b781ffe` is pushed on `codex/sla-alert-delivery`; draft PR
+  #40 is correctly stacked on PR #39 and is mergeable.
+
 ## 2026-08-08 - ERP/WMS adapters and governed connection validation
 
-Status: implemented; all local release gates passed and GitHub publication is
-in progress.
+Status: implemented, published as draft PR #39, and verified by GitHub Actions
+run #74. Backend, frontend, private PostgreSQL/RLS, dependency, production
+configuration, Compose, and API/Web image jobs all passed.
 
 Delivered:
 

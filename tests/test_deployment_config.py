@@ -95,6 +95,38 @@ def test_safe_production_configuration_and_cors_are_accepted():
             {"operations_history_query_max_samples": 999},
             "OPERATIONS_HISTORY_QUERY_MAX_SAMPLES",
         ),
+        (
+            {"operations_alert_delivery_poll_seconds": 10},
+            "OPERATIONS_ALERT_DELIVERY_POLL_SECONDS",
+        ),
+        (
+            {"operations_alert_min_severity": "info"},
+            "OPERATIONS_ALERT_MIN_SEVERITY",
+        ),
+        (
+            {"operations_alert_reminder_minutes": 2},
+            "OPERATIONS_ALERT_REMINDER_MINUTES",
+        ),
+        (
+            {"operations_alert_request_timeout_seconds": 31},
+            "OPERATIONS_ALERT_REQUEST_TIMEOUT_SECONDS",
+        ),
+        (
+            {"operations_alert_max_response_bytes": 512},
+            "OPERATIONS_ALERT_MAX_RESPONSE_BYTES",
+        ),
+        (
+            {"operations_alert_delivery_enabled": True},
+            "OPERATIONS_ALERT_WEBHOOK_URL",
+        ),
+        (
+            {
+                "operations_alert_delivery_enabled": True,
+                "operations_alert_webhook_url": "https://alerts.example.com/openpartsflow",
+                "operations_alert_webhook_secret": "change-me-placeholder-secret-over-32-characters",
+            },
+            "OPERATIONS_ALERT_WEBHOOK_SECRET",
+        ),
     ],
 )
 def test_unsafe_deployment_configuration_fails_closed(overrides, message):
@@ -108,6 +140,16 @@ def test_development_keeps_local_origins_and_does_not_require_production_secrets
     validate_deployment_settings(config)
 
     assert set(LOCAL_CORS_ORIGINS).issubset(cors_allowed_origins(config))
+
+
+def test_signed_operations_alert_delivery_configuration_is_accepted():
+    validate_deployment_settings(
+        deployment_settings(
+            operations_alert_delivery_enabled=True,
+            operations_alert_webhook_url="https://alerts.example.com/openpartsflow",
+            operations_alert_webhook_secret="secure-operations-alert-secret-over-32-characters",
+        )
+    )
 
 
 def test_password_reset_email_configuration_is_fail_closed():

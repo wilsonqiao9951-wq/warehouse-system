@@ -254,6 +254,20 @@ def test_platform_operations_rejects_customer_administrator(client):
             headers={"X-User-Id": str(created.json()["id"])},
         )
         assert history_denied.status_code == 403
+        alerting_denied = client.get(
+            "/api/platform/operations/alerting",
+            headers={"X-User-Id": str(created.json()["id"])},
+        )
+        assert alerting_denied.status_code == 403
+        alert_test_denied = client.post(
+            "/api/platform/operations/alerting/test",
+            headers={"X-User-Id": str(created.json()["id"])},
+            json={
+                "account_password": "customer-operations-password",
+                "reason": "Attempted platform alert test",
+            },
+        )
+        assert alert_test_denied.status_code == 403
     finally:
         settings.rbac_enforce = original_rbac
         settings.legacy_header_auth = original_legacy

@@ -140,6 +140,14 @@ instance identifiers are not retained in API responses; only high-level state
 and the exception class are exposed to the platform operator. See
 [`OPERATIONS_MONITORING.md`](OPERATIONS_MONITORING.md).
 
+`GET /api/platform/operations/alerting`, its signed test endpoint, and failed
+delivery retry are also platform-administrator-only. Test/retry additionally
+require the current account password and a reason. Customer administrators and
+all tenant roles are denied before the platform-global database scope is
+enabled. Alert payloads contain aggregate safe codes/counts only; the full
+destination and signing secret never enter the API. See
+[`SLA_ALERT_DELIVERY.md`](SLA_ALERT_DELIVERY.md).
+
 Background scheduler ownership is elected through the platform-global database
 lease table. The platform summary exposes generation, expiration, current-run,
 and next-run evidence but never the opaque host/process owner identifier.

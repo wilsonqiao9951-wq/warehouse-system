@@ -6,7 +6,7 @@ from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -17,20 +17,27 @@ from app.core.security import verify_password
 from app.models import (
     AuditLog,
     ExternalSyncLog,
-    Organization,
-    OrganizationDataExport,
-    OrganizationDataRestore,
-    SubscriptionNotice,
+    OperationsAlertDelivery,
+    OperationsAlertIncident,
     User,
-    WorkerLease,
 )
 from app.schemas import (
+    OperationsAlertAction,
+    OperationsAlertDeliveryRead,
+    OperationsAlertRetryAction,
+    OperationsAlertingRead,
     OperationsStaleDeliveryRecovery,
     OperationsStaleDeliveryRecoveryRead,
     PlatformOperationsHistoryRead,
     PlatformOperationsSummaryRead,
 )
 from app.services.operations_history import aggregate_operations_history
+from app.services.operations_alerts import (
+    alert_destination_host,
+    enqueue_operations_alert_test,
+    operations_alert_configuration_errors,
+)
+from app.services.operations_risks import collect_platform_operations_risks
 
 
 router = APIRouter(tags=["operations"])
@@ -60,6 +67,43 @@ def _require_platform_reauthentication(
             status_code=401,
             detail="Account password verification failed",
         )
+
+
+def _operations_alert_delivery_read(row: OperationsAlertDelivery) -> dict:
+    return {
+        "id": row.id,
+        "incident_id": row.incident_id,
+        "event_type": row.event_type,
+        "idempotency_key": row.idempotency_key,
+        "request_hash": row.request_hash,
+        "status": row.status,
+        "attempt_count": row.attempt_count,
+        "response_status_code": row.response_status_code,
+        "failure_code": row.failure_code,
+        "next_attempt_at": row.next_attempt_at,
+        "last_attempt_at": row.last_attempt_at,
+        "sent_at": row.sent_at,
+        "version": row.version,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def _operations_alert_incident_read(row: OperationsAlertIncident) -> dict:
+    return {
+        "id": row.id,
+        "alert_code": row.alert_code,
+        "severity": row.severity,
+        "message": row.message,
+        "status": row.status,
+        "current_count": row.current_count,
+        "peak_count": row.peak_count,
+        "observation_count": row.observation_count,
+        "opened_at": row.opened_at,
+        "last_observed_at": row.last_observed_at,
+        "resolved_at": row.resolved_at,
+        "version": row.version,
+    }
 
 
 @router.get("/health/live")
@@ -126,181 +170,15 @@ def platform_operations_summary(
         window_seconds=settings.operations_request_window_seconds,
         now=now,
     )
-    leases = {
-        row.name: row
-        for row in db.scalars(select(WorkerLease)).all()
-    }
-    for worker in snapshot["workers"]:
-        lease = leases.get(worker["name"])
-        worker.update(
-            lease_generation=lease.generation if lease else None,
-            lease_expires_at=utc_iso(lease.lease_expires_at) if lease else None,
-            next_run_at=utc_iso(lease.next_run_at) if lease else None,
-            run_started_at=utc_iso(lease.run_started_at) if lease else None,
-        )
-
-    pending_conditions = (
-        ExternalSyncLog.direction == "outbound",
-        ExternalSyncLog.status == "pending",
-    )
-    outbound_pending = db.scalar(
-        select(func.count(ExternalSyncLog.id)).where(*pending_conditions)
-    ) or 0
-    outbound_due = db.scalar(
-        select(func.count(ExternalSyncLog.id)).where(
-            *pending_conditions,
-            or_(
-                ExternalSyncLog.next_retry_at.is_(None),
-                ExternalSyncLog.next_retry_at <= now,
-            ),
-        )
-    ) or 0
-    outbound_failed = db.scalar(
-        select(func.count(ExternalSyncLog.id)).where(
-            ExternalSyncLog.direction == "outbound",
-            ExternalSyncLog.status == "failed",
-        )
-    ) or 0
-    stale_cutoff = now - timedelta(
-        minutes=max(1, settings.operations_stale_processing_minutes)
-    )
-    stale_processing = db.scalar(
-        select(func.count(ExternalSyncLog.id)).where(
-            ExternalSyncLog.direction == "outbound",
-            ExternalSyncLog.status == "processing",
-            ExternalSyncLog.updated_at < stale_cutoff,
-        )
-    ) or 0
-
-    critical_notices = db.scalar(
-        select(func.count(SubscriptionNotice.id)).where(
-            SubscriptionNotice.status == "open",
-            SubscriptionNotice.severity == "critical",
-        )
-    ) or 0
-    active_organizations = db.scalar(
-        select(func.count(Organization.id)).where(Organization.is_active.is_(True))
-    ) or 0
-    latest_exports = (
-        select(
-            OrganizationDataExport.organization_id.label("organization_id"),
-            func.max(OrganizationDataExport.generated_at).label("latest_generated_at"),
-        )
-        .group_by(OrganizationDataExport.organization_id)
-        .subquery()
-    )
-    backup_cutoff = now - timedelta(
-        days=max(1, settings.operations_backup_warning_days)
-    )
-    organizations_without_recent_backup = db.scalar(
-        select(func.count(Organization.id))
-        .outerjoin(
-            latest_exports,
-            latest_exports.c.organization_id == Organization.id,
-        )
-        .where(
-            Organization.is_active.is_(True),
-            or_(
-                latest_exports.c.latest_generated_at.is_(None),
-                latest_exports.c.latest_generated_at < backup_cutoff,
-            ),
-        )
-    ) or 0
-    restore_plans_with_conflicts = db.scalar(
-        select(func.count(OrganizationDataRestore.id)).where(
-            OrganizationDataRestore.status.in_(["validated", "approved"]),
-            or_(
-                OrganizationDataRestore.conflict_count > 0,
-                OrganizationDataRestore.file_conflict_count > 0,
-            ),
-        )
-    ) or 0
-
-    alerts: list[dict] = []
-
-    def alert(severity: str, code: str, message: str, count: int) -> None:
-        if count > 0:
-            alerts.append(
-                {
-                    "severity": severity,
-                    "code": code,
-                    "message": message,
-                    "count": count,
-                }
-            )
-
-    alert(
-        "warning",
-        "outbound_delivery_due",
-        "Outbound webhook deliveries are due.",
-        outbound_due,
-    )
-    alert(
-        "critical",
-        "outbound_delivery_failed",
-        "Outbound webhook deliveries require manual retry.",
-        outbound_failed,
-    )
-    alert(
-        "critical",
-        "outbound_delivery_stale",
-        "Outbound webhook deliveries are stuck in processing.",
-        stale_processing,
-    )
-    alert(
-        "critical",
-        "billing_notice_critical",
-        "Critical subscription notices are open.",
-        critical_notices,
-    )
-    alert(
-        "warning",
-        "backup_overdue",
-        "Active organizations have no backup in the last "
-        f"{max(1, settings.operations_backup_warning_days)} days.",
-        organizations_without_recent_backup,
-    )
-    alert(
-        "warning",
-        "restore_conflict",
-        "Restore plans have unresolved record or media conflicts.",
-        restore_plans_with_conflicts,
-    )
-    for worker in snapshot["workers"]:
-        if worker["enabled"] and worker["status"] in {"error", "stale"}:
-            alert(
-                "critical" if worker["status"] == "stale" else "warning",
-                f"worker_{worker['name']}_{worker['status']}",
-                f"Background worker {worker['name']} is {worker['status']}.",
-                1,
-            )
-    request_metrics = snapshot["requests"]
-    if request_metrics["total"] >= 20 and request_metrics["server_error_rate"] >= 0.05:
-        alert(
-            "critical",
-            "request_error_rate",
-            "Five-minute server error rate is at least 5%.",
-            request_metrics["server_errors"],
-        )
-    if (
-        request_metrics["total"] >= 5
-        and request_metrics["p95_duration_ms"] > max(1, settings.operations_slow_request_ms)
-    ):
-        alert(
-            "warning",
-            "request_latency",
-            "Five-minute p95 request latency exceeds the configured threshold.",
-            1,
-        )
     schema_ready = getattr(request.app.state, "schema_ready", False)
     schema_revision = str(getattr(request.app.state, "schema_revision", "unknown"))
-    if not schema_ready:
-        alert(
-            "critical",
-            "schema_not_ready",
-            "Application schema readiness has been lost.",
-            1,
-        )
+    risks = collect_platform_operations_risks(
+        db,
+        snapshot=snapshot,
+        schema_ready=schema_ready,
+        now=now,
+    )
+    alerts = risks["alerts"]
 
     status = (
         "critical"
@@ -318,23 +196,173 @@ def platform_operations_summary(
         "database_latency_ms": database_latency_ms,
         "schema_status": "ok" if schema_ready else "error",
         "schema_revision": schema_revision,
-        "requests": request_metrics,
+        "requests": snapshot["requests"],
         "workers": snapshot["workers"],
-        "integration_queue": {
-            "outbound_pending": outbound_pending,
-            "outbound_due": outbound_due,
-            "outbound_failed": outbound_failed,
-            "stale_processing": stale_processing,
-        },
-        "open_critical_billing_notices": critical_notices,
-        "data_protection": {
-            "active_organizations": active_organizations,
-            "organizations_without_recent_backup": organizations_without_recent_backup,
-            "backup_warning_days": max(1, settings.operations_backup_warning_days),
-            "restore_plans_with_conflicts": restore_plans_with_conflicts,
-        },
+        "integration_queue": risks["integration_queue"],
+        "open_critical_billing_notices": risks["open_critical_billing_notices"],
+        "data_protection": risks["data_protection"],
         "alerts": alerts,
     }
+
+
+@router.get(
+    "/api/platform/operations/alerting",
+    response_model=OperationsAlertingRead,
+)
+def platform_operations_alerting(
+    response: Response,
+    incident_limit: int = Query(default=50, ge=1, le=200),
+    delivery_limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    set_platform_database_scope(db)
+    response.headers["Cache-Control"] = "no-store"
+    incidents = db.scalars(
+        select(OperationsAlertIncident)
+        .order_by(
+            OperationsAlertIncident.last_observed_at.desc(),
+            OperationsAlertIncident.id.desc(),
+        )
+        .limit(incident_limit)
+    ).all()
+    deliveries = db.scalars(
+        select(OperationsAlertDelivery)
+        .order_by(
+            OperationsAlertDelivery.created_at.desc(),
+            OperationsAlertDelivery.id.desc(),
+        )
+        .limit(delivery_limit)
+    ).all()
+    open_incident_count = db.scalar(
+        select(func.count(OperationsAlertIncident.id)).where(
+            OperationsAlertIncident.status == "open"
+        )
+    ) or 0
+    pending_delivery_count = db.scalar(
+        select(func.count(OperationsAlertDelivery.id)).where(
+            OperationsAlertDelivery.status.in_(["pending", "processing"])
+        )
+    ) or 0
+    failed_delivery_count = db.scalar(
+        select(func.count(OperationsAlertDelivery.id)).where(
+            OperationsAlertDelivery.status == "failed"
+        )
+    ) or 0
+    config_errors = operations_alert_configuration_errors()
+    return {
+        "enabled": settings.operations_alert_delivery_enabled,
+        "configured": settings.operations_alert_delivery_enabled and not config_errors,
+        "destination_host": alert_destination_host(),
+        "minimum_severity": settings.operations_alert_min_severity,
+        "poll_seconds": settings.operations_alert_delivery_poll_seconds,
+        "reminder_minutes": settings.operations_alert_reminder_minutes,
+        "open_incident_count": open_incident_count,
+        "pending_delivery_count": pending_delivery_count,
+        "failed_delivery_count": failed_delivery_count,
+        "incidents": [_operations_alert_incident_read(row) for row in incidents],
+        "deliveries": [_operations_alert_delivery_read(row) for row in deliveries],
+    }
+
+
+@router.post(
+    "/api/platform/operations/alerting/test",
+    response_model=OperationsAlertDeliveryRead,
+)
+def queue_operations_alert_test(
+    payload: OperationsAlertAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    _require_platform_reauthentication(db, actor, payload.account_password)
+    errors = operations_alert_configuration_errors()
+    if not settings.operations_alert_delivery_enabled or errors:
+        raise HTTPException(status_code=409, detail="Operations alert delivery is not configured")
+    set_platform_database_scope(db)
+    queued_at = utcnow_naive()
+    delivery = enqueue_operations_alert_test(db, now=queued_at)
+    db.flush()
+    db.add(
+        AuditLog(
+            organization_id=actor.organization_id,
+            user_id=actor.user_id,
+            action="queue_operations_alert_test",
+            entity_type="operations_alert_delivery",
+            entity_id=delivery.id,
+            metadata_json=json.dumps(
+                {
+                    "reason": payload.reason,
+                    "destination_host": alert_destination_host(),
+                    "queued_at": utc_iso(queued_at),
+                },
+                separators=(",", ":"),
+            ),
+            timestamp=queued_at,
+        )
+    )
+    db.commit()
+    db.refresh(delivery)
+    return _operations_alert_delivery_read(delivery)
+
+
+@router.post(
+    "/api/platform/operations/alerting/deliveries/{delivery_id}/retry",
+    response_model=OperationsAlertDeliveryRead,
+)
+def retry_operations_alert_delivery(
+    delivery_id: int,
+    payload: OperationsAlertRetryAction,
+    db: Session = Depends(get_db),
+    actor: Actor = Depends(get_current_actor),
+):
+    require_platform_admin(actor)
+    _require_platform_reauthentication(db, actor, payload.account_password)
+    errors = operations_alert_configuration_errors()
+    if not settings.operations_alert_delivery_enabled or errors:
+        raise HTTPException(status_code=409, detail="Operations alert delivery is not configured")
+    set_platform_database_scope(db)
+    delivery = db.get(OperationsAlertDelivery, delivery_id)
+    if not delivery:
+        raise HTTPException(status_code=404, detail="Operations alert delivery not found")
+    if delivery.version != payload.expected_version:
+        raise HTTPException(status_code=409, detail="Operations alert delivery version conflict")
+    if delivery.status != "failed":
+        raise HTTPException(status_code=409, detail="Only failed alert deliveries can be retried")
+    queued_at = utcnow_naive()
+    previous_attempt_count = delivery.attempt_count
+    delivery.status = "pending"
+    delivery.attempt_count = 0
+    delivery.response_status_code = None
+    delivery.failure_code = None
+    delivery.next_attempt_at = queued_at
+    delivery.sent_at = None
+    delivery.version += 1
+    delivery.updated_at = queued_at
+    db.add(delivery)
+    db.add(
+        AuditLog(
+            organization_id=actor.organization_id,
+            user_id=actor.user_id,
+            action="retry_operations_alert_delivery",
+            entity_type="operations_alert_delivery",
+            entity_id=delivery.id,
+            metadata_json=json.dumps(
+                {
+                    "reason": payload.reason,
+                    "previous_attempt_count": previous_attempt_count,
+                    "idempotency_key": delivery.idempotency_key,
+                    "queued_at": utc_iso(queued_at),
+                },
+                separators=(",", ":"),
+            ),
+            timestamp=queued_at,
+        )
+    )
+    db.commit()
+    db.refresh(delivery)
+    return _operations_alert_delivery_read(delivery)
 
 
 @router.get(
