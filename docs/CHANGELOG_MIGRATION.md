@@ -1,5 +1,19 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260808_0067 - Scale query indexes and executable platform recovery
+
+- Adds tenant-led indexes for recent/scheduled work orders, inventory-ledger
+  pagination, and organization/engineer work-order part history.
+- Adds a non-root PostgreSQL 16 recovery image and explicit Compose recovery
+  profile that packages PostgreSQL plus public, private, and rollback evidence
+  under one hash-protected recovery point after user writes are closed.
+- Adds isolated restore refusal, pre-mutation archive validation, exact schema/
+  row/file verification, safe RPO/RTO reporting, and report budget validation.
+- Adds a repeatable loopback-only PostgreSQL scale gate with rolled-back
+  synthetic data, query-plan/index assertions, and p50/p95 regression evidence.
+- Extends controlled tenant restore compatibility through `0067`; these
+  revisions do not change the allowlisted portable record format.
+
 ## 20260808_0066 - Durable signed operations alert delivery
 
 - Added platform-global alert incidents with one active episode per safe alert

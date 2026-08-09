@@ -31,6 +31,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Tenant-scoped enterprise operations analytics with reconciled KPIs, quality coverage, regional stock, and audited CSV export
 - Read-only enterprise operations Agent with bounded intents, source-defined evidence, quota control, and privacy-preserving run audit
 - Private-deployment container stack with PostgreSQL, one-shot migrations, persistent evidence volumes, same-origin web/API routing, health gates, and fail-closed production configuration
+- Complete PostgreSQL plus evidence-volume recovery points, isolated hash-verified restore rehearsals, measured RPO/RTO reports, and repeatable PostgreSQL scale/query-plan gates
 - Enterprise data-residency pinning with deployment-region validation, password-confirmed policy changes, runtime access denial, and fail-closed startup
 - Tenant-isolated portable ZIP backups with secret redaction, media manifests, and durable SHA-256 evidence
 - Controlled restore rehearsal, safe record/media recovery, exact-plan application, and drift-protected rollback
@@ -145,6 +146,8 @@ docker compose --env-file .env.production -f docker-compose.production.yml up -d
 TLS must terminate at the organization's gateway or load balancer. Deployment,
 upgrade, backup, rollback, health-check, and security requirements are in
 [`docs/PRIVATE_DEPLOYMENT.md`](docs/PRIVATE_DEPLOYMENT.md).
+Executable platform recovery and scale rehearsal boundaries are in
+[`docs/PLATFORM_RECOVERY_REHEARSALS.md`](docs/PLATFORM_RECOVERY_REHEARSALS.md).
 Enterprise residency policy, enforcement, and controlled relocation boundaries
 are in [`docs/DATA_RESIDENCY.md`](docs/DATA_RESIDENCY.md).
 
@@ -244,7 +247,7 @@ DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/openpartsflow
 
 ## Database Migrations (Alembic)
 
-- Current schema head: `20260808_0066` (durable platform alert incidents and signed delivery outbox evidence).
+- Current schema head: `20260808_0067` (tenant-led scale query indexes for work orders, part use, and inventory ledger pagination).
 - New database (recommended):
   - `alembic upgrade head`
 - Existing database already created by previous app versions:

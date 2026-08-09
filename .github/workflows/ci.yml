@@ -94,7 +94,9 @@ jobs:
       - run: python -m scripts.verify_worker_leases
       - run: python -m scripts.verify_operations_history
       - run: python -m scripts.verify_operations_alerts
+      - run: python -m scripts.verify_scale_performance --confirm-isolated-ci --report /tmp/openpartsflow-scale-report.json
+      - run: python -m scripts.verify_disaster_recovery --confirm-isolated-ci
       - run: docker compose --env-file .env.production.example -f docker-compose.production.yml config --quiet
         env:
           DATABASE_URL: postgresql+psycopg://openpartsflow_app:ci-app-postgres-password@db:5432/openpartsflow
-      - run: docker compose --env-file .env.production.example -f docker-compose.production.yml build api web
+      - run: docker compose --env-file .env.production.example -f docker-compose.production.yml build api web recovery-backup

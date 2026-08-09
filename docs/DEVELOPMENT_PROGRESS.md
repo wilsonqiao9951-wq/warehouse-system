@@ -6,6 +6,56 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-08 - Platform recovery and repeatable scale rehearsals
+
+Status: implemented and locally verified; publishing and authoritative GitHub
+PostgreSQL 16 recovery/scale verification are in progress.
+
+Delivered:
+
+- Added one complete platform recovery point for PostgreSQL plus public,
+  protected, and controlled-restore rollback evidence after user writes close.
+- Added canonical manifest and archive/file SHA-256 evidence, exact Alembic and
+  table row counts, atomic recovery-point publication, and secret/path/value
+  exclusion from operator output.
+- Added an isolated restore workflow that refuses the source or non-empty target,
+  validates every artifact before mutation, restores PostgreSQL/evidence to new
+  targets, and verifies exact schema, row, file, byte, and hash evidence.
+- Added privacy-safe measured RPO/RTO rehearsal reports and explicit budget
+  verification, plus an automatic PostgreSQL 16 CI rehearsal that always drops
+  its unique target database.
+- Added a non-root, capability-free PostgreSQL 16 recovery image and opt-in
+  Compose recovery profile with read-only source evidence mounts and encrypted
+  off-host bind-root configuration.
+- Added a loopback-only, rolled-back PostgreSQL scale gate covering 40,000 work
+  orders across two tenants, 40,000 part-use rows, 80,000 inventory movements,
+  real query plans, expected indexes, and p50/p95 regression evidence.
+- Added migration `0067` with tenant-led work-order, inventory-ledger, and
+  engineer part-use pagination/range indexes. Restored missing portable-schema
+  compatibility continuity through revisions `0065`, `0066`, and `0067`.
+
+Verification so far:
+
+- Six recovery safety, RLS-privilege, hash, isolation, report-budget, scale-
+  helper, and portable-compatibility tests pass; recovery and scale scripts
+  compile.
+- Configured SQLite upgraded from `0066` to `0067`; fresh base-to-head,
+  `0067 -> 0066 -> 0067`, and Alembic model zero-drift checks passed.
+- Backed up the local `0066` database as
+  `openpartsflow.pre-0067-20260808-224406.db` (1,839,104 bytes; SHA-256
+  `CBF113AB1BC258E360383DCCA59ACE833352210A043AC2716E441570DDBCB913`)
+  before upgrading to `0067`.
+- All 305 backend tests pass after extending the private-deployment contract for
+  the two opt-in recovery services.
+- Frontend ESLint, standalone TypeScript, and the Next.js production build pass
+  for all 47 static routes.
+- Python dependency consistency and requirement/full-environment vulnerability
+  audits plus full/production npm audits report no known vulnerabilities.
+  Production configuration, Compose topology, Python compilation, and diff
+  integrity checks pass. Local Docker Desktop and PostgreSQL client utilities
+  are unavailable, so GitHub's PostgreSQL 16 and recovery-image gates remain
+  authoritative for the real scale and restore rehearsal.
+
 ## 2026-08-08 - Signed SLA alert delivery and production observability
 
 Status: implemented, published as draft PR #40, and verified by GitHub Actions
