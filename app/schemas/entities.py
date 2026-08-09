@@ -2442,14 +2442,100 @@ class LowStockAlert(BaseModel):
     threshold_rule_id: int | None = None
 
 
+class PartUsageBaselineRead(BaseModel):
+    id: int
+    part_id: int
+    part_number: str
+    part_name: str
+    scope: str
+    job_type_key: str
+    machine_type_key: str
+    store_key: str
+    sample_work_orders: int
+    sample_usage_rows: int
+    segment_work_orders: int
+    mean_quantity: float
+    stddev_quantity: float
+    p90_quantity: float
+    spike_threshold: float
+    support_ratio: float
+    source_fingerprint: str
+    version: int
+    computed_at: datetime
+
+
 class AbnormalUsageRow(BaseModel):
+    id: int
     work_order_id: int
+    work_order_part_id: int
     ticket_number: str
     engineer_id: int | None
+    engineer_name: str | None
+    part_id: int
+    part_number: str
+    part_name: str
+    warehouse_id: int
+    warehouse_name: str
+    observed_quantity: int
+    observed_parts_cost: float
     parts_cost: float
     revenue: float
-    severity: str
+    status: Literal["pending", "acknowledged", "confirmed", "dismissed"]
+    severity: Literal["low", "medium", "high"]
+    reason_codes: list[str]
+    explanations: list[str]
     reason: str
+    baseline_id: int | None
+    baseline_scope: str | None
+    baseline_sample_size: int
+    baseline_mean_quantity: float
+    baseline_p90_quantity: float
+    baseline_spike_threshold: float
+    segment_work_order_count: int
+    combination_support_ratio: float
+    usage_timezone: str
+    usage_local_hour: int | None
+    evaluation_version: str
+    source_fingerprint: str
+    version: int
+    acknowledged_by: int | None
+    acknowledged_by_name: str | None
+    acknowledged_at: datetime | None
+    acknowledgement_note: str | None
+    reviewed_by: int | None
+    reviewed_by_name: str | None
+    reviewed_at: datetime | None
+    decision_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class PartUsageReviewAction(BaseModel):
+    action: Literal["acknowledge", "confirm", "dismiss"]
+    expected_version: int = Field(ge=0)
+    note: str | None = Field(default=None, max_length=500)
+    reason: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_action_evidence(self):
+        if self.action == "acknowledge" and (
+            self.note is None or len(self.note.strip()) < 3
+        ):
+            raise ValueError("Acknowledgement note must be at least 3 characters")
+        if self.action in {"confirm", "dismiss"} and (
+            self.reason is None or len(self.reason.strip()) < 3
+        ):
+            raise ValueError("A decision reason of at least 3 characters is required")
+        return self
+
+
+class PartUsageEvaluationRead(BaseModel):
+    scanned: int = Field(ge=0)
+    created: int = Field(ge=0)
+    already_evaluated: int = Field(ge=0)
+    no_anomaly: int = Field(ge=0)
+    truncated: bool
+    next_after_id: int | None = Field(default=None, ge=1)
 
 
 class EngineerDashboard(BaseModel):

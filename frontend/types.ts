@@ -2065,13 +2065,80 @@ export interface LowStockAlert {
 }
 
 export interface AbnormalUsageRow {
+  id: number;
   work_order_id: number;
+  work_order_part_id: number;
   ticket_number: string;
   engineer_id?: number | null;
+  engineer_name?: string | null;
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  warehouse_id: number;
+  warehouse_name: string;
+  observed_quantity: number;
+  observed_parts_cost: number;
   parts_cost: number;
   revenue: number;
-  severity: string;
+  status: "pending" | "acknowledged" | "confirmed" | "dismissed";
+  severity: "low" | "medium" | "high";
+  reason_codes: string[];
+  explanations: string[];
   reason: string;
+  baseline_id?: number | null;
+  baseline_scope?: string | null;
+  baseline_sample_size: number;
+  baseline_mean_quantity: number;
+  baseline_p90_quantity: number;
+  baseline_spike_threshold: number;
+  segment_work_order_count: number;
+  combination_support_ratio: number;
+  usage_timezone: string;
+  usage_local_hour?: number | null;
+  evaluation_version: string;
+  source_fingerprint: string;
+  version: number;
+  acknowledged_by?: number | null;
+  acknowledged_by_name?: string | null;
+  acknowledged_at?: string | null;
+  acknowledgement_note?: string | null;
+  reviewed_by?: number | null;
+  reviewed_by_name?: string | null;
+  reviewed_at?: string | null;
+  decision_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PartUsageBaseline {
+  id: number;
+  part_id: number;
+  part_number: string;
+  part_name: string;
+  scope: string;
+  job_type_key: string;
+  machine_type_key: string;
+  store_key: string;
+  sample_work_orders: number;
+  sample_usage_rows: number;
+  segment_work_orders: number;
+  mean_quantity: number;
+  stddev_quantity: number;
+  p90_quantity: number;
+  spike_threshold: number;
+  support_ratio: number;
+  source_fingerprint: string;
+  version: number;
+  computed_at: string;
+}
+
+export interface PartUsageEvaluation {
+  scanned: number;
+  created: number;
+  already_evaluated: number;
+  no_anomaly: number;
+  truncated: boolean;
+  next_after_id?: number | null;
 }
 
 export interface PilotChecklist {

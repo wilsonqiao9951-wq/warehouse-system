@@ -1,5 +1,24 @@
 # OpenPartsFlow Migration Changelog
 
+## 20260808_0063 - Governed part-usage baselines and review evidence
+
+- Added fingerprinted tenant/part baselines for exact job-machine-store,
+  job-machine, machine, job, and organization fallback scopes.
+- Persisted sample coverage, segment population, mean, population deviation,
+  P90, spike threshold, support ratio, evidence time range, and versions.
+- Added one immutable-evidence review per work-order part usage with quantity,
+  cost, baseline snapshot, local timezone/hour, reasons, severity, and source
+  fingerprint.
+- Enforced `pending -> acknowledged -> confirmed|dismissed` with responsible
+  accounts, notes/reasons, server timestamps, optimistic versions, exact-retry
+  idempotency, and tenant-leading queue indexes.
+- Enabled and forced PostgreSQL row-level security on both new tenant tables.
+- Extends controlled tenant restore compatibility through revision `0063`;
+  baselines and reviews remain protected operational evidence, not restorable
+  master data.
+- Downgrade removes only generated baseline/review evidence and does not change
+  work-order part usage or inventory transactions.
+
 ## 20260807_0062 - Governed low-stock rules and alert evidence
 
 - Added one versioned threshold/reorder override per tenant warehouse and part,

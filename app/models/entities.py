@@ -2236,6 +2236,194 @@ class WorkOrderPart(Base):
     organization = relationship("Organization")
 
 
+class PartUsageBaseline(Base):
+    __tablename__ = "part_usage_baselines"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "part_id",
+            "scope",
+            "job_type_key",
+            "machine_type_key",
+            "store_key",
+            name="uq_part_usage_baseline_segment",
+        ),
+        CheckConstraint(
+            "scope IN ('job_machine_store', 'job_machine', 'machine', 'job', 'organization')",
+            name="ck_part_usage_baseline_scope",
+        ),
+        CheckConstraint(
+            "sample_work_orders >= 0 AND sample_usage_rows >= 0 "
+            "AND segment_work_orders >= 0 AND total_quantity >= 0",
+            name="ck_part_usage_baseline_counts_non_negative",
+        ),
+        CheckConstraint(
+            "mean_quantity >= 0 AND stddev_quantity >= 0 AND p90_quantity >= 0 "
+            "AND spike_threshold >= 0 AND support_ratio >= 0 AND support_ratio <= 1",
+            name="ck_part_usage_baseline_metrics_valid",
+        ),
+        CheckConstraint(
+            "length(source_fingerprint) = 64",
+            name="ck_part_usage_baseline_fingerprint",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_part_usage_baseline_version_non_negative",
+        ),
+        Index(
+            "ix_part_usage_baseline_org_scope",
+            "organization_id",
+            "scope",
+            "computed_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False, index=True)
+    scope: Mapped[str] = mapped_column(String(30), nullable=False)
+    job_type_key: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    machine_type_key: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    store_key: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    sample_work_orders: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sample_usage_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    segment_work_orders: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    mean_quantity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    stddev_quantity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    p90_quantity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    spike_threshold: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    support_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    first_observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_observed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    organization = relationship("Organization")
+    part = relationship("Part")
+
+
+class PartUsageReview(Base):
+    __tablename__ = "part_usage_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "work_order_part_id",
+            name="uq_part_usage_review_usage",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'acknowledged', 'confirmed', 'dismissed')",
+            name="ck_part_usage_review_status",
+        ),
+        CheckConstraint(
+            "severity IN ('low', 'medium', 'high')",
+            name="ck_part_usage_review_severity",
+        ),
+        CheckConstraint(
+            "observed_quantity > 0 AND observed_parts_cost >= 0 "
+            "AND baseline_sample_size >= 0 AND segment_work_order_count >= 0",
+            name="ck_part_usage_review_counts_valid",
+        ),
+        CheckConstraint(
+            "baseline_mean_quantity >= 0 AND baseline_p90_quantity >= 0 "
+            "AND baseline_spike_threshold >= 0 "
+            "AND combination_support_ratio >= 0 AND combination_support_ratio <= 1",
+            name="ck_part_usage_review_metrics_valid",
+        ),
+        CheckConstraint(
+            "usage_local_hour IS NULL OR (usage_local_hour >= 0 AND usage_local_hour <= 23)",
+            name="ck_part_usage_review_local_hour",
+        ),
+        CheckConstraint(
+            "length(source_fingerprint) = 64",
+            name="ck_part_usage_review_fingerprint",
+        ),
+        CheckConstraint(
+            "version >= 0",
+            name="ck_part_usage_review_version_non_negative",
+        ),
+        Index(
+            "ix_part_usage_review_org_status_severity",
+            "organization_id",
+            "status",
+            "severity",
+            "created_at",
+        ),
+        Index(
+            "ix_part_usage_review_org_engineer",
+            "organization_id",
+            "engineer_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    work_order_id: Mapped[int] = mapped_column(
+        ForeignKey("work_orders.id"), nullable=False, index=True
+    )
+    work_order_part_id: Mapped[int] = mapped_column(
+        ForeignKey("work_order_parts.id"), nullable=False, index=True
+    )
+    part_id: Mapped[int] = mapped_column(ForeignKey("parts.id"), nullable=False, index=True)
+    warehouse_id: Mapped[int] = mapped_column(
+        ForeignKey("warehouses.id"), nullable=False, index=True
+    )
+    engineer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    baseline_id: Mapped[int | None] = mapped_column(
+        ForeignKey("part_usage_baselines.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
+    reason_codes_json: Mapped[str] = mapped_column(Text, nullable=False)
+    explanation_json: Mapped[str] = mapped_column(Text, nullable=False)
+    observed_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    observed_parts_cost: Mapped[float] = mapped_column(Float, nullable=False)
+    baseline_scope: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    baseline_sample_size: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    baseline_mean_quantity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    baseline_p90_quantity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    baseline_spike_threshold: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    segment_work_order_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    combination_support_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    usage_timezone: Mapped[str] = mapped_column(String(64), default="UTC", nullable=False)
+    usage_local_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    evaluation_version: Mapped[str] = mapped_column(String(24), nullable=False)
+    source_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    acknowledged_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acknowledgement_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    organization = relationship("Organization")
+    work_order = relationship("WorkOrder")
+    work_order_part = relationship("WorkOrderPart")
+    part = relationship("Part")
+    warehouse = relationship("Warehouse")
+    engineer = relationship("User", foreign_keys=[engineer_id])
+    baseline = relationship("PartUsageBaseline")
+    acknowledger = relationship("User", foreign_keys=[acknowledged_by])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+
+
 class WorkOrderProfitSnapshot(Base):
     __tablename__ = "work_order_profit_snapshots"
     __table_args__ = (

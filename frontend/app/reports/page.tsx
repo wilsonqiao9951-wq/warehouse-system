@@ -113,25 +113,28 @@ export default function ReportsPage() {
         <h4>Abnormal usage</h4>
         {error && <p className="notice notice-error">{error}</p>}
         <p className="muted" style={{ fontSize: 14 }}>
-          Rows below flag jobs where parts cost is high relative to revenue — review before billing close.
+          Active, evidence-backed part usage reviews. Open the dedicated workbench to acknowledge and decide each item.
         </p>
+        <a className="nav-item" href="/abnormal-usage" style={{ display: "inline-block", marginBottom: 12 }}>
+          Open usage review workbench
+        </a>
         <div className="abnormal-mobile-cards">
           {rows.length === 0 && !error ? <div className="empty-state">No abnormal usage rows.</div> : null}
           {rows.map((r) => (
-            <div key={r.work_order_id} className="abnormal-card">
+            <div key={r.id} className="abnormal-card">
               <div>
                 <strong>{r.ticket_number}</strong>{" "}
                 <span className="muted" style={{ fontSize: 13 }}>
-                  severity {r.severity}
+                  {r.part_number} · {r.status} · severity {r.severity}
                 </span>
               </div>
               <div style={{ marginTop: 6 }}>
                 <span className="danger" style={{ fontWeight: 700 }}>
-                  Parts ${r.parts_cost.toFixed(2)}
+                  {r.observed_quantity} used · ${r.observed_parts_cost.toFixed(2)}
                 </span>
                 <span className="muted"> vs revenue ${r.revenue.toFixed(2)}</span>
               </div>
-              <div className="abnormal-card__reason">{r.reason}</div>
+              <div className="abnormal-card__reason">{r.explanations.join(" ")}</div>
             </div>
           ))}
         </div>
@@ -140,18 +143,18 @@ export default function ReportsPage() {
             <thead>
               <tr>
                 <th>WO</th>
-                <th>Parts Cost</th>
+                <th>Part / quantity</th>
                 <th>Revenue</th>
-                <th>Reason</th>
+                <th>Status / evidence</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.work_order_id}>
+                <tr key={r.id}>
                   <td>{r.ticket_number}</td>
-                  <td className="danger">${r.parts_cost.toFixed(2)}</td>
+                  <td className="danger">{r.part_number} × {r.observed_quantity}</td>
                   <td>${r.revenue.toFixed(2)}</td>
-                  <td>{r.reason}</td>
+                  <td>{r.status} · {r.explanations.join(" ")}</td>
                 </tr>
               ))}
             </tbody>
