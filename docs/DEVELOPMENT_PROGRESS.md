@@ -6,6 +6,52 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-09 - Centralized role page access and technician team visibility
+
+Status: implemented and locally verified on `codex/role-page-access`; stacked
+draft pull request and GitHub CI are pending.
+
+Delivered:
+
+- Centralized every application route and navigation item in one fail-closed
+  access policy for manager, warehouse, technician, organization administrator,
+  assistant, and platform-administrator workspaces.
+- Added a shared authenticated access session that refreshes the server-issued
+  role and effective permission matrix, removes stale permission state when
+  accounts change, retains bounded offline role context, and drives both the
+  visible navigation and direct-route guard.
+- Added an explicit access-restricted screen for unavailable direct URLs and
+  role-specific login destinations: manager/admin dashboard, warehouse
+  inventory, technician Today, and assistant Profile.
+- Added **Work Orders** to the technician workspace so every engineer can see
+  the organization pool, claimant, attribution, and progress. The overview is
+  read-only for technicians; it does not load the protected employee directory
+  or render generic Save controls. Owner/device/claim enforcement remains in
+  the existing API and work-order detail workflow.
+- Aligned the manager work-order overview with the server rule that managers
+  create, assign, approve, and release through governed workflows but do not
+  impersonate the claimant through generic field edits. Only administrators
+  receive overview correction controls.
+- Documented the complete role/page matrix and clarified that frontend hiding
+  never replaces API authorization, tenant isolation, device binding,
+  work-order ownership, inventory custody, or reauthentication.
+
+Verification:
+
+- Browser acceptance confirmed the technician navigation, team Work Orders
+  page, absence of Save controls, and direct denial of Inventory Ledger.
+- Independent Bearer sessions confirmed manager work-order/employee/ledger
+  reads, warehouse ledger access with work-order/employee denial, and
+  technician work-order access with employee/ledger denial.
+- RBAC and enterprise permission target suite: 6 passed. Full backend suite:
+  319 passed.
+- Frontend ESLint, TypeScript, and the Next.js production build passed for all
+  48 routes.
+- Python compilation and dependency consistency passed. Python requirements,
+  full npm, and production npm audits reported no known vulnerabilities; Git
+  diff integrity passed.
+- No database model or migration changed; Schema head remains `0070`.
+
 ## 2026-08-09 - Immutable work-order field media evidence
 
 Status: implemented and published as stacked draft PR #44 on

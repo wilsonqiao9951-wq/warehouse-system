@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, storeAuthenticatedSession } from "@/lib/api";
+import { homeRouteForRole } from "@/lib/access-policy";
 import { OrganizationBranding } from "@/types";
 
 export default function LoginPage() {
@@ -46,7 +47,7 @@ export default function LoginPage() {
         return;
       }
       storeAuthenticatedSession(result);
-      window.location.href = result.user.role === "engineer" ? "/today" : "/";
+      window.location.href = homeRouteForRole(result.user.role);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in.");
     } finally {
