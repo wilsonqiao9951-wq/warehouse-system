@@ -8,9 +8,9 @@
 
 ## 2026-08-16 - Route access policy contract gate
 
-Status: implemented and locally verified on
-`codex/route-access-contract-gate`; stacked draft pull request and GitHub CI are
-pending.
+Status: implemented and published as stacked draft PR #46 on
+`codex/route-access-contract-gate`. Feature commit `73e1f7b` and GitHub Actions
+run #89 passed every required job.
 
 Delivered:
 
@@ -39,6 +39,10 @@ Verification:
   requirements audit, full/production npm audits, and diff integrity pass with
   no known vulnerabilities. No database model or migration changed; Schema
   head remains `0070`.
+- GitHub Actions run #89 passed backend, frontend, and private-deployment. The
+  frontend job executed the new access contract before lint/build; PostgreSQL
+  migration/RLS, scale/disaster-recovery, Compose, and all production image
+  gates also passed.
 
 ## 2026-08-09 - Centralized role page access and technician team visibility
 
