@@ -6,6 +6,40 @@
 - Delivery strategy: sellable workflow first, intelligence second, platform capabilities last.
 - Required batch gates: migration, backend tests, frontend production build, security review, Git commit, push, CI verification.
 
+## 2026-08-16 - Route access policy contract gate
+
+Status: implemented and locally verified on
+`codex/route-access-contract-gate`; stacked draft pull request and GitHub CI are
+pending.
+
+Delivered:
+
+- Added a no-new-dependency frontend verification command that inventories
+  every `app/**/page.tsx` route and executes the real TypeScript access-policy
+  module.
+- Requires every protected page to have one explicit centralized policy entry,
+  every public page to remain outside the protected catalog, every policy to
+  resolve to a real page, and duplicate route/role declarations to fail.
+- Locks the critical manager, warehouse, technician, assistant, tenant-admin,
+  platform-admin, explicit permission-override, default landing-page, nested
+  route, trailing-slash, and unknown-path fail-closed decisions.
+- Added the contract command to the GitHub frontend job before lint/build so a
+  newly added or removed page cannot silently drift from the navigation and
+  direct-route guard.
+
+Verification:
+
+- `npm run verify:access-policy` passes for 46 application pages: 42 protected
+  and 4 public.
+- Frontend ESLint, standalone TypeScript, and the Next.js production build pass
+  for all 48 generated routes.
+- RBAC and enterprise permission target suite: 6 passed. Full backend suite:
+  319 passed.
+- Alembic model drift, Python compilation/dependency consistency, Python
+  requirements audit, full/production npm audits, and diff integrity pass with
+  no known vulnerabilities. No database model or migration changed; Schema
+  head remains `0070`.
+
 ## 2026-08-09 - Centralized role page access and technician team visibility
 
 Status: implemented and published as stacked draft PR #45 on

@@ -9,6 +9,7 @@
     "build:mobile": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "verify:access-policy": "node scripts/verify-access-policy.mjs",
     "cap:sync": "npx cap sync",
     "cap:open:ios": "npx cap open ios",
     "cap:open:android": "npx cap open android"

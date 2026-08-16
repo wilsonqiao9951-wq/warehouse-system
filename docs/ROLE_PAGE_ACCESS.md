@@ -51,3 +51,18 @@ overrides from **Employees** for the enterprise permission catalog. An explicit
 deny removes the corresponding navigation entry and direct page access as soon
 as the current permission matrix is refreshed. Administrator permissions and
 the non-delegable ownership/custody controls cannot be overridden.
+
+## Automated contract gate
+
+Run the page-access contract before committing frontend route changes:
+
+```bash
+cd frontend
+npm run verify:access-policy
+```
+
+The command inventories every `app/**/page.tsx` page and executes the real
+TypeScript policy. It rejects missing or stale policy entries, public/protected
+collisions, duplicate declarations, invalid platform-only roles, critical role
+matrix regressions, incorrect landing routes, and unknown paths that no longer
+fail closed. GitHub Actions runs the same gate before frontend lint and build.

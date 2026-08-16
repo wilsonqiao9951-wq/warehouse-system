@@ -30,6 +30,7 @@ OpenPartsFlow is an open-source parts inventory and work-order usage tracking sy
 - Durable aggregate SLA alert episodes with signed, idempotent, retryable on-call Webhooks and explicit recovery evidence
 - Database-elected background schedulers with generation fencing, heartbeat takeover, and multi-replica standby visibility
 - Role-compatible enterprise user access policies with explicit allow/deny/inherit overrides and complete audit evidence
+- CI-enforced fail-closed page/navigation access contract for every frontend route
 - Tenant-scoped enterprise operations analytics with reconciled KPIs, quality coverage, regional stock, and audited CSV export
 - Read-only enterprise operations Agent with bounded intents, source-defined evidence, quota control, and privacy-preserving run audit
 - Private-deployment container stack with PostgreSQL, one-shot migrations, persistent evidence volumes, same-origin web/API routing, health gates, and fail-closed production configuration
@@ -107,6 +108,13 @@ npm run dev
 ```
 
 The frontend uses Next.js 16.2.12 and requires Node.js 20.9 or newer.
+
+Verify that every page remains registered in the centralized role access
+policy before lint/build:
+
+```bash
+npm run verify:access-policy
+```
 
 Default frontend URL:
 
