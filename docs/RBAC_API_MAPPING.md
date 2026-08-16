@@ -19,6 +19,9 @@ organization work-order pool, while manager, warehouse, technician, tenant
 administrator, and platform-only pages remain separated. This UI policy is a
 usability boundary only; the API checks documented below remain authoritative.
 See [`ROLE_PAGE_ACCESS.md`](ROLE_PAGE_ACCESS.md) for the complete page matrix.
+The frontend CI job also runs `npm run verify:access-policy`, which inventories
+all application pages and executes the shared policy to reject route/catalog
+drift and critical role-matrix or fail-closed regressions.
 
 PostgreSQL deployments additionally force tenant read/write row-level security
 on all tenant models. API/ORM authorization remains authoritative for roles,
