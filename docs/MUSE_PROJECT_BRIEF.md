@@ -4,6 +4,18 @@
 
 管理员提供本项目的稳定HTTPS服务器地址。先GET `/api/muse`读取接口版本和入口，再读取`/openapi.json`。统一只读查询为POST `/api/muse/query`。你必须具备HTTP请求工具或受控连接器；单纯阅读这份说明不会赋予联网权限。
 
+## 统一症状词表（1.0）
+
+先GET `/api/muse/symptoms`读取13类症状的稳定小写代码、类别、中英文标签及同义说法。这是项目的可观察症状词表，不是厂家故障码或故障原因表。LOW_FLOW、low-flow、流量小、出液量小等完整说法统一为low_flow。厂家报警编号及复杂描述未明确匹配时不猜测含义。
+
+POST `/api/muse/symptoms/resolve`可提交symptom_codes、symptom_text或work_order_id。GET `/api/muse/work-orders/{id}/symptoms`读取工单problem_description的分类；均要求当前用户的组织及工单读取权限。也可用POST `/api/muse/query`的resource=symptoms。
+
+完整症状短语可按逗号、分号或换行分隔。canonical_codes才会用于案例检索；unknown_codes、unresolved_text及suggested_codes仅用于提示确认。复杂句中的否定、怀疑、引用可能改变含义，因此出现关键词只作为候选，不自动选定。needs_confirmation=true时展示原文及候选并向技师确认，不能把候选改写成已观察事实。
+
+指导查询支持symptom_code、symptom_codes或symptom_text。显式输入优先；没有显式输入时，从当前工单problem_description取原文，来源标为work_order_problem_description。示例：`{"resource":"repair_guidance","work_order_id":123,"symptom_text":"出液量小"}`；或只传resource及work_order_id。多个明确代码按任一代码匹配，但仍要求同组织、同明确机型及人工审核，不扩大到其他机型。
+
+反馈可传标准symptom_codes或symptom_text；原始代码、原文、分类依据、词表版本和工单来源保存在报告symptom_resolution中。新反馈写入统一代码，未识别输入保留；只有未知症状的反馈即使审核通过也不会成为可检索指导。旧反馈不批量改写，读取时通过legacy_report_code_lookup规范化已知旧代码，并保留原始值。同一次幂等重试可使用等价代码/同义说法；改变自由文本属于改变提交内容，需明确提交新反馈。
+
 ## 身份
 
 每人使用自己的账户与组织；不要共用管理员账户或令牌，不在这份说明、工单备注、仓库或普通聊天文本里写密码。登录由`POST /api/auth/login`处理，使用application/x-www-form-urlencoded的username/password。设备凭证使用X-Device-Id、X-Device-Token、X-Device-Name；在客户端凭证存储中生成并保管，沿用现有设备协议。Bearer令牌只放在工具的秘密配置或安全会话中。

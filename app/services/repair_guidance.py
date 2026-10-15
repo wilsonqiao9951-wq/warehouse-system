@@ -3,6 +3,7 @@ from sqlalchemy import select
 from app.models import Equipment,RepairCaseReport,Part,WorkOrder,Warehouse,StorageLocation
 from app.services.freestyle_chain import graph,matches_model
 from app.services.model_chain import is_viper3,inventory
+from app.services import symptoms
 
 
 def machine_model(db,org,work_order):
@@ -25,6 +26,8 @@ def _case_source(report):
             'source_path': f'/api/muse/reports/{report.id}',
             'work_order_context_path': f'/api/work-orders/{report.work_order_id}/service-context',
             'machine_model': report.machine_model, 'symptom_codes': report.symptom_codes,
+            'canonical_symptom_codes': sorted(symptoms.report_codes(report)),
+            'symptom_resolution': symptoms.report_resolution(report),
             'reported_steps': report.steps, 'result_notes': report.result_notes,
             'reviewed_by': report.reviewed_by, 'reviewed_at': report.reviewed_at,
             'outcome': report.outcome, 'source':
@@ -49,9 +52,10 @@ def _stock_context(part, positions, warehouse_ids, active_locations):
             'inventory_reserved': False}
 
 
-def guidance(db, org, order, codes):
+def guidance(db, org, order, codes, classification=None):
     model = machine_model(db, org, order)
-    codes = {s.strip().casefold() for s in codes if s.strip()}
+    classification = classification or symptoms.resolve(codes)
+    codes = set(classification['canonical_codes'])
     reports = list(db.scalars(select(RepairCaseReport).where(
         RepairCaseReport.organization_id == org, RepairCaseReport.machine_model == model,
         RepairCaseReport.review_status == 'approved', RepairCaseReport.work_order_id != order.id
@@ -60,7 +64,7 @@ def guidance(db, org, order, codes):
         WorkOrder.organization_id == org, WorkOrder.id.in_({r.work_order_id for r in reports}))) } if reports else {}
     # Recheck current source identity: a report snapshot must not outlive a corrected model.
     valid_orders = {wid for wid, source in source_orders.items() if machine_model(db, org, source) == model}
-    reports = [r for r in reports if r.work_order_id in valid_orders and codes.intersection(r.symptom_codes)]
+    reports = [r for r in reports if r.work_order_id in valid_orders and codes.intersection(symptoms.report_codes(r))]
     latest = {}
     for report in reports:
         latest.setdefault(report.work_order_id, report)
@@ -74,6 +78,8 @@ def guidance(db, org, order, codes):
         notices.append({'code': code, 'message': message})
     if not model:
         notice('machine_model_unconfirmed', '机型缺失、不支持或与设备记录冲突；请先确认准确机型。')
+    if classification['needs_confirmation']:
+        notice('symptom_classification_needs_confirmation', classification['message'])
     if not codes:
         notice('symptom_code_required', '尚未提供症状代码；请补充实际症状和检查结果。')
     if model and codes and not reports:
@@ -127,7 +133,7 @@ def guidance(db, org, order, codes):
             'supporting_case_count': len(refs), 'non_resolved_case_count': len(contrary),
             'non_resolved_source_case_ids': [r.id for r in contrary[:CASE_LIMIT]],
             'non_resolved_evidence': [_case_source(r) for r in contrary[:CASE_LIMIT]],
-            'matched_symptom_codes': sorted(codes.intersection({s for r in refs for s in r.symptom_codes})),
+            'matched_symptom_codes': sorted(codes.intersection({s for r in refs for s in symptoms.report_codes(r)})),
             'recommendation_reason': f"本组织 {len(refs)} 个同机型、同症状的已审核解决工单提及此零件；报告提及不等于实际安装或确认适配。",
             'evidence_status': 'limited' if evidence_limited else 'multiple_reviewed_cases',
             'recommendation_status': 'candidate_requires_confirmation' if part.is_active else 'inactive_reference_only',
@@ -144,9 +150,9 @@ def guidance(db, org, order, codes):
     for step in suggested_steps:
         step['supporting_case_count'] = len(step['source_case_ids'])
         step['needs_more_evidence'] = len(step['source_case_ids']) < MIN_SUPPORTING_CASES
-    needs_more = not model or not codes or len(positive) < MIN_SUPPORTING_CASES or bool(negative)
+    needs_more = not model or not codes or len(positive) < MIN_SUPPORTING_CASES or bool(negative) or classification['needs_confirmation']
     return {'engine': 'reviewed_case_retrieval', 'model_training_performed': False,
-        'machine_model': model, 'symptom_codes': sorted(codes),
+        'machine_model': model, 'symptom_codes': sorted(codes), 'symptom_resolution': classification,
         'evidence_scope': {'organization_id': org, 'exact_model_required': True,
                            'matching_symptom_required': True, 'review_status': 'approved'},
         'reviewed_resolved_case_count': len(positive), 'reviewed_non_resolved_case_count': len(negative),

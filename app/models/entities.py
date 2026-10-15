@@ -531,6 +531,7 @@ class RepairCaseReport(Base):
     request_fingerprint: Mapped[str | None] = mapped_column(String(64),nullable=True)
     machine_model: Mapped[str | None] = mapped_column(String(255),nullable=True,index=True)
     symptom_codes: Mapped[list] = mapped_column(JSON,nullable=False)
+    symptom_context: Mapped[dict | None] = mapped_column(JSON,nullable=True)
     steps: Mapped[list] = mapped_column(JSON,nullable=False)
     outcome: Mapped[str] = mapped_column(String(30),nullable=False)
     part_ids: Mapped[list] = mapped_column(JSON,nullable=False)
