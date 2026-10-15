@@ -106,7 +106,8 @@ def submit_report(work_order_id: int,payload: RepairReportCreate,db: Session=Dep
         return existing
 
     def response(report,replayed):
-        return {'report_id':report.id,'machine_model':report.machine_model,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(report.machine_model),'replayed':replayed}
+        current_model=machine_model(db,actor.organization_id,order)
+        return {'report_id':report.id,'machine_model':report.machine_model,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(current_model and current_model==report.machine_model),'replayed':replayed}
 
     existing=existing_report()
     if existing:return response(existing,True)
@@ -122,12 +123,15 @@ def submit_report(work_order_id: int,payload: RepairReportCreate,db: Session=Dep
 
 @muse_router.post('/reports/{report_id}/review')
 def review_report(report_id: int,payload: RepairReportReview,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor)):
+    from app.services.repair_guidance import machine_model
     require_roles(actor,UserRole.ADMIN,UserRole.MANAGER)
     report=db.scalar(select(RepairCaseReport).where(RepairCaseReport.id==report_id,RepairCaseReport.organization_id==actor.organization_id))
     if not report:raise HTTPException(404,'Report not found')
     report.review_status=payload.decision;report.reviewed_by=actor.user_id;report.reviewed_at=datetime.now(timezone.utc)
     db.add(AuditLog(organization_id=actor.organization_id,user_id=actor.user_id,action='review_repair_case',entity_type='repair_case_report',entity_id=report.id,metadata_json=json.dumps({'decision':payload.decision})));db.commit()
-    return {'report_id':report.id,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(report.machine_model)}
+    order=db.scalar(select(WorkOrder).where(WorkOrder.id==report.work_order_id,WorkOrder.organization_id==actor.organization_id))
+    current_model=machine_model(db,actor.organization_id,order) if order else None
+    return {'report_id':report.id,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(current_model and current_model==report.machine_model)}
 
 @muse_router.get('/work-orders/{work_order_id}/guidance')
 def repair_guidance(work_order_id: int,symptom_code: str=Query('',max_length=80),db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor)):

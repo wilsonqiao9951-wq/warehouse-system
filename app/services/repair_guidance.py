@@ -27,7 +27,9 @@ def _case_source(report):
             'machine_model': report.machine_model, 'symptom_codes': report.symptom_codes,
             'reported_steps': report.steps, 'result_notes': report.result_notes,
             'reviewed_by': report.reviewed_by, 'reviewed_at': report.reviewed_at,
-            'outcome': report.outcome, 'source': 'reviewed_resolved_case' if report.outcome == 'resolved' else 'reviewed_non_resolved_case'}
+            'outcome': report.outcome, 'source':
+            ('reviewed_resolved_case' if report.outcome == 'resolved' else 'reviewed_non_resolved_case')
+            if report.review_status == 'approved' else f'{report.review_status}_case_report'}
 
 
 def _stock_context(part, positions, warehouse_ids, active_locations):
@@ -128,8 +130,10 @@ def guidance(db, org, order, codes):
             'matched_symptom_codes': sorted(codes.intersection({s for r in refs for s in r.symptom_codes})),
             'recommendation_reason': f"本组织 {len(refs)} 个同机型、同症状的已审核解决工单提及此零件；报告提及不等于实际安装或确认适配。",
             'evidence_status': 'limited' if evidence_limited else 'multiple_reviewed_cases',
+            'recommendation_status': 'candidate_requires_confirmation' if part.is_active else 'inactive_reference_only',
             'needs_more_evidence': evidence_limited, 'cautions': reasons,
             'requires_technician_confirmation': True, 'compatibility_confirmed': False,
+            'recommended_quantity': None, 'quantity_confirmation_required': True,
             'automatically_selected': False, **availability})
     # Evidence first; stock availability only breaks ties between equal supporting evidence.
     candidates.sort(key=lambda p: (-p['supporting_case_count'], p['non_resolved_case_count'],

@@ -123,6 +123,8 @@ def test_source_model_changes_and_tenant_poisoning_fail_closed(client):
     result = guidance(client, current)
     assert not result['cases'] and not result['part_candidates']
     assert rid not in [c['case_id'] for c in result['cases']]
+    assert client.get(f'/api/muse/reports/{rid}').json()['model_evidence_current'] is False
+    assert client.post(f'/api/muse/reports/{rid}/review', json={'decision': 'approved'}).json()['guidance_eligible'] is False
     with client.app.state.testing_session_local() as db:
         conflict = Equipment(organization_id=1, model='Viper 4'); db.add(conflict); db.flush()
         db.get(WorkOrder, current).equipment_id = conflict.id; db.commit()
@@ -161,6 +163,7 @@ def test_case_source_permissions_do_not_expose_other_pending_or_foreign_reports(
     with client.app.state.testing_session_local() as db:
         db.get(RepairCaseReport, pending).submitted_by = uid; db.commit()
     assert client.get(f'/api/muse/reports/{pending}').status_code == 200
+    assert client.get(f'/api/muse/reports/{pending}').json()['source'] == 'pending_case_report'
     client.app.dependency_overrides[get_current_actor] = lambda: Actor(uid, UserRole.ADMIN, 2)
     assert client.get(f'/api/muse/reports/{approved}').status_code == 404
 
