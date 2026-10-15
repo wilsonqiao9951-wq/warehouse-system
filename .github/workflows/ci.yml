@@ -21,6 +21,54 @@ jobs:
           DATABASE_URL: sqlite:///./ci.db
       - run: pytest -q
 
+  backend-postgres-container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: mycoke_ci
+          POSTGRES_USER: mycoke_ci
+          POSTGRES_PASSWORD: ephemeral-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mycoke_ci -d mycoke_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      APP_ENV: production
+      APP_DEBUG: 'false'
+      DATABASE_URL: postgresql+psycopg://mycoke_ci:ephemeral-ci-only@127.0.0.1:5432/mycoke_ci
+      JWT_SECRET_KEY: ephemeral-ci-only-secret-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image and verify bundled catalog
+        run: docker build -t mycoke-backend-ci .
+      - name: Start backend and migrate fresh PostgreSQL
+        run: >-
+          docker run -d --name mycoke-backend-ci --network host
+          -e APP_ENV -e APP_DEBUG -e DATABASE_URL -e JWT_SECRET_KEY
+          mycoke-backend-ci
+      - name: Wait for API readiness
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8000/api/muse > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs mycoke-backend-ci
+          exit 1
+      - name: Verify real HTTP technician and review workflow
+        run: docker exec mycoke-backend-ci python -m scripts.verify_live_muse
+      - name: Container logs
+        if: failure()
+        run: docker logs mycoke-backend-ci
+      - name: Stop backend
+        if: always()
+        run: docker rm -f mycoke-backend-ci
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

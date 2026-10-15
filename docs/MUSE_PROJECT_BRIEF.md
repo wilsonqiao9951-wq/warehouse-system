@@ -34,6 +34,8 @@ POST /api/muse/query，Content-Type: application/json：
 
 outcome为resolved、partial或unresolved。part_ids仅为本组织已存在零件，不自动代表实际领用或扣库存。记录用料、完工和现场适配确认必须使用各自现有接口与权限。不要把建议零件当成已安装，或把报告提交当成工单完工。
 
+为每次新反馈生成一个UUID，作为`Idempotency-Key`请求头；网络超时重试时复用同一键和相同内容。键允许16–128位英文字母、数字、下划线或连字符。重试返回原report_id和当前审核状态，`replayed=true`，不会再建报告或提交审计。同键换工单、换提交人或改内容返回409；不要用新键绕过冲突。明确提交新结果才生成新键。不带此头的旧客户端仍可提交，但不保证重试去重。重试仍须通过当前账户、设备和工单权限检查。
+
 技师提交报告后状态pending；管理员/经理通过GET `/api/muse/reports`审核队列和POST `/api/muse/reports/{id}/review`（decision=approved/rejected）审核。审核通过的已解决案例才进入正向指导；未解决结果单独保留，重复工单不重复计算支持数量。后续查询实时检索新增案例，不自动训练模型、更新参数或跨组织共享数据。
 
 ## 展示与执行

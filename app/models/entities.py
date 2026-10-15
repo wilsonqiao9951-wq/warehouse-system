@@ -522,10 +522,13 @@ class UserInvitation(Base):
 
 class RepairCaseReport(Base):
     __tablename__ = 'repair_case_reports'
+    __table_args__ = (UniqueConstraint('organization_id', 'idempotency_key', name='uq_repair_report_org_idempotency'),)
     id: Mapped[int] = mapped_column(Integer,primary_key=True)
     organization_id: Mapped[int] = mapped_column(ForeignKey('organizations.id'),nullable=False,index=True)
     work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'),nullable=False,index=True)
     submitted_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'),nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128),nullable=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64),nullable=True)
     machine_model: Mapped[str | None] = mapped_column(String(255),nullable=True,index=True)
     symptom_codes: Mapped[list] = mapped_column(JSON,nullable=False)
     steps: Mapped[list] = mapped_column(JSON,nullable=False)

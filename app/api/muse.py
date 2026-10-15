@@ -1,8 +1,9 @@
 """Stateless, self-describing entry point for independently operated Muse clients."""
 from typing import Literal
-from fastapi import APIRouter,Depends,HTTPException,Query
+from fastapi import APIRouter,Depends,Header,HTTPException,Query
 from pydantic import BaseModel,Field,model_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.rbac import Actor,get_current_actor
@@ -72,6 +73,7 @@ from app.models import WorkOrder,RepairCaseReport,AuditLog,UserRole
 from app.core.rbac import require_roles,require_work_order_scope,require_work_order_write_scope
 from datetime import datetime,timezone
 import json
+from hashlib import sha256
 
 class RepairReportCreate(BaseModel):
     symptom_codes: list[Annotated[str,Field(min_length=1,max_length=80)]]=Field(min_length=1,max_length=20)
@@ -84,7 +86,7 @@ class RepairReportReview(BaseModel):
     decision: Literal['approved','rejected']
 
 @muse_router.post('/work-orders/{work_order_id}/reports')
-def submit_report(work_order_id: int,payload: RepairReportCreate,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor)):
+def submit_report(work_order_id: int,payload: RepairReportCreate,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor),idempotency_key: str | None=Header(None,alias='Idempotency-Key',min_length=16,max_length=128,pattern=r'^[A-Za-z0-9_-]+$')):
     from app.services.repair_guidance import machine_model
     order=require_work_order_write_scope(db,actor,work_order_id)
     ids=set(payload.part_ids)
@@ -93,9 +95,30 @@ def submit_report(work_order_id: int,payload: RepairReportCreate,db: Session=Dep
     codes=sorted({s.strip().casefold() for s in payload.symptom_codes if s.strip()})
     steps=[s.strip() for s in payload.steps if s.strip()]
     if not codes or not steps or not payload.result_notes.strip():raise HTTPException(422,'Nonblank symptoms, steps and results are required')
-    report=RepairCaseReport(organization_id=actor.organization_id,work_order_id=order.id,submitted_by=actor.user_id,machine_model=machine_model(db,actor.organization_id,order),symptom_codes=codes,steps=steps,outcome=payload.outcome,part_ids=sorted(ids),result_notes=payload.result_notes.strip(),review_status='pending')
-    db.add(report);db.flush();db.add(AuditLog(organization_id=actor.organization_id,user_id=actor.user_id,action='submit_repair_case',entity_type='repair_case_report',entity_id=report.id,metadata_json=json.dumps({'work_order_id':order.id})));db.commit()
-    return {'report_id':report.id,'machine_model':report.machine_model,'review_status':'pending','guidance_eligible':False}
+    normalized={'work_order_id':order.id,'symptom_codes':codes,'steps':steps,'outcome':payload.outcome,'part_ids':sorted(ids),'result_notes':payload.result_notes.strip()}
+    fingerprint=sha256(json.dumps(normalized,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
+
+    def existing_report():
+        if not idempotency_key:return None
+        existing=db.scalar(select(RepairCaseReport).where(RepairCaseReport.organization_id==actor.organization_id,RepairCaseReport.idempotency_key==idempotency_key))
+        if existing and (existing.submitted_by!=actor.user_id or existing.request_fingerprint!=fingerprint):
+            raise HTTPException(409,'Idempotency key already used for another submission')
+        return existing
+
+    def response(report,replayed):
+        return {'report_id':report.id,'machine_model':report.machine_model,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(report.machine_model),'replayed':replayed}
+
+    existing=existing_report()
+    if existing:return response(existing,True)
+    report=RepairCaseReport(organization_id=actor.organization_id,submitted_by=actor.user_id,machine_model=machine_model(db,actor.organization_id,order),review_status='pending',idempotency_key=idempotency_key,request_fingerprint=fingerprint if idempotency_key else None,**normalized)
+    try:
+        db.add(report);db.flush();db.add(AuditLog(organization_id=actor.organization_id,user_id=actor.user_id,action='submit_repair_case',entity_type='repair_case_report',entity_id=report.id,metadata_json=json.dumps({'work_order_id':order.id})));db.commit()
+    except IntegrityError:
+        db.rollback()
+        existing=existing_report()
+        if existing:return response(existing,True)
+        raise
+    return response(report,False)
 
 @muse_router.post('/reports/{report_id}/review')
 def review_report(report_id: int,payload: RepairReportReview,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor)):
