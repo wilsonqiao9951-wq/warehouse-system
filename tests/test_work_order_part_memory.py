@@ -1,4 +1,4 @@
-def test_similar_work_orders_receive_part_recommendations(client):
+def test_unreviewed_usage_does_not_become_a_repair_recommendation(client):
     user = client.post("/api/users", json={"name": "memory-tech", "email": "memory-tech@example.com", "role": "engineer"}).json()
     warehouse = client.post("/api/warehouses", json={"code": "MEM", "name": "Memory Warehouse"}).json()
     part = client.post("/api/parts", json={"part_number": "PUMP-SEAL", "name": "Pump Seal"}).json()
@@ -8,5 +8,6 @@ def test_similar_work_orders_receive_part_recommendations(client):
     assert used.status_code == 200
     recommendations = client.get(f"/api/work-orders/{work_order['id']}/part-recommendations")
     assert recommendations.status_code == 200
-    assert recommendations.json()[0]["part"]["part_number"] == "PUMP-SEAL"
-    assert recommendations.json()[0]["recommended_quantity"] == 2
+    assert recommendations.json() == []
+    # Unknown model and unreviewed historical usage cannot establish a repair recommendation.
+    assert client.get(f"/api/work-orders/{work_order['id']}/part-recommendations", params={"symptom_code": "LEAK"}).json() == []

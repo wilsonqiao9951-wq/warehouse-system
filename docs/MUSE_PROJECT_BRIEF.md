@@ -24,6 +24,14 @@ POST /api/muse/query，Content-Type: application/json：
 
 返回数据要区分官网关联、普通现场观察、明确现场验证、工单实际用料及审核通过的解决案例。共享官网零件不表示跨机型适配。只用同一明确机型的案例；机型未知或工单/设备冲突时先请求补充证据。
 
+维修指导中的`evidence_notices`是必须向技师展示的证据缺口，不能省略。缺机型、缺症状、无匹配已审核解决案例时不编造步骤或零件。单一独立工单、重复报告、未解决结果不能包装成充分证据；两个独立解决案例只是多来源标记，不是成功率或适配认证。
+
+`suggested_checks`仅整理已审核案例报告中的历史操作，保留source_case_ids/source_work_order_ids，execution_required=false，不作为必须执行的维修指令。`cases[].source_path`可通过GET `/api/muse/reports/{report_id}`查验原报告、审核信息及当前机型是否仍有效。已审核来源可由有工单读取权限的同组织用户查看；未审核报告仅提交人和经理/管理员可读。
+
+`part_candidates`按独立解决案例数量优先排序，未解决案例提及、启用状态及库存作为后续条件。展示recommendation_reason、source_case_ids、evidence_status、cautions和availability_note。报告提及零件不代表实际安装或因果关系。available_quantity仅计算本组织启用仓库/库位的账面数量；负库存会提示先核对，停用零件不作为当前选用建议。库存不预留、不扣减，不自动补货或推荐跨机型替代件。
+
+旧GET `/api/work-orders/{id}/part-recommendations`已统一使用相同已审核证据，需要提供symptom_code；缺少症状或无证据返回空列表。recommended_quantity=null，quantity_confirmation_required=true，因为案例零件引用没有足以推断本次用量的证据；usage_count/total_quantity为0，不能把解决案例数冒充实际领用数。此轮没有修改旧前端；旧网页未传症状时不再显示未经审核的历史用料推荐。完整证据缺口通过Muse指导接口获取。
+
 ## 工单工作流与信息回收
 
 先查询工单，必要时由当前技师通过现有`/work-orders/{id}/claim`流程领取。同一账户、注册设备、claim_version绑定后才可执行写操作；执行请求带X-Device-Token和X-Claim-Version。出现401/403/409停止写入，刷新身份/工单领取状态，不绕过锁。

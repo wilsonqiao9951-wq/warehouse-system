@@ -150,6 +150,24 @@ def report_review_queue(review_status: Literal['pending','approved','rejected']=
     return {'items':[{'report_id':r.id,'work_order_id':r.work_order_id,'submitted_by':r.submitted_by,'machine_model':r.machine_model,'symptom_codes':r.symptom_codes,'steps':r.steps,'outcome':r.outcome,'part_ids':r.part_ids,'result_notes':r.result_notes,'review_status':r.review_status} for r in rows],'skip':skip,'limit':limit}
 
 
+@muse_router.get('/reports/{report_id}')
+def report_source(report_id: int,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor)):
+    from app.services.repair_guidance import machine_model,_case_source
+    report=db.scalar(select(RepairCaseReport).where(RepairCaseReport.id==report_id,RepairCaseReport.organization_id==actor.organization_id))
+    if not report:raise HTTPException(404,'Report not found')
+    privileged=actor.role in {UserRole.ADMIN,UserRole.MANAGER}
+    own=actor.user_id is not None and report.submitted_by==actor.user_id
+    if not privileged and not own and report.review_status!='approved':raise HTTPException(404,'Report not found')
+    require_work_order_scope(db,actor,report.work_order_id)
+    order=db.scalar(select(WorkOrder).where(WorkOrder.id==report.work_order_id,WorkOrder.organization_id==actor.organization_id))
+    current_model=machine_model(db,actor.organization_id,order)
+    return {**_case_source(report),'report_id':report.id,'part_ids':report.part_ids,
+            'review_status':report.review_status,'current_machine_model':current_model,
+            'model_evidence_current':bool(current_model and current_model==report.machine_model),
+            'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(current_model and current_model==report.machine_model),
+            'compatibility_confirmed':False}
+
+
 @muse_router.get('/guide')
 def muse_guide():
     from fastapi.responses import PlainTextResponse
