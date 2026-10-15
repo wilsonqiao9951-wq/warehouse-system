@@ -38,7 +38,10 @@ from app.models import (
 )
 
 
+from app.models import RepairCaseReport
+
 TENANT_MODELS = (
+    RepairCaseReport,
     CompletionPolicy,
     Customer,
     Equipment,

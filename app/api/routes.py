@@ -750,8 +750,9 @@ async def record_part_observation(
         PartMachineAssociation.machine_model == machine_model.strip(), PartMachineAssociation.part_id == part.id
     ))
     if association:
-        association.confirmed_count += 1
-        association.last_confirmed_at = datetime.utcnow()
+        if association.recognition_source != "field_verified":
+            association.confirmed_count += 1
+            association.last_confirmed_at = datetime.utcnow()
         association.photo_url = photo_url or association.photo_url
     else:
         association = PartMachineAssociation(machine_model=machine_model.strip(), part_id=part.id, photo_url=photo_url)

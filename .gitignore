@@ -12,3 +12,12 @@ frontend/out/
 .pytest_cache/
 .coverage
 *.tsbuildinfo
+.env.*
+!.env.example
+!frontend/.env.example
+artifacts/
+/.env.production
+/parts_index.json
+/manuals_index.json
+/data/organized/*.json
+/data/verification/*.json
