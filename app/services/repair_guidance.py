@@ -21,6 +21,14 @@ CASE_LIMIT = 10
 MIN_SUPPORTING_CASES = 2
 
 
+def durable_resolution(report):
+    return report.outcome == 'resolved' and (report.repair_followup or {}).get('recurrence') != 'recurred'
+
+
+def referenced_parts(report):
+    return set(report.part_ids) | {p['part_id'] for p in (report.repair_followup or {}).get('actual_parts', [])}
+
+
 def _case_source(report):
     return {'case_id': report.id, 'source_work_order_id': report.work_order_id,
             'source_path': f'/api/muse/reports/{report.id}',
@@ -30,8 +38,10 @@ def _case_source(report):
             'symptom_resolution': symptoms.report_resolution(report),
             'reported_steps': report.steps, 'result_notes': report.result_notes,
             'reviewed_by': report.reviewed_by, 'reviewed_at': report.reviewed_at,
-            'outcome': report.outcome, 'source':
-            ('reviewed_resolved_case' if report.outcome == 'resolved' else 'reviewed_non_resolved_case')
+            'outcome': report.outcome, 'repair_followup': report.repair_followup,
+            'actual_use_source': 'technician_reported_actual_use' if report.repair_followup else None,
+            'compatibility_confirmed': False, 'source':
+            ('reviewed_resolved_case' if durable_resolution(report) else 'reviewed_non_resolved_case')
             if report.review_status == 'approved' else f'{report.review_status}_case_report'}
 
 
@@ -69,8 +79,8 @@ def guidance(db, org, order, codes, classification=None):
     for report in reports:
         latest.setdefault(report.work_order_id, report)
     reports = list(latest.values())
-    positive = [r for r in reports if r.outcome == 'resolved']
-    negative = [r for r in reports if r.outcome != 'resolved']
+    positive = [r for r in reports if durable_resolution(r)]
+    negative = [r for r in reports if not durable_resolution(r)]
     cases = [_case_source(r) for r in positive[:CASE_LIMIT]]
     failed_cases = [_case_source(r) for r in negative[:CASE_LIMIT]]
     notices = []
@@ -88,6 +98,8 @@ def guidance(db, org, order, codes, classification=None):
         notice('no_reviewed_resolved_cases', '匹配案例尚无已审核的解决结果；未解决记录仅作为排查背景。')
     if positive and len(positive) < MIN_SUPPORTING_CASES:
         notice('single_supporting_case', '目前仅有一个独立工单的解决案例，证据有限，需要现场核实。')
+    if any((r.repair_followup or {}).get('recurrence')=='recurred' for r in negative):
+        notice('reviewed_recurrence_present', '已审核回访记录显示复发，相关工单不再作为解决案例支持推荐。')
     if negative:
         notice('non_resolved_evidence_present', '同症状存在未解决或部分解决结果；不能保证历史操作有效。')
     if len(positive) > CASE_LIMIT or len(negative) > CASE_LIMIT:
@@ -106,7 +118,7 @@ def guidance(db, org, order, codes, classification=None):
             if r.id not in step['source_case_ids']:
                 step['source_case_ids'].append(r.id)
                 step['source_work_order_ids'].append(r.work_order_id)
-        for pid in set(r.part_ids):
+        for pid in referenced_parts(r):
             part_refs.setdefault(pid, []).append(r)
     local = list(db.scalars(select(Part).where(Part.organization_id == org, Part.id.in_(part_refs)))) if part_refs else []
     stock = inventory(db, org, [p.id for p in local])
@@ -117,7 +129,7 @@ def guidance(db, org, order, codes, classification=None):
     candidates = []
     for part in local:
         refs = part_refs[part.id]
-        contrary = [r for r in negative if part.id in r.part_ids]
+        contrary = [r for r in negative if part.id in referenced_parts(r)]
         availability = _stock_context(part, stock.get(part.id, []), warehouse_ids, active_locations)
         evidence_limited = len(refs) < MIN_SUPPORTING_CASES or bool(contrary)
         reasons = []
@@ -130,6 +142,9 @@ def guidance(db, org, order, codes, classification=None):
         candidates.append({'part_id': part.id, 'part_number': part.part_number, 'name': part.name,
             'is_active': part.is_active, 'source': 'reviewed_case_report_part_reference',
             'source_case_ids': [r.id for r in refs], 'source_work_order_ids': [r.work_order_id for r in refs],
+            'actual_use_evidence': [{'case_id': r.id, 'source_path': f'/api/muse/reports/{r.id}',
+                'quantity': p['quantity'], 'source': 'technician_reported_actual_use',
+                'compatibility_confirmed': False} for r in refs for p in (r.repair_followup or {}).get('actual_parts', []) if p['part_id']==part.id],
             'supporting_case_count': len(refs), 'non_resolved_case_count': len(contrary),
             'non_resolved_source_case_ids': [r.id for r in contrary[:CASE_LIMIT]],
             'non_resolved_evidence': [_case_source(r) for r in contrary[:CASE_LIMIT]],

@@ -33,3 +33,29 @@ API接口：
 维修反馈支持Idempotency-Key：同组织同次请求的网络重试返回原报告，数据库唯一约束防止并发重试创建重复记录；键不能换内容、换工单或换提交人。无键旧客户端保持兼容。幂等重试不会跳过当前工单权限检查，也不会重复写入提交审计。
 
 远程共享还需稳定HTTPS域名、持久化数据库和上传存储、备份、生产JWT密钥、每技师账户及运行监控。GitHub仓库已选warehouse-system，DigitalOcean为待开通方案；目前暂停开通，由所有者研究。当前本机地址不能供远程Muse直接访问，未部署前不可宣称多人远程服务已上线。
+
+## 维修反馈闭环
+
+继续使用 `POST /api/muse/work-orders/{work_order_id}/reports`，沿用当前技师身份、设备和工单领取权限及 Idempotency-Key。每次回访创建新报告，独立进入 pending 审核，不覆盖历史报告。
+
+`outcome` 记录本次结果（resolved / partial / unresolved）。可选 `repair_followup` 示例：
+
+```json
+{
+  "previous_report_id": 123,
+  "recurrence": "not_observed",
+  "observation_days": 14,
+  "actual_parts": [{"part_id": 45, "quantity": 1}],
+  "actual_parts_complete": true
+}
+```
+
+- recurrence 为 unknown（未确认）、not_observed（观察期内未见复发）、recurred（已复发）；not_observed 必须提供正数 observation_days。不代表永久解决。
+- previous_report_id 必须属于本组织、同一工单且机型和标准症状仍一致。首次报告可省略。回访需提交完整的症状、检查步骤、结果说明和用料快照，不自动复制旧报告。
+- actual_parts 是技师明确报告的实际使用零件及正数数量，仅接受本组织零件，不写库存流水、不认证适配。actual_parts_complete=false 表示清单可能不完整；true 且空数组表示明确未使用零件。旧 part_ids 仍仅表示报告提及。
+- 同工单、同症状按最新提交且已审核的报告去重；审核时间不会改变提交顺序。未审核或已拒绝回访不替换当前已审核证据；经理可拒绝错误记录恢复此前证据。
+- 已审核复发记录即使 outcome=resolved，也不能作为持续解决证据，返回 non_resolved_cases 及复发提示。修复复发后再次回访、审核，才可能恢复正向案例。
+- 来源详情 GET /api/muse/reports/{id} 保留 repair_followup、审核者、审核时间、原始症状、原报告 ID；实际用料候选提供 actual_use_evidence 和来源路径。反馈数量不等于推荐用量。
+- 旧报告没有回访数据时返回 null，不推断无复发或实际安装。不计算未经校准的成功率，不进行模型训练。
+
+数据库迁移 20261015_0022 增加可空 JSON repair_followup；旧报告不回填、不改写。前端无需改动即可由 Muse 调用上述后端 API。

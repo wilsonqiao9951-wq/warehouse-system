@@ -79,11 +79,31 @@ from datetime import datetime,timezone
 import json
 from hashlib import sha256
 
+class ActualRepairPart(BaseModel):
+    part_id: int=Field(gt=0)
+    quantity: float=Field(gt=0,allow_inf_nan=False)
+
+class RepairFollowup(BaseModel):
+    previous_report_id: int | None=Field(None,gt=0)
+    recurrence: Literal['unknown','not_observed','recurred']='unknown'
+    observation_days: int | None=Field(None,ge=0,le=36500)
+    actual_parts: list[ActualRepairPart]=Field(default_factory=list,max_length=50)
+    actual_parts_complete: bool=False
+
+    @model_validator(mode='after')
+    def validate_observation(self):
+        if self.recurrence=='not_observed' and not self.observation_days:
+            raise ValueError('No recurrence requires a positive observation period')
+        ids=[p.part_id for p in self.actual_parts]
+        if len(ids)!=len(set(ids)):raise ValueError('Duplicate actual part')
+        return self
+
 class RepairReportCreate(BaseModel):
     symptom_codes: list[Annotated[str,Field(min_length=1,max_length=80)]]=Field(default_factory=list,max_length=20)
     symptom_text: str=Field('',max_length=5000)
     steps: list[Annotated[str,Field(min_length=1,max_length=1000)]]=Field(min_length=1,max_length=50)
     outcome: Literal['resolved','partial','unresolved']
+    repair_followup: RepairFollowup | None=None
     part_ids: list[Annotated[int,Field(gt=0)]]=Field(default_factory=list,max_length=50)
     result_notes: str=Field(min_length=1,max_length=5000)
 
@@ -127,7 +147,21 @@ def work_order_symptoms(work_order_id: int,db: Session=Depends(get_db),actor: Ac
 def submit_report(work_order_id: int,payload: RepairReportCreate,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor),idempotency_key: str | None=Header(None,alias='Idempotency-Key',min_length=16,max_length=128,pattern=r'^[A-Za-z0-9_-]+$')):
     from app.services.repair_guidance import machine_model
     order=require_work_order_write_scope(db,actor,work_order_id)
+    closure=payload.repair_followup.model_dump() if payload.repair_followup else None
+    if closure:
+        closure['actual_parts']=sorted(closure['actual_parts'],key=lambda p:p['part_id'])
+        previous_id=closure['previous_report_id']
+        if previous_id:
+            previous=db.scalar(select(RepairCaseReport).where(RepairCaseReport.id==previous_id,RepairCaseReport.organization_id==actor.organization_id,RepairCaseReport.work_order_id==order.id))
+            if not previous:raise HTTPException(404,'Previous report not found for this work order')
+            if previous.machine_model!=machine_model(db,actor.organization_id,order):raise HTTPException(422,'Previous report model no longer matches work order')
+            if set(symptoms.report_codes(previous))!=set(symptoms.resolve(payload.symptom_codes,payload.symptom_text)['canonical_codes']):
+                raise HTTPException(422,'Follow-up must retain the previous report symptom codes')
     ids=set(payload.part_ids)
+    actual_ids={p['part_id'] for p in closure['actual_parts']} if closure else set()
+    if actual_ids:
+        actual_found=set(db.scalars(select(Part.id).where(Part.organization_id==actor.organization_id,Part.id.in_(actual_ids))))
+        if actual_ids!=actual_found:raise HTTPException(404,'Organization actual part not found')
     found=set(db.scalars(select(Part.id).where(Part.organization_id==actor.organization_id,Part.id.in_(ids)))) if ids else set()
     if ids!=found:raise HTTPException(404,'Organization part not found')
     classification=symptoms.resolve(payload.symptom_codes,payload.symptom_text,source='technician_report',work_order_id=order.id)
@@ -135,6 +169,7 @@ def submit_report(work_order_id: int,payload: RepairReportCreate,db: Session=Dep
     steps=[s.strip() for s in payload.steps if s.strip()]
     if not (any(s.strip() for s in payload.symptom_codes) or payload.symptom_text.strip()) or not steps or not payload.result_notes.strip():raise HTTPException(422,'Nonblank symptoms, steps and results are required')
     normalized={'work_order_id':order.id,'symptom_codes':codes,'steps':steps,'outcome':payload.outcome,'part_ids':sorted(ids),'result_notes':payload.result_notes.strip()}
+    if closure is not None:normalized['repair_followup']=closure
     if payload.symptom_text:normalized['symptom_text']=payload.symptom_text
     fingerprint=sha256(json.dumps(normalized,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
 
@@ -149,7 +184,7 @@ def submit_report(work_order_id: int,payload: RepairReportCreate,db: Session=Dep
 
     def response(report,replayed):
         current_model=machine_model(db,actor.organization_id,order)
-        return {'report_id':report.id,'machine_model':report.machine_model,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(current_model and current_model==report.machine_model) and bool(symptoms.report_codes(report)),'replayed':replayed,'symptom_resolution':symptoms.report_resolution(report)}
+        return {'report_id':report.id,'machine_model':report.machine_model,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and (report.repair_followup or {}).get('recurrence')!='recurred' and bool(current_model and current_model==report.machine_model) and bool(symptoms.report_codes(report)),'replayed':replayed,'symptom_resolution':symptoms.report_resolution(report)}
 
     existing=existing_report()
     if existing:return response(existing,True)
@@ -173,7 +208,7 @@ def review_report(report_id: int,payload: RepairReportReview,db: Session=Depends
     db.add(AuditLog(organization_id=actor.organization_id,user_id=actor.user_id,action='review_repair_case',entity_type='repair_case_report',entity_id=report.id,metadata_json=json.dumps({'decision':payload.decision})));db.commit()
     order=db.scalar(select(WorkOrder).where(WorkOrder.id==report.work_order_id,WorkOrder.organization_id==actor.organization_id))
     current_model=machine_model(db,actor.organization_id,order) if order else None
-    return {'report_id':report.id,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(current_model and current_model==report.machine_model) and bool(symptoms.report_codes(report))}
+    return {'report_id':report.id,'review_status':report.review_status,'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and (report.repair_followup or {}).get('recurrence')!='recurred' and bool(current_model and current_model==report.machine_model) and bool(symptoms.report_codes(report))}
 
 @muse_router.get('/work-orders/{work_order_id}/guidance')
 def repair_guidance(work_order_id: int,symptom_code: str=Query('',max_length=80),db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor),symptom_text: str=Query('',max_length=5000),symptom_codes: list[Annotated[str,Field(min_length=1,max_length=80)]] | None=Query(None,max_length=20)):
@@ -194,7 +229,7 @@ def report_review_queue(review_status: Literal['pending','approved','rejected']=
     require_roles(actor,UserRole.ADMIN,UserRole.MANAGER)
     if skip<0 or not 1<=limit<=100:raise HTTPException(422,'Invalid pagination')
     rows=db.scalars(select(RepairCaseReport).where(RepairCaseReport.organization_id==actor.organization_id,RepairCaseReport.review_status==review_status).order_by(RepairCaseReport.id.desc()).offset(skip).limit(limit)).all()
-    return {'items':[{'report_id':r.id,'work_order_id':r.work_order_id,'submitted_by':r.submitted_by,'machine_model':r.machine_model,'symptom_codes':r.symptom_codes,'symptom_resolution':symptoms.report_resolution(r),'steps':r.steps,'outcome':r.outcome,'part_ids':r.part_ids,'result_notes':r.result_notes,'review_status':r.review_status} for r in rows],'skip':skip,'limit':limit}
+    return {'items':[{'report_id':r.id,'work_order_id':r.work_order_id,'submitted_by':r.submitted_by,'machine_model':r.machine_model,'symptom_codes':r.symptom_codes,'symptom_resolution':symptoms.report_resolution(r),'steps':r.steps,'outcome':r.outcome,'part_ids':r.part_ids,'result_notes':r.result_notes,'repair_followup':r.repair_followup,'review_status':r.review_status} for r in rows],'skip':skip,'limit':limit}
 
 
 @muse_router.get('/reports/{report_id}')
@@ -211,7 +246,7 @@ def report_source(report_id: int,db: Session=Depends(get_db),actor: Actor=Depend
     return {**_case_source(report),'report_id':report.id,'part_ids':report.part_ids,
             'review_status':report.review_status,'current_machine_model':current_model,
             'model_evidence_current':bool(current_model and current_model==report.machine_model),
-            'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and bool(current_model and current_model==report.machine_model) and bool(symptoms.report_codes(report)),
+            'guidance_eligible':report.review_status=='approved' and report.outcome=='resolved' and (report.repair_followup or {}).get('recurrence')!='recurred' and bool(current_model and current_model==report.machine_model) and bool(symptoms.report_codes(report)),
             'symptom_resolution':symptoms.report_resolution(report),'compatibility_confirmed':False}
 
 
