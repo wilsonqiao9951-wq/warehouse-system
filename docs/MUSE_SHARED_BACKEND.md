@@ -59,3 +59,28 @@ API接口：
 - 旧报告没有回访数据时返回 null，不推断无复发或实际安装。不计算未经校准的成功率，不进行模型训练。
 
 数据库迁移 20261015_0022 增加可空 JSON repair_followup；旧报告不回填、不改写。前端无需改动即可由 Muse 调用上述后端 API。
+
+## 待回访清单与到期提醒
+
+对已审核报告调用 `PUT /api/muse/reports/{report_id}/followup-schedule`：
+```json
+{"due_at":"2026-11-01T10:00:00-05:00","reason":"维修后七天复查"}
+```
+必须有原工单写权限（管理员或持有有效设备与领取版本的技师）；经理仍走审核/领取管理权限。日期必须带时区，服务器存 UTC。due_at=null 表示取消计划，reason 必填，调整前后时间和操作者写审计。旧报告不自动安排回访。
+
+查询 `GET /api/muse/followups?scope=mine&status=open`，或：
+```json
+{"resource":"followups","scope":"mine","followup_status":"open","skip":0,"limit":25}
+```
+scope 支持 mine / available / all，始终限制当前组织。status 支持 open / due / upcoming / awaiting_review / completed / all；open 包括未到期、到期和待审核。counts 为所选 scope 下各状态总数，total 为状态筛选后的数量。按计划时间和来源报告 ID 排序，limit 最大 100。
+
+Muse 在会话开始或技师询问待办时查询，将 reminder_required=true 的项目展示为到期提醒。返回 UTC due_at、as_of、工单编号、准确机型、症状、来源路径、提交路径及 previous_report_id。is_overdue 可在待审核时为 true，但 reminder_required=false，避免催促重复提交。提醒为查询时计算，不推送邮件或外部消息，也不要求新增云服务。
+
+沿用 POST /api/muse/work-orders/{work_order_id}/reports，repair_followup.previous_report_id 使用清单值，填写 recurrence、观察天数、实际用料及完整结果。只有直接关联该计划来源的反馈才处理该计划；同工单无关反馈不关闭计划。
+- 未提交：到期或未到期；待审核反馈：awaiting_review；审核通过：completed；仅有被拒绝反馈：重新显示到期/未到期。
+- completed 只表示这次回访已审核，不代表维修成功；复发仍会作为负面证据影响指导。
+- 审核撤销时状态随查询重新计算；需要再次回访时给最新已审核反馈另排计划。
+- 原报告审核撤销后计划不进入清单。机型发生变更会返回 model_evidence_current=false，需先核对身份；不会把旧机型案例自动适配到新机型。
+- 未审核反馈明细仅本人或经理/管理员获得来源链接；其他有工单读取权限的同组织用户只看到待审核状态。
+
+迁移 20261015_0023 增加可空 followup_due_at 和索引。排期和提醒不改变维修建议、库存或适配状态。

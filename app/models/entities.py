@@ -533,6 +533,7 @@ class RepairCaseReport(Base):
     symptom_codes: Mapped[list] = mapped_column(JSON,nullable=False)
     symptom_context: Mapped[dict | None] = mapped_column(JSON,nullable=True)
     repair_followup: Mapped[dict | None] = mapped_column(JSON,nullable=True)
+    followup_due_at: Mapped[datetime | None] = mapped_column(DateTime,nullable=True,index=True)
     steps: Mapped[list] = mapped_column(JSON,nullable=False)
     outcome: Mapped[str] = mapped_column(String(30),nullable=False)
     part_ids: Mapped[list] = mapped_column(JSON,nullable=False)

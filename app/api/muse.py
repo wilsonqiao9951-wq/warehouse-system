@@ -13,15 +13,16 @@ from app.services import model_chain,freestyle_chain
 from app.services import symptoms
 
 muse_router=APIRouter(prefix='/muse',tags=['Muse integration'])
-RESOURCES=['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms']
+RESOURCES=['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups']
 
 @muse_router.get('')
 def manifest():
-    return {'name':'myCoke shared backend','contract_version':'1.1','symptoms_path':'/api/muse/symptoms','symptom_resolve_path':'/api/muse/symptoms/resolve','api_base_path':'/api','query_path':'/api/muse/query','openapi_path':'/openapi.json','interactive_docs_path':'/docs','authentication':{'type':'Bearer','login_path':'/api/auth/login','identity_path':'/api/auth/me','per_technician_identity_required':True,'shared_admin_credentials_allowed':False,'device_headers':['X-Device-Id','X-Device-Token','X-Device-Name'],'token_expiry':'Use expires_in from login; sign in again when expired'},'query_resources':RESOURCES,'frontend':{'existing_ui_requires_its_own_host':True,'agent_can_render_api_results':True,'new_model_features_in_existing_ui':False},'rules':['Use current signed-in technician identity; organization is resolved server-side.','Official associations, field observations, explicit field verification and reported actual use are distinct evidence.','Shared catalog references never establish cross-model fitment.','Query is read-only. Writes use documented REST endpoints and existing role/device/claim restrictions.','Do not store passwords or tokens in shared project descriptions, GitHub issues or logs.'],'write_contracts':{'freestyle_verification':'POST /api/catalog/freestyle/models/{model_id}/field-verifications','viper3_verification':'POST /api/catalog/models/viper-3/field-verifications','catalog_import':'POST /api/catalog/parts/{catalog_id}/import','other_operations':'Use /openapi.json; existing authorization and work-order ownership rules apply.'}}
+    return {'name':'myCoke shared backend','contract_version':'1.2','followups_path':'/api/muse/followups','followup_schedule_path':'/api/muse/reports/{report_id}/followup-schedule','symptoms_path':'/api/muse/symptoms','symptom_resolve_path':'/api/muse/symptoms/resolve','api_base_path':'/api','query_path':'/api/muse/query','openapi_path':'/openapi.json','interactive_docs_path':'/docs','authentication':{'type':'Bearer','login_path':'/api/auth/login','identity_path':'/api/auth/me','per_technician_identity_required':True,'shared_admin_credentials_allowed':False,'device_headers':['X-Device-Id','X-Device-Token','X-Device-Name'],'token_expiry':'Use expires_in from login; sign in again when expired'},'query_resources':RESOURCES,'frontend':{'existing_ui_requires_its_own_host':True,'agent_can_render_api_results':True,'new_model_features_in_existing_ui':False},'rules':['Use current signed-in technician identity; organization is resolved server-side.','Official associations, field observations, explicit field verification and reported actual use are distinct evidence.','Shared catalog references never establish cross-model fitment.','Query is read-only. Writes use documented REST endpoints and existing role/device/claim restrictions.','Do not store passwords or tokens in shared project descriptions, GitHub issues or logs.'],'write_contracts':{'freestyle_verification':'POST /api/catalog/freestyle/models/{model_id}/field-verifications','viper3_verification':'POST /api/catalog/models/viper-3/field-verifications','catalog_import':'POST /api/catalog/parts/{catalog_id}/import','other_operations':'Use /openapi.json; existing authorization and work-order ownership rules apply.'}}
 
 class MuseQuery(BaseModel):
-    resource: Literal['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms']
+    resource: Literal['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups']
     work_order_id: int | None=Field(None,gt=0)
+    followup_status: Literal['open','due','upcoming','awaiting_review','completed','all']='open'
     status: str | None=Field(None,max_length=50)
     scope: Literal['mine','available','all']='mine'
     symptom_code: str=Field('',max_length=80)
@@ -44,6 +45,7 @@ class MuseQuery(BaseModel):
 @muse_router.post('/query')
 def query(payload: MuseQuery,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor)):
     r=payload.resource;org=actor.organization_id
+    if r=='followups':return followup_list(payload.followup_status,payload.scope,payload.skip,payload.limit,db,actor)
     if r=='identity':return {'user_id':actor.user_id,'organization_id':org,'role':actor.role,'authentication':actor.auth_method}
     if r=='work_orders':
         from app.api.routes import list_work_orders
@@ -255,3 +257,54 @@ def muse_guide():
     from fastapi.responses import PlainTextResponse
     from app.services.catalog import DATA_ROOT
     return PlainTextResponse((DATA_ROOT/'docs/MUSE_PROJECT_BRIEF.md').read_text())
+
+
+class FollowupSchedule(BaseModel):
+    due_at: datetime | None
+    reason: str=Field(min_length=1,max_length=1000)
+
+    @model_validator(mode='after')
+    def timezone_required(self):
+        if self.due_at is not None and self.due_at.utcoffset() is None:
+            raise ValueError('due_at requires an explicit timezone')
+        if not self.reason.strip():raise ValueError('A nonblank reason is required')
+        return self
+
+
+@muse_router.put('/reports/{report_id}/followup-schedule')
+def schedule_followup(report_id:int,payload:FollowupSchedule,db:Session=Depends(get_db),actor:Actor=Depends(get_current_actor)):
+    report=db.scalar(select(RepairCaseReport).where(RepairCaseReport.id==report_id,RepairCaseReport.organization_id==actor.organization_id))
+    if not report:raise HTTPException(404,'Report not found')
+    require_work_order_write_scope(db,actor,report.work_order_id)
+    if report.review_status!='approved':raise HTTPException(409,'Schedule requires an approved source report')
+    previous=report.followup_due_at
+    report.followup_due_at=payload.due_at.astimezone(timezone.utc).replace(tzinfo=None) if payload.due_at else None
+    db.add(AuditLog(organization_id=actor.organization_id,user_id=actor.user_id,action='schedule_repair_followup',entity_type='repair_case_report',entity_id=report.id,metadata_json=json.dumps({'previous_due_at':previous.isoformat() if previous else None,'due_at':report.followup_due_at.isoformat() if report.followup_due_at else None,'reason':payload.reason.strip()})))
+    db.commit()
+    return {'report_id':report.id,'work_order_id':report.work_order_id,'due_at':report.followup_due_at.replace(tzinfo=timezone.utc) if report.followup_due_at else None,'cancelled':report.followup_due_at is None,'source_path':f'/api/muse/reports/{report.id}','guidance_changed':False}
+
+
+@muse_router.get('/followups')
+def followup_list(status:Literal['open','due','upcoming','awaiting_review','completed','all']='open',scope:Literal['mine','available','all']='mine',skip:int=Query(0,ge=0),limit:int=Query(25,ge=1,le=100),db:Session=Depends(get_db),actor:Actor=Depends(get_current_actor)):
+    require_roles(actor,UserRole.ADMIN,UserRole.MANAGER,UserRole.ENGINEER,UserRole.WAREHOUSE)
+    now=datetime.now(timezone.utc)
+    stmt=select(RepairCaseReport,WorkOrder).join(WorkOrder,WorkOrder.id==RepairCaseReport.work_order_id).where(RepairCaseReport.organization_id==actor.organization_id,WorkOrder.organization_id==actor.organization_id,RepairCaseReport.followup_due_at.is_not(None),RepairCaseReport.review_status=='approved')
+    if scope=='mine':stmt=stmt.where(WorkOrder.claimed_by_id==actor.user_id) if actor.user_id else stmt.where(False)
+    elif scope=='available':stmt=stmt.where(WorkOrder.claimed_by_id.is_(None),WorkOrder.is_locked.is_(False))
+    rows=db.execute(stmt.order_by(RepairCaseReport.followup_due_at,RepairCaseReport.id)).all()
+    work_ids={r.work_order_id for r,o in rows}
+    reports=list(db.scalars(select(RepairCaseReport).where(RepairCaseReport.organization_id==actor.organization_id,RepairCaseReport.work_order_id.in_(work_ids)).order_by(RepairCaseReport.created_at.desc(),RepairCaseReport.id.desc()))) if work_ids else []
+    from app.services.repair_guidance import machine_model
+    items=[];counts={'due':0,'upcoming':0,'awaiting_review':0,'completed':0}
+    for report,order in rows:
+        children=[r for r in reports if r.work_order_id==report.work_order_id and (r.repair_followup or {}).get('previous_report_id')==report.id]
+        approved=next((r for r in children if r.review_status=='approved'),None)
+        pending=next((r for r in children if r.review_status=='pending'),None)
+        due=report.followup_due_at.replace(tzinfo=timezone.utc)
+        state='completed' if approved else 'awaiting_review' if pending else 'due' if due<=now else 'upcoming'
+        counts[state]+=1
+        if status!='all' and not (status=='open' and state!='completed') and status!=state:continue
+        visible=pending if pending and (actor.role in {UserRole.ADMIN,UserRole.MANAGER} or pending.submitted_by==actor.user_id) else None
+        latest=approved or visible
+        items.append({'report_id':report.id,'work_order_id':order.id,'ticket_number':order.ticket_number,'claimed_by_id':order.claimed_by_id,'machine_model':report.machine_model,'model_evidence_current':machine_model(db,actor.organization_id,order)==report.machine_model and report.machine_model is not None,'symptom_codes':sorted(symptoms.report_codes(report)),'due_at':due,'status':state,'is_overdue':due<=now and state!='completed','reminder_required':state=='due','source_path':f'/api/muse/reports/{report.id}','followup_report_id':latest.id if latest else None,'followup_source_path':f'/api/muse/reports/{latest.id}' if latest else None,'submit_path':f'/api/muse/work-orders/{order.id}/reports','previous_report_id':report.id,'compatibility_confirmed':False})
+    return {'items':items[skip:skip+limit],'total':len(items),'skip':skip,'limit':limit,'counts':counts,'as_of':now,'timezone':'UTC','reminder_delivery':'query_only','policy':'Due status is computed on each query. Submit a linked report using existing claim/device permissions; only approved feedback affects repair guidance. No external messages are sent.'}
