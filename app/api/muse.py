@@ -13,14 +13,14 @@ from app.services import model_chain,freestyle_chain
 from app.services import symptoms
 
 muse_router=APIRouter(prefix='/muse',tags=['Muse integration'])
-RESOURCES=['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences']
+RESOURCES=['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences','repair_statistics']
 
 @muse_router.get('')
 def manifest():
-    return {'name':'myCoke shared backend','contract_version':'1.3','followup_stats_path':'/api/muse/followups/stats','repair_recurrences_path':'/api/muse/followups/recurrences','followups_path':'/api/muse/followups','followup_schedule_path':'/api/muse/reports/{report_id}/followup-schedule','symptoms_path':'/api/muse/symptoms','symptom_resolve_path':'/api/muse/symptoms/resolve','api_base_path':'/api','query_path':'/api/muse/query','openapi_path':'/openapi.json','interactive_docs_path':'/docs','authentication':{'type':'Bearer','login_path':'/api/auth/login','identity_path':'/api/auth/me','per_technician_identity_required':True,'shared_admin_credentials_allowed':False,'device_headers':['X-Device-Id','X-Device-Token','X-Device-Name'],'token_expiry':'Use expires_in from login; sign in again when expired'},'query_resources':RESOURCES,'frontend':{'existing_ui_requires_its_own_host':True,'agent_can_render_api_results':True,'new_model_features_in_existing_ui':False},'rules':['Use current signed-in technician identity; organization is resolved server-side.','Official associations, field observations, explicit field verification and reported actual use are distinct evidence.','Shared catalog references never establish cross-model fitment.','Query is read-only. Writes use documented REST endpoints and existing role/device/claim restrictions.','Do not store passwords or tokens in shared project descriptions, GitHub issues or logs.'],'write_contracts':{'freestyle_verification':'POST /api/catalog/freestyle/models/{model_id}/field-verifications','viper3_verification':'POST /api/catalog/models/viper-3/field-verifications','catalog_import':'POST /api/catalog/parts/{catalog_id}/import','other_operations':'Use /openapi.json; existing authorization and work-order ownership rules apply.'}}
+    return {'name':'myCoke shared backend','contract_version':'1.4','repair_statistics_path':'/api/muse/repair-statistics','followup_stats_path':'/api/muse/followups/stats','repair_recurrences_path':'/api/muse/followups/recurrences','followups_path':'/api/muse/followups','followup_schedule_path':'/api/muse/reports/{report_id}/followup-schedule','symptoms_path':'/api/muse/symptoms','symptom_resolve_path':'/api/muse/symptoms/resolve','api_base_path':'/api','query_path':'/api/muse/query','openapi_path':'/openapi.json','interactive_docs_path':'/docs','authentication':{'type':'Bearer','login_path':'/api/auth/login','identity_path':'/api/auth/me','per_technician_identity_required':True,'shared_admin_credentials_allowed':False,'device_headers':['X-Device-Id','X-Device-Token','X-Device-Name'],'token_expiry':'Use expires_in from login; sign in again when expired'},'query_resources':RESOURCES,'frontend':{'existing_ui_requires_its_own_host':True,'agent_can_render_api_results':True,'new_model_features_in_existing_ui':False},'rules':['Use current signed-in technician identity; organization is resolved server-side.','Official associations, field observations, explicit field verification and reported actual use are distinct evidence.','Shared catalog references never establish cross-model fitment.','Query is read-only. Writes use documented REST endpoints and existing role/device/claim restrictions.','Do not store passwords or tokens in shared project descriptions, GitHub issues or logs.'],'write_contracts':{'freestyle_verification':'POST /api/catalog/freestyle/models/{model_id}/field-verifications','viper3_verification':'POST /api/catalog/models/viper-3/field-verifications','catalog_import':'POST /api/catalog/parts/{catalog_id}/import','other_operations':'Use /openapi.json; existing authorization and work-order ownership rules apply.'}}
 
 class MuseQuery(BaseModel):
-    resource: Literal['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences']
+    resource: Literal['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences','repair_statistics']
     work_order_id: int | None=Field(None,gt=0)
     followup_status: Literal['open','due','upcoming','awaiting_review','completed','overdue','late','recurred','all']='open'
     status: str | None=Field(None,max_length=50)
@@ -29,6 +29,7 @@ class MuseQuery(BaseModel):
     symptom_codes: list[Annotated[str,Field(min_length=1,max_length=80)]]=Field(default_factory=list,max_length=20)
     symptom_text: str=Field('',max_length=5000)
     kind: Literal['parts','manuals','equipment']='parts'
+    machine_model: str=Field('',max_length=255)
     model_id: str | None=Field(None,max_length=40)
     part_id: int | None=Field(None,gt=0)
     section_id: str | None=Field(None,max_length=255)
@@ -45,6 +46,7 @@ class MuseQuery(BaseModel):
 @muse_router.post('/query')
 def query(payload: MuseQuery,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor)):
     r=payload.resource;org=actor.organization_id
+    if r=='repair_statistics':return repair_statistics(payload.machine_model,payload.symptom_code,payload.skip,payload.limit,db,actor)
     if r=='followup_stats':return followup_stats(payload.scope,db,actor)
     if r=='repair_recurrences':return repair_recurrences(payload.scope,payload.skip,payload.limit,db,actor)
     if r=='followups':return followup_list(payload.followup_status,payload.scope,payload.skip,payload.limit,db,actor)
@@ -350,3 +352,19 @@ def followup_stats(scope:Literal['mine','available','all']='mine',db:Session=Dep
     items=data['items'];recurrences=_reviewed_recurrences(scope,db,actor)
     timing={s:sum(i['submission_timing']==s for i in items) for s in ['overdue','late','on_time','not_due']}
     return {'as_of':data['as_of'],'scope':scope,'organization_id':actor.organization_id,'scheduled_followup_count':len(items),'scheduled_work_order_count':len({i['work_order_id'] for i in items}),'status_counts':data['counts'],'submission_timing_counts':timing,'overdue_work_order_count':len({i['work_order_id'] for i in items if i['followup_needed']}),'reviewed_recurrence_count':len(recurrences),'reviewed_recurrence_work_order_count':len({i['work_order_id'] for i in recurrences}),'sources':{'overdue':'/api/muse/followups?status=overdue&scope='+scope,'late':'/api/muse/followups?status=late&scope='+scope,'recurrences':'/api/muse/followups/recurrences?scope='+scope},'definitions':{'timeliness':'First currently pending or approved direct follow-up submission versus current due time; rejected reports do not satisfy follow-up. Review waiting is not submission delay. Rescheduling recalculates timing; audit preserves previous deadlines.','population':'Scheduled counts include active schedules on approved source reports. Recurrences include unscheduled latest approved reports per work order and exact canonical symptom set. Counts are current state, not a historical cohort or success rate.','approval':'Pending recurrence is never counted as confirmed. Reporting and scheduling do not change guidance or compatibility.'}}
+
+
+@muse_router.get('/repair-statistics')
+def repair_statistics(machine_model:str=Query('',max_length=255),symptom_code:str=Query('',max_length=80),skip:int=Query(0,ge=0),limit:int=Query(25,ge=1,le=100),db:Session=Depends(get_db),actor:Actor=Depends(get_current_actor)):
+    require_roles(actor,UserRole.ADMIN,UserRole.MANAGER,UserRole.ENGINEER,UserRole.WAREHOUSE)
+    from app.services.repair_statistics import summary
+    return summary(db,actor.organization_id,machine_model,symptom_code,skip,limit)
+
+
+@muse_router.get('/repair-statistics/cases')
+def repair_statistics_cases(machine_model:str=Query(...,min_length=1,max_length=255),symptom_code:str=Query(...,min_length=1,max_length=80),skip:int=Query(0,ge=0),limit:int=Query(25,ge=1,le=100),db:Session=Depends(get_db),actor:Actor=Depends(get_current_actor)):
+    require_roles(actor,UserRole.ADMIN,UserRole.MANAGER,UserRole.ENGINEER,UserRole.WAREHOUSE)
+    from app.services.repair_statistics import groups
+    items,_,classification=groups(db,actor.organization_id,machine_model,symptom_code)
+    cases=[source for item in items for source in item['source_cases']]
+    return {'items':cases[skip:skip+limit],'total':len(cases),'skip':skip,'limit':limit,'symptom_resolution':classification}

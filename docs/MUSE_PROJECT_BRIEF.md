@@ -131,3 +131,20 @@ GET /api/muse/followups 新增 status=overdue（到期尚无有效提交）、la
 新增 GET /api/muse/followups/recurrences（或 query resource=repair_recurrences），查询本组织当前已审核复发记录，包含未排期的回访。按工单和完全相同的标准症状代码集合取最新已审核报告；待审核的新反馈不会覆盖旧已审核结果。返回来源报告路径、原报告 ID、机型当前性及观察天数。后续审核确认未见复发后，旧复发仍可从历史来源读取，但不再列为该症状当前复发。
 
 统计中的 recurrence 数量与计划数量使用不同总体，不能相除推导复发率或成功率。多个症状/计划可属于同一工单，分别提供记录数和工单去重数。来源路径可逐条核验；不自动认定适配、不修改库存或工单状态。无需新增数据库迁移，仍为 0023。
+
+## 按机型和症状汇总维修证据（契约 1.4）
+
+GET /api/muse/repair-statistics，或 query resource=repair_statistics，可用 machine_model（准确官方机型名称）、symptom_code（支持明确别名）、skip、limit 筛选。统计仅限当前组织的已审核报告；当前工单机型必须与报告快照一致，未知机型/无标准症状报告计入 excluded_report_counts，不混合到确定机型。
+
+每个机型/标准症状组，按工单取最新提交且已审核的匹配报告。返回：
+- 独立工单数、resolved/partial/unresolved 原始结果数；
+- recurred/not_observed/unknown 复发观察数；resolved 与 recurred 可以同时出现，不能把原始解决数当作持续成功；
+- actual_parts 明确报告的实际用料、数量、独立工单支持数及 source_case_ids，报告提及但未明确实际使用的零件不进入实际用料汇总；
+- repeat_failure_signal：至少一例已审核复发，或至少两个部分解决/未解决工单，仅用于提示排查；
+- needs_more_evidence 与原因：单一案例、复发观察不完整、实际用料不完整、负面结果；
+- 来源案例（最多20条）及 sources_path，后者分页读取全部来源；每条仍可通过报告详情追溯原始反馈；
+- guidance_query 模板，Muse 必须填入待修目标 work_order_id，调用现有 repair_guidance。后端再次核对同机型与组织，并排除目标工单自身，统计本身不是维修处方。
+
+GET /api/muse/repair-statistics/cases?machine_model=...&symptom_code=... 提供来源分页，limit 最大100。非法/未知症状不会退回全量结果，无匹配证据时明确提示。
+
+实际数量是每个工单最新报告的用料快照之和，不是累积消耗、库存流水或推荐用量。多个症状会使同一工单及用料出现在多个组，不能跨组相加当独立工单总数。观察期不同，不计算成功率或复发率；not_observed 只表示报告观察期内未见复发。所有记录保留来源，不自动认定适配、改库存或改变审核结果。数据库仍为0023，无新增迁移。
