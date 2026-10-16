@@ -20,8 +20,8 @@ def allowed_path(name: str) -> bool:
     )
 
 
-def install(root: Path = ROOT) -> int:
-    bundle = root / 'catalog-bundle'
+def install(root: Path = ROOT, bundle_relative: str = 'catalog-bundle') -> int:
+    bundle = root / bundle_relative
     manifest = json.loads((bundle / 'manifest.json').read_text())
     archive = bytearray()
     for chunk in manifest['chunks']:
@@ -58,7 +58,8 @@ def install(root: Path = ROOT) -> int:
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(tar.extractfile(member).read())
-    return len(expected)
+    extra = install(root, 'catalog-bundle/quest') if bundle_relative == 'catalog-bundle' and (root/'catalog-bundle/quest/manifest.json').exists() else 0
+    return len(expected) + extra
 
 
 if __name__ == '__main__':

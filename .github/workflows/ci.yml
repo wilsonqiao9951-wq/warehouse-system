@@ -61,7 +61,9 @@ jobs:
           docker logs mycoke-backend-ci
           exit 1
       - name: Verify real HTTP technician and review workflow
-        run: docker exec mycoke-backend-ci python -m scripts.verify_live_muse
+        run: |
+          docker exec mycoke-backend-ci python -m scripts.verify_live_muse
+          docker exec mycoke-backend-ci python -m scripts.verify_live_quest
       - name: Container logs
         if: failure()
         run: docker logs mycoke-backend-ci

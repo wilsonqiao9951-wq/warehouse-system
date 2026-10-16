@@ -116,3 +116,12 @@ GET /api/muse/repair-statistics，或 query resource=repair_statistics，可用 
 GET /api/muse/repair-statistics/cases?machine_model=...&symptom_code=... 提供来源分页，limit 最大100。非法/未知症状不会退回全量结果，无匹配证据时明确提示。
 
 实际数量是每个工单最新报告的用料快照之和，不是累积消耗、库存流水或推荐用量。多个症状会使同一工单及用料出现在多个组，不能跨组相加当独立工单总数。观察期不同，不计算成功率或复发率；not_observed 只表示报告观察期内未见复发。所有记录保留来源，不自动认定适配、改库存或改变审核结果。数据库仍为0023，无新增迁移。
+
+
+## Quest 2000／4000 查询
+
+47条官网已确认新零件使用 official-quest-{part_number} 稳定ID接入主目录，原有23条ID不变。GET /api/catalog/quest/models、/quest/models/{model_id}、/quest/models/{model_id}/parts 提供列表、章节和分页零件查询；model_id仅2000和4000。零件接口支持section_id、q、skip、limit。2000为51条/16章节，4000为63条/15章节，70条独立零件，44条共享官网引用不能相加或推断通用。
+
+Muse query资源新增quest_models、quest_model、quest_parts，后两者必须传model_id。返回当前机型/章节官网来源、图片及主要字段、organization_part及本组织库存位置；未知机型或其他机型章节404。不自动写入组织库存、现场验证或适配关系。主目录现有POST /api/catalog/parts/{catalog_id}/import仍需授权，重复导入幂等且不会增加库存。本轮未新增Quest工单用料、现场验证或维修指导机型支持。
+
+运行数据通过catalog-bundle/quest补充包同步，安装器校验哈希且拒绝覆盖不同内容。原审核来源及访问时间保留；无法确认的Viper/Freestyle项继续保留，前端未改。
