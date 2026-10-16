@@ -84,3 +84,18 @@ Muse 在会话开始或技师询问待办时查询，将 reminder_required=true 
 - 未审核反馈明细仅本人或经理/管理员获得来源链接；其他有工单读取权限的同组织用户只看到待审核状态。
 
 迁移 20261015_0023 增加可空 followup_due_at 和索引。排期和提醒不改变维修建议、库存或适配状态。
+
+## 逾期跟进与回访统计（契约 1.3）
+
+新增 GET /api/muse/followups/stats（或 query resource=followup_stats），支持 scope=mine/available/all。返回计划数、去重工单数、各回访状态、按时/迟交/未交逾期/未到期数量，以及已审核复发工单数。所有统计在分页之前计算，始终仅限当前组织与所选范围。
+
+GET /api/muse/followups 新增 status=overdue（到期尚无有效提交）、late（迟交，包含待审核与已完成）、recurred（该计划最新已审核直接回访为复发）。
+- submission_timing 使用最早一份当前仍为 pending 或 approved 的直接关联回访提交时间，和当前计划时间比较；rejected 不满足回访要求。
+- submission_delay_seconds 表示迟交时长或未提交时当前逾期时长；overdue_days 为未提交逾期的完整天数；followup_needed 标记需要催办。
+- is_overdue 现在只表示未有效提交的逾期。review_overdue 单独表示计划时间已过、等待审核；审核等待不算技师提交延迟。
+- 原本按时提交但审核较晚仍为 on_time；迟交审核后仍可通过 late 查询。
+- 改期会按新时间重新计算，旧时间保存在排期审计中。此处是当前计划状态统计，不是历史履约率。
+
+新增 GET /api/muse/followups/recurrences（或 query resource=repair_recurrences），查询本组织当前已审核复发记录，包含未排期的回访。按工单和完全相同的标准症状代码集合取最新已审核报告；待审核的新反馈不会覆盖旧已审核结果。返回来源报告路径、原报告 ID、机型当前性及观察天数。后续审核确认未见复发后，旧复发仍可从历史来源读取，但不再列为该症状当前复发。
+
+统计中的 recurrence 数量与计划数量使用不同总体，不能相除推导复发率或成功率。多个症状/计划可属于同一工单，分别提供记录数和工单去重数。来源路径可逐条核验；不自动认定适配、不修改库存或工单状态。无需新增数据库迁移，仍为 0023。

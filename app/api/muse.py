@@ -13,16 +13,16 @@ from app.services import model_chain,freestyle_chain
 from app.services import symptoms
 
 muse_router=APIRouter(prefix='/muse',tags=['Muse integration'])
-RESOURCES=['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups']
+RESOURCES=['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences']
 
 @muse_router.get('')
 def manifest():
-    return {'name':'myCoke shared backend','contract_version':'1.2','followups_path':'/api/muse/followups','followup_schedule_path':'/api/muse/reports/{report_id}/followup-schedule','symptoms_path':'/api/muse/symptoms','symptom_resolve_path':'/api/muse/symptoms/resolve','api_base_path':'/api','query_path':'/api/muse/query','openapi_path':'/openapi.json','interactive_docs_path':'/docs','authentication':{'type':'Bearer','login_path':'/api/auth/login','identity_path':'/api/auth/me','per_technician_identity_required':True,'shared_admin_credentials_allowed':False,'device_headers':['X-Device-Id','X-Device-Token','X-Device-Name'],'token_expiry':'Use expires_in from login; sign in again when expired'},'query_resources':RESOURCES,'frontend':{'existing_ui_requires_its_own_host':True,'agent_can_render_api_results':True,'new_model_features_in_existing_ui':False},'rules':['Use current signed-in technician identity; organization is resolved server-side.','Official associations, field observations, explicit field verification and reported actual use are distinct evidence.','Shared catalog references never establish cross-model fitment.','Query is read-only. Writes use documented REST endpoints and existing role/device/claim restrictions.','Do not store passwords or tokens in shared project descriptions, GitHub issues or logs.'],'write_contracts':{'freestyle_verification':'POST /api/catalog/freestyle/models/{model_id}/field-verifications','viper3_verification':'POST /api/catalog/models/viper-3/field-verifications','catalog_import':'POST /api/catalog/parts/{catalog_id}/import','other_operations':'Use /openapi.json; existing authorization and work-order ownership rules apply.'}}
+    return {'name':'myCoke shared backend','contract_version':'1.3','followup_stats_path':'/api/muse/followups/stats','repair_recurrences_path':'/api/muse/followups/recurrences','followups_path':'/api/muse/followups','followup_schedule_path':'/api/muse/reports/{report_id}/followup-schedule','symptoms_path':'/api/muse/symptoms','symptom_resolve_path':'/api/muse/symptoms/resolve','api_base_path':'/api','query_path':'/api/muse/query','openapi_path':'/openapi.json','interactive_docs_path':'/docs','authentication':{'type':'Bearer','login_path':'/api/auth/login','identity_path':'/api/auth/me','per_technician_identity_required':True,'shared_admin_credentials_allowed':False,'device_headers':['X-Device-Id','X-Device-Token','X-Device-Name'],'token_expiry':'Use expires_in from login; sign in again when expired'},'query_resources':RESOURCES,'frontend':{'existing_ui_requires_its_own_host':True,'agent_can_render_api_results':True,'new_model_features_in_existing_ui':False},'rules':['Use current signed-in technician identity; organization is resolved server-side.','Official associations, field observations, explicit field verification and reported actual use are distinct evidence.','Shared catalog references never establish cross-model fitment.','Query is read-only. Writes use documented REST endpoints and existing role/device/claim restrictions.','Do not store passwords or tokens in shared project descriptions, GitHub issues or logs.'],'write_contracts':{'freestyle_verification':'POST /api/catalog/freestyle/models/{model_id}/field-verifications','viper3_verification':'POST /api/catalog/models/viper-3/field-verifications','catalog_import':'POST /api/catalog/parts/{catalog_id}/import','other_operations':'Use /openapi.json; existing authorization and work-order ownership rules apply.'}}
 
 class MuseQuery(BaseModel):
-    resource: Literal['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups']
+    resource: Literal['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences']
     work_order_id: int | None=Field(None,gt=0)
-    followup_status: Literal['open','due','upcoming','awaiting_review','completed','all']='open'
+    followup_status: Literal['open','due','upcoming','awaiting_review','completed','overdue','late','recurred','all']='open'
     status: str | None=Field(None,max_length=50)
     scope: Literal['mine','available','all']='mine'
     symptom_code: str=Field('',max_length=80)
@@ -45,6 +45,8 @@ class MuseQuery(BaseModel):
 @muse_router.post('/query')
 def query(payload: MuseQuery,db: Session=Depends(get_db),actor: Actor=Depends(get_current_actor)):
     r=payload.resource;org=actor.organization_id
+    if r=='followup_stats':return followup_stats(payload.scope,db,actor)
+    if r=='repair_recurrences':return repair_recurrences(payload.scope,payload.skip,payload.limit,db,actor)
     if r=='followups':return followup_list(payload.followup_status,payload.scope,payload.skip,payload.limit,db,actor)
     if r=='identity':return {'user_id':actor.user_id,'organization_id':org,'role':actor.role,'authentication':actor.auth_method}
     if r=='work_orders':
@@ -285,7 +287,11 @@ def schedule_followup(report_id:int,payload:FollowupSchedule,db:Session=Depends(
 
 
 @muse_router.get('/followups')
-def followup_list(status:Literal['open','due','upcoming','awaiting_review','completed','all']='open',scope:Literal['mine','available','all']='mine',skip:int=Query(0,ge=0),limit:int=Query(25,ge=1,le=100),db:Session=Depends(get_db),actor:Actor=Depends(get_current_actor)):
+def followup_list(status:Literal['open','due','upcoming','awaiting_review','completed','overdue','late','recurred','all']='open',scope:Literal['mine','available','all']='mine',skip:int=Query(0,ge=0),limit:int=Query(25,ge=1,le=100),db:Session=Depends(get_db),actor:Actor=Depends(get_current_actor)):
+    return _followup_data(status,scope,skip,limit,db,actor)
+
+
+def _followup_data(status,scope,skip,limit,db,actor):
     require_roles(actor,UserRole.ADMIN,UserRole.MANAGER,UserRole.ENGINEER,UserRole.WAREHOUSE)
     now=datetime.now(timezone.utc)
     stmt=select(RepairCaseReport,WorkOrder).join(WorkOrder,WorkOrder.id==RepairCaseReport.work_order_id).where(RepairCaseReport.organization_id==actor.organization_id,WorkOrder.organization_id==actor.organization_id,RepairCaseReport.followup_due_at.is_not(None),RepairCaseReport.review_status=='approved')
@@ -303,8 +309,44 @@ def followup_list(status:Literal['open','due','upcoming','awaiting_review','comp
         due=report.followup_due_at.replace(tzinfo=timezone.utc)
         state='completed' if approved else 'awaiting_review' if pending else 'due' if due<=now else 'upcoming'
         counts[state]+=1
-        if status!='all' and not (status=='open' and state!='completed') and status!=state:continue
+        accepted=[r for r in children if r.review_status in {'approved','pending'}]
+        first=min(accepted,key=lambda r:(r.created_at,r.id)) if accepted else None
+        submitted=first.created_at.replace(tzinfo=timezone.utc) if first else None
+        timing='on_time' if submitted and submitted<=due else 'late' if submitted else 'overdue' if due<now else 'not_due'
+        elapsed=max(0,int(((submitted or now)-due).total_seconds()))
+        recurrence=(approved.repair_followup or {}).get('recurrence','unknown') if approved else 'unreviewed'
+        if status!='all' and not (status=='open' and state!='completed') and status!=state and not (status=='overdue' and timing=='overdue') and not (status=='late' and timing=='late') and not (status=='recurred' and recurrence=='recurred'):continue
         visible=pending if pending and (actor.role in {UserRole.ADMIN,UserRole.MANAGER} or pending.submitted_by==actor.user_id) else None
         latest=approved or visible
-        items.append({'report_id':report.id,'work_order_id':order.id,'ticket_number':order.ticket_number,'claimed_by_id':order.claimed_by_id,'machine_model':report.machine_model,'model_evidence_current':machine_model(db,actor.organization_id,order)==report.machine_model and report.machine_model is not None,'symptom_codes':sorted(symptoms.report_codes(report)),'due_at':due,'status':state,'is_overdue':due<=now and state!='completed','reminder_required':state=='due','source_path':f'/api/muse/reports/{report.id}','followup_report_id':latest.id if latest else None,'followup_source_path':f'/api/muse/reports/{latest.id}' if latest else None,'submit_path':f'/api/muse/work-orders/{order.id}/reports','previous_report_id':report.id,'compatibility_confirmed':False})
-    return {'items':items[skip:skip+limit],'total':len(items),'skip':skip,'limit':limit,'counts':counts,'as_of':now,'timezone':'UTC','reminder_delivery':'query_only','policy':'Due status is computed on each query. Submit a linked report using existing claim/device permissions; only approved feedback affects repair guidance. No external messages are sent.'}
+        items.append({'report_id':report.id,'work_order_id':order.id,'ticket_number':order.ticket_number,'claimed_by_id':order.claimed_by_id,'machine_model':report.machine_model,'model_evidence_current':machine_model(db,actor.organization_id,order)==report.machine_model and report.machine_model is not None,'symptom_codes':sorted(symptoms.report_codes(report)),'due_at':due,'status':state,'submission_timing':timing,'submission_delay_seconds':elapsed,'overdue_days':elapsed//86400 if timing=='overdue' else 0,'first_accepted_submission_at':submitted,'reviewed_recurrence':recurrence,'followup_needed':timing=='overdue','review_pending':bool(pending and not approved),'is_overdue':timing=='overdue','review_overdue':due<now and state=='awaiting_review','reminder_required':state=='due','source_path':f'/api/muse/reports/{report.id}','followup_report_id':latest.id if latest else None,'followup_source_path':f'/api/muse/reports/{latest.id}' if latest else None,'submit_path':f'/api/muse/work-orders/{order.id}/reports','previous_report_id':report.id,'compatibility_confirmed':False})
+    return {'items':items[skip:skip+limit] if limit is not None else items,'total':len(items),'skip':skip,'limit':limit,'counts':counts,'as_of':now,'timezone':'UTC','reminder_delivery':'query_only','policy':'Due status is computed on each query. Submit a linked report using existing claim/device permissions; only approved feedback affects repair guidance. No external messages are sent.'}
+
+
+@muse_router.get('/followups/recurrences')
+def repair_recurrences(scope:Literal['mine','available','all']='mine',skip:int=Query(0,ge=0),limit:int=Query(25,ge=1,le=100),db:Session=Depends(get_db),actor:Actor=Depends(get_current_actor)):
+    items=_reviewed_recurrences(scope,db,actor)
+    return {'items':items[skip:skip+limit],'total':len(items),'skip':skip,'limit':limit,'distinct_work_order_count':len({r['work_order_id'] for r in items}),'policy':'Latest approved report per exact symptom-code set and work order; includes unscheduled follow-ups, excludes unreviewed recurrence.'}
+
+
+def _reviewed_recurrences(scope,db,actor):
+    require_roles(actor,UserRole.ADMIN,UserRole.MANAGER,UserRole.ENGINEER,UserRole.WAREHOUSE)
+    stmt=select(RepairCaseReport,WorkOrder).join(WorkOrder,WorkOrder.id==RepairCaseReport.work_order_id).where(RepairCaseReport.organization_id==actor.organization_id,WorkOrder.organization_id==actor.organization_id,RepairCaseReport.review_status=='approved')
+    if scope=='mine':stmt=stmt.where(WorkOrder.claimed_by_id==actor.user_id) if actor.user_id else stmt.where(False)
+    elif scope=='available':stmt=stmt.where(WorkOrder.claimed_by_id.is_(None),WorkOrder.is_locked.is_(False))
+    from app.services.repair_guidance import machine_model
+    seen=set();items=[]
+    for report,order in db.execute(stmt.order_by(RepairCaseReport.created_at.desc(),RepairCaseReport.id.desc())):
+        key=(order.id,tuple(sorted(symptoms.report_codes(report))))
+        if key in seen:continue
+        seen.add(key)
+        if (report.repair_followup or {}).get('recurrence')!='recurred':continue
+        items.append({'report_id':report.id,'work_order_id':order.id,'ticket_number':order.ticket_number,'machine_model':report.machine_model,'model_evidence_current':bool(report.machine_model and machine_model(db,actor.organization_id,order)==report.machine_model),'symptom_codes':list(key[1]),'source_path':f'/api/muse/reports/{report.id}','previous_report_id':report.repair_followup.get('previous_report_id'),'observation_days':report.repair_followup.get('observation_days'),'outcome':report.outcome,'reviewed_at':report.reviewed_at,'compatibility_confirmed':False})
+    return items
+
+
+@muse_router.get('/followups/stats')
+def followup_stats(scope:Literal['mine','available','all']='mine',db:Session=Depends(get_db),actor:Actor=Depends(get_current_actor)):
+    data=_followup_data('all',scope,0,None,db,actor)
+    items=data['items'];recurrences=_reviewed_recurrences(scope,db,actor)
+    timing={s:sum(i['submission_timing']==s for i in items) for s in ['overdue','late','on_time','not_due']}
+    return {'as_of':data['as_of'],'scope':scope,'organization_id':actor.organization_id,'scheduled_followup_count':len(items),'scheduled_work_order_count':len({i['work_order_id'] for i in items}),'status_counts':data['counts'],'submission_timing_counts':timing,'overdue_work_order_count':len({i['work_order_id'] for i in items if i['followup_needed']}),'reviewed_recurrence_count':len(recurrences),'reviewed_recurrence_work_order_count':len({i['work_order_id'] for i in recurrences}),'sources':{'overdue':'/api/muse/followups?status=overdue&scope='+scope,'late':'/api/muse/followups?status=late&scope='+scope,'recurrences':'/api/muse/followups/recurrences?scope='+scope},'definitions':{'timeliness':'First currently pending or approved direct follow-up submission versus current due time; rejected reports do not satisfy follow-up. Review waiting is not submission delay. Rescheduling recalculates timing; audit preserves previous deadlines.','population':'Scheduled counts include active schedules on approved source reports. Recurrences include unscheduled latest approved reports per work order and exact canonical symptom set. Counts are current state, not a historical cohort or success rate.','approval':'Pending recurrence is never counted as confirmed. Reporting and scheduling do not change guidance or compatibility.'}}

@@ -93,12 +93,19 @@ def run():
             def followups():
                 r=client.post(base+'/muse/query',json={'resource':'followups','scope':'mine','followup_status':'all'},headers=th);r.raise_for_status();return r.json()
             assert followups()['items'][0]['status']=='due' and followups()['items'][0]['reminder_required']
+            assert client.get(base+'/muse/followups/stats').status_code==401
+            def followup_stats():
+                r=client.post(base+'/muse/query',json={'resource':'followup_stats','scope':'mine'},headers=th);r.raise_for_status();return r.json()
+            assert followup_stats()['overdue_work_order_count']==1
+            assert client.get(base+'/muse/followups',params={'scope':'mine','status':'overdue'},headers=th).json()['total']==1
+            assert client.get(base+'/muse/followups/stats',params={'scope':'all'},headers=fh).json()['scheduled_followup_count']==0
             assert client.get(base+'/muse/followups',params={'scope':'all'},headers=fh).json()['total']==0
             follow_headers={**th,'Idempotency-Key':'followup-'+uuid4().hex}
             follow_payload={**payload,'part_ids':[], 'repair_followup':{'previous_report_id':rid,'recurrence':'not_observed','observation_days':14,'actual_parts':[{'part_id':pid,'quantity':1}],'actual_parts_complete':True}}
             r=client.post(base+f'/muse/work-orders/{prior}/reports',json=follow_payload,headers=follow_headers);r.raise_for_status();follow_id=r.json()['report_id']
             assert guidance()['cases'][0]['case_id']==rid
             assert followups()['items'][0]['status']=='awaiting_review'
+            assert followup_stats()['overdue_work_order_count']==0 and followup_stats()['submission_timing_counts']['late']==1
             retry=client.post(base+f'/muse/work-orders/{prior}/reports',json=follow_payload,headers=follow_headers);retry.raise_for_status();assert retry.json()['report_id']==follow_id
             assert client.post(base+f'/muse/reports/{follow_id}/review',json={'decision':'approved'},headers=th).status_code==403
             client.post(base+f'/muse/reports/{follow_id}/review',json={'decision':'approved'},headers=ah).raise_for_status()
@@ -111,11 +118,15 @@ def run():
             recurrence={**follow_payload,'outcome':'unresolved','repair_followup':{**follow_payload['repair_followup'],'previous_report_id':follow_id,'recurrence':'recurred','observation_days':21}}
             r=client.post(base+f'/muse/work-orders/{prior}/reports',json=recurrence,headers={**th,'Idempotency-Key':'recurrence-'+uuid4().hex});r.raise_for_status();recurrence_id=r.json()['report_id']
             assert guidance()['reviewed_resolved_case_count']==1
+            assert followup_stats()['reviewed_recurrence_count']==0
             client.post(base+f'/muse/reports/{recurrence_id}/review',json={'decision':'approved'},headers=ah).raise_for_status()
+            assert followup_stats()['reviewed_recurrence_count']==1
+            r=client.get(base+'/muse/followups/recurrences',params={'scope':'mine'},headers=th);r.raise_for_status();assert r.json()['items'][0]['report_id']==recurrence_id
+            assert client.get(base+'/muse/followups/recurrences',params={'scope':'all'},headers=fh).json()['total']==0
             closed=guidance();assert not closed['cases'] and not closed['part_candidates'] and closed['non_resolved_cases'][0]['case_id']==recurrence_id
             assert client.get(base+f'/muse/reports/{recurrence_id}',headers=fh).status_code==404
             source=client.get(base+f'/muse/reports/{recurrence_id}',headers=th);source.raise_for_status();assert source.json()['repair_followup']['previous_report_id']==follow_id
-        result={'followup_due_reminder':True,'followup_schedule_tenant_isolation':True,'followup_review_lifecycle':True,'reviewed_actual_use_evidence':True,'followup_pending_excluded':True,'reviewed_recurrence_retracts_success':True,'followup_sources_preserved':True,'foreign_actual_parts_rejected':True,'followup_idempotency':True,'discovery_and_guide':True,'symptom_taxonomy_discovery':True,'work_order_symptom_resolution':True,'ambiguous_text_requires_confirmation':True,'symptom_alias_idempotent_retry':True,'feedback_original_symptoms_preserved':True,'guidance_from_work_order_symptoms':True,'technician_work_order_query':True,'work_order_all_mine_available_scopes':True,'device_bound_claim_and_report':True,'concurrent_report_retry':True,'single_report_and_submission_audit':True,'idempotent_report_retry':True,'changed_retry_rejected':True,'pending_not_learned':True,'technician_cannot_review':True,'admin_review_enables_same_model_case':True,'sourced_checks_and_part_recommendation':True,'organization_inventory_not_foreign_stock':True,'single_case_evidence_caution':True,'source_report_access_scoped':True,'legacy_recommendation_uses_reviewed_evidence':True,'no_automatic_quantity_fitment_or_inventory_use':True,'other_organization_excluded':True,'cross_org_claim_report_and_review_rejected':True,'idempotency_key_tenant_scoped':True,'anonymous_rejected':True,'engine':'reviewed_case_retrieval','model_training_performed':False}
+        result={'followup_overdue_vs_review_wait':True,'followup_late_submission_stats':True,'reviewed_recurrence_stats_and_sources':True,'followup_stats_tenant_isolation':True,'followup_due_reminder':True,'followup_schedule_tenant_isolation':True,'followup_review_lifecycle':True,'reviewed_actual_use_evidence':True,'followup_pending_excluded':True,'reviewed_recurrence_retracts_success':True,'followup_sources_preserved':True,'foreign_actual_parts_rejected':True,'followup_idempotency':True,'discovery_and_guide':True,'symptom_taxonomy_discovery':True,'work_order_symptom_resolution':True,'ambiguous_text_requires_confirmation':True,'symptom_alias_idempotent_retry':True,'feedback_original_symptoms_preserved':True,'guidance_from_work_order_symptoms':True,'technician_work_order_query':True,'work_order_all_mine_available_scopes':True,'device_bound_claim_and_report':True,'concurrent_report_retry':True,'single_report_and_submission_audit':True,'idempotent_report_retry':True,'changed_retry_rejected':True,'pending_not_learned':True,'technician_cannot_review':True,'admin_review_enables_same_model_case':True,'sourced_checks_and_part_recommendation':True,'organization_inventory_not_foreign_stock':True,'single_case_evidence_caution':True,'source_report_access_scoped':True,'legacy_recommendation_uses_reviewed_evidence':True,'no_automatic_quantity_fitment_or_inventory_use':True,'other_organization_excluded':True,'cross_org_claim_report_and_review_rejected':True,'idempotency_key_tenant_scoped':True,'anonymous_rejected':True,'engine':'reviewed_case_retrieval','model_training_performed':False}
         from pathlib import Path
         output=Path(os.environ.get('MYCOKE_VERIFY_REPORT_PATH',str(OUT/'muse_api_check.json')))
         output.write_text(json.dumps(result,indent=2));print(json.dumps(result))
