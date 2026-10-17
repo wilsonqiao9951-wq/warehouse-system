@@ -168,3 +168,5 @@ GET /api/catalog/abs/models、/abs/models/{model_id}、/abs/models/{model_id}/pa
 官网共享引用不是跨代适配认证；不自动创建库存、工单用料或现场验证。本轮只接入目录与分机型查询，ABS维修指导、工单用料和现场验证机型支持尚未扩展。公开运行数据由catalog-bundle/abs独立增量包恢复并校验，主库schema仍0023，前端未改。
 
 ED目录已加入：Muse query支持ed_models、ed_model、ed_parts，model_id使用150、200-250、300。303条独立官网零件（新增122条），按所选机型/章节返回来源及本组织库存；200/250为官网合并标签，不自动认定互相适配。缺失字段保留，前端不变。
+
+MD目录新增：md_models、md_model、md_parts，model_id=150/200/250。72条独立官网零件（新增45条），精确章节来源与本组织库存隔离；不自动认定适配。

@@ -29,7 +29,7 @@ def _catalogs() -> dict[str, tuple[dict, ...]]:
                 entry['title'] = row.get('name')
                 entry['manual_type'] = 'parts_section'
             result[target].append(entry)
-    for prefix in ('viper3','freestyle','quest','abs','ed'):
+    for prefix in ('viper3','freestyle','quest','abs','ed','md'):
         additions=directory/(prefix+'_added_parts.json')
         if additions.exists():
             added_manifest=json.loads((directory/(prefix+'_added_manifest.json')).read_text())

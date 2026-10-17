@@ -147,3 +147,16 @@ GET /api/catalog/ed/models、/ed/models/{model_id}、/ed/models/{model_id}/parts
 响应只含所选机型/章节的官网关联和当前组织库存；未知机型或跨机型章节404，所有请求需认证。新增ID为official-ed-{part_number}。沿用授权的主目录导入接口，重复导入不会增加库存。官网引用不代表现场验证或跨机型适配；本次未扩展ED维修指导或工单用料机型支持。
 
 公开运行数据由catalog-bundle/ed恢复并校验；官网链接、访问时间和快照哈希保留。原始页面快照在本机data/verification/ed_20261016中。审核清单中的“待接入主目录”表示接入前快照，实际接入以ed_added_manifest.json和ed_graph.json为准。数据库schema保持0023。
+
+
+## MD150／MD200／MD250 目录查询
+
+重新核验30个官网手册页面和72个零件页面，新增45条主目录记录、复用27条既有记录ID。MD150为52条、MD200为57条、MD250为50条，各9章节；去重72条，50条具有多个机型官网引用。缺图1条、缺厂家1条保持空缺，官网关系不代表跨机型适配。
+
+GET /api/catalog/md/models、/md/models/{model_id}、/md/models/{model_id}/parts；model_id严格使用150、200、250。零件查询支持section_id、q、skip、limit（最大100）。Muse query支持md_models、md_model、md_parts，后两者必须传model_id。例如：
+```json
+{"resource":"md_parts","model_id":"200","limit":25}
+```
+所有接口需认证；每条仅返回所选机型/章节的官网关联和当前组织库存。未知机型或跨机型章节404。新增ID为official-md-{part_number}，既有授权导入接口保持幂等，不增加库存。不自动创建现场验证或认定适配；本次未扩展MD维修指导或工单用料机型支持。
+
+运行数据通过catalog-bundle/md恢复并校验；链接、访问时间、快照哈希保留。原始快照位于本机data/verification/md_20261016；审核中待接入主目录列表为接入前快照，实际以md_added_manifest.json、md_graph.json为准。schema保持0023，前端未改。
