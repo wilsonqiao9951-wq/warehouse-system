@@ -3,6 +3,7 @@ import json
 from uuid import uuid4
 from sqlalchemy import select,delete
 import httpx
+from app.services.catalog import entries
 from app.core.database import SessionLocal
 from app.core.security import create_access_token
 from app.models import Organization,User,UserRole
@@ -18,8 +19,10 @@ def run():
         with httpx.Client(timeout=30) as client:
             assert client.get(base+'/freestyle/models').status_code==401
             response=client.get(base+'/parts',headers=headers);response.raise_for_status();total=response.json()['total'];found=set()
-            for skip in range(total-len(ids),total,100):
-                response=client.get(base+'/parts',params={'skip':skip,'limit':100},headers=headers);response.raise_for_status();found.update(r['catalog_id'] for r in response.json()['items'])
+            positions=[i for i,r in enumerate(entries('parts')) if r['catalog_id'] in ids]
+            assert len(positions)==len(ids)
+            for skip in range(min(positions),max(positions)+1,100):
+                response=client.get(base+'/parts',params={'skip':skip,'limit':100},headers=headers);response.raise_for_status();found.update(r['catalog_id'] for r in response.json()['items'] if r['catalog_id'] in ids)
             assert found==ids
             response=client.get(base+'/freestyle/models',headers=headers);response.raise_for_status();models=response.json()['items'];assert len(models)==8
             model_counts={};linked=set()

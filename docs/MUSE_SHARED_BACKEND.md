@@ -125,3 +125,12 @@ GET /api/muse/repair-statistics/cases?machine_model=...&symptom_code=... 提供�
 Muse query资源新增quest_models、quest_model、quest_parts，后两者必须传model_id。返回当前机型/章节官网来源、图片及主要字段、organization_part及本组织库存位置；未知机型或其他机型章节404。不自动写入组织库存、现场验证或适配关系。主目录现有POST /api/catalog/parts/{catalog_id}/import仍需授权，重复导入幂等且不会增加库存。本轮未新增Quest工单用料、现场验证或维修指导机型支持。
 
 运行数据通过catalog-bundle/quest补充包同步，安装器校验哈希且拒绝覆盖不同内容。原审核来源及访问时间保留；无法确认的Viper/Freestyle项继续保留，前端未改。
+
+
+## ABS 1.0／2.0 目录查询
+
+已接入170条已确认新零件，使用official-abs-{part_number}稳定ID，保留324条既有记录ID。ABS 1.0为309条/20章节，ABS 2.0为216条/31章节，去重494条，其中31条有两代官网引用。缺图15条、厂家缺失6条保持空缺，不阻塞已确认身份的目录接入。
+
+GET /api/catalog/abs/models、/abs/models/{model_id}、/abs/models/{model_id}/parts；model_id严格为1.0或2.0。零件查询支持section_id、q、skip、limit（最大100）。Muse query新增abs_models、abs_model、abs_parts资源，后两者必须传model_id。每条只返回当前机型/章节的官网关系与本组织库存位置；跨代章节或未知机型404。
+
+官网共享引用不是跨代适配认证；不自动创建库存、工单用料或现场验证。本轮只接入目录与分机型查询，ABS维修指导、工单用料和现场验证机型支持尚未扩展。公开运行数据由catalog-bundle/abs独立增量包恢复并校验，主库schema仍0023，前端未改。
