@@ -166,3 +166,5 @@ Muse query资源新增quest_models、quest_model、quest_parts，后两者必须
 GET /api/catalog/abs/models、/abs/models/{model_id}、/abs/models/{model_id}/parts；model_id严格为1.0或2.0。零件查询支持section_id、q、skip、limit（最大100）。Muse query新增abs_models、abs_model、abs_parts资源，后两者必须传model_id。每条只返回当前机型/章节的官网关系与本组织库存位置；跨代章节或未知机型404。
 
 官网共享引用不是跨代适配认证；不自动创建库存、工单用料或现场验证。本轮只接入目录与分机型查询，ABS维修指导、工单用料和现场验证机型支持尚未扩展。公开运行数据由catalog-bundle/abs独立增量包恢复并校验，主库schema仍0023，前端未改。
+
+ED目录已加入：Muse query支持ed_models、ed_model、ed_parts，model_id使用150、200-250、300。303条独立官网零件（新增122条），按所选机型/章节返回来源及本组织库存；200/250为官网合并标签，不自动认定互相适配。缺失字段保留，前端不变。

@@ -134,3 +134,16 @@ Muse query资源新增quest_models、quest_model、quest_parts，后两者必须
 GET /api/catalog/abs/models、/abs/models/{model_id}、/abs/models/{model_id}/parts；model_id严格为1.0或2.0。零件查询支持section_id、q、skip、limit（最大100）。Muse query新增abs_models、abs_model、abs_parts资源，后两者必须传model_id。每条只返回当前机型/章节的官网关系与本组织库存位置；跨代章节或未知机型404。
 
 官网共享引用不是跨代适配认证；不自动创建库存、工单用料或现场验证。本轮只接入目录与分机型查询，ABS维修指导、工单用料和现场验证机型支持尚未扩展。公开运行数据由catalog-bundle/abs独立增量包恢复并校验，主库schema仍0023，前端未改。
+
+
+## ED 150／ED 200/250／ED 300 目录查询
+
+本轮重新核验29个官网手册页面和303个零件页面，新增122条主目录记录，保留181条既有记录ID。ED 150为158条/9章节，ED 200/250为200条/10章节，ED 300为91条/5章节；去重303条，115条具有多个机型的官网引用。200/250沿用官网合并机型标签，不能由此认证200与250通用。缺图16条、缺厂家5条、缺厂家料号1条原样保留，不补猜测值。
+
+GET /api/catalog/ed/models、/ed/models/{model_id}、/ed/models/{model_id}/parts；model_id为150、200-250或300。零件查询支持section_id、q、skip、limit（最大100）。Muse query资源为ed_models、ed_model、ed_parts，后两者必须传model_id。例如：
+```json
+{"resource":"ed_parts","model_id":"200-250","limit":25}
+```
+响应只含所选机型/章节的官网关联和当前组织库存；未知机型或跨机型章节404，所有请求需认证。新增ID为official-ed-{part_number}。沿用授权的主目录导入接口，重复导入不会增加库存。官网引用不代表现场验证或跨机型适配；本次未扩展ED维修指导或工单用料机型支持。
+
+公开运行数据由catalog-bundle/ed恢复并校验；官网链接、访问时间和快照哈希保留。原始页面快照在本机data/verification/ed_20261016中。审核清单中的“待接入主目录”表示接入前快照，实际接入以ed_added_manifest.json和ed_graph.json为准。数据库schema保持0023。

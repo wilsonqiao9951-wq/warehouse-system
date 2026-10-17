@@ -13,14 +13,14 @@ from app.services import model_chain,freestyle_chain
 from app.services import symptoms
 
 muse_router=APIRouter(prefix='/muse',tags=['Muse integration'])
-RESOURCES=['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences','repair_statistics','quest_models','quest_model','quest_parts','abs_models','abs_model','abs_parts']
+RESOURCES=['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences','repair_statistics','quest_models','quest_model','quest_parts','abs_models','abs_model','abs_parts','ed_models','ed_model','ed_parts']
 
 @muse_router.get('')
 def manifest():
     return {'name':'myCoke shared backend','contract_version':'1.4','repair_statistics_path':'/api/muse/repair-statistics','followup_stats_path':'/api/muse/followups/stats','repair_recurrences_path':'/api/muse/followups/recurrences','followups_path':'/api/muse/followups','followup_schedule_path':'/api/muse/reports/{report_id}/followup-schedule','symptoms_path':'/api/muse/symptoms','symptom_resolve_path':'/api/muse/symptoms/resolve','api_base_path':'/api','query_path':'/api/muse/query','openapi_path':'/openapi.json','interactive_docs_path':'/docs','authentication':{'type':'Bearer','login_path':'/api/auth/login','identity_path':'/api/auth/me','per_technician_identity_required':True,'shared_admin_credentials_allowed':False,'device_headers':['X-Device-Id','X-Device-Token','X-Device-Name'],'token_expiry':'Use expires_in from login; sign in again when expired'},'query_resources':RESOURCES,'frontend':{'existing_ui_requires_its_own_host':True,'agent_can_render_api_results':True,'new_model_features_in_existing_ui':False},'rules':['Use current signed-in technician identity; organization is resolved server-side.','Official associations, field observations, explicit field verification and reported actual use are distinct evidence.','Shared catalog references never establish cross-model fitment.','Query is read-only. Writes use documented REST endpoints and existing role/device/claim restrictions.','Do not store passwords or tokens in shared project descriptions, GitHub issues or logs.'],'write_contracts':{'freestyle_verification':'POST /api/catalog/freestyle/models/{model_id}/field-verifications','viper3_verification':'POST /api/catalog/models/viper-3/field-verifications','catalog_import':'POST /api/catalog/parts/{catalog_id}/import','other_operations':'Use /openapi.json; existing authorization and work-order ownership rules apply.'}}
 
 class MuseQuery(BaseModel):
-    resource: Literal['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences','repair_statistics','quest_models','quest_model','quest_parts','abs_models','abs_model','abs_parts']
+    resource: Literal['catalog','freestyle_models','freestyle_model','freestyle_parts','freestyle_usage','viper3_model','viper3_parts','viper3_usage','identity','work_orders','repair_guidance','symptoms','followups','followup_stats','repair_recurrences','repair_statistics','quest_models','quest_model','quest_parts','abs_models','abs_model','abs_parts','ed_models','ed_model','ed_parts']
     work_order_id: int | None=Field(None,gt=0)
     followup_status: Literal['open','due','upcoming','awaiting_review','completed','overdue','late','recurred','all']='open'
     status: str | None=Field(None,max_length=50)
@@ -39,7 +39,7 @@ class MuseQuery(BaseModel):
     @model_validator(mode='after')
     def required_arguments(self):
         if self.resource=='repair_guidance' and self.work_order_id is None:raise ValueError('work_order_id is required')
-        if self.resource in {'freestyle_model','freestyle_parts','freestyle_usage','quest_model','quest_parts','abs_model','abs_parts'} and not self.model_id:raise ValueError('model_id is required')
+        if self.resource in {'freestyle_model','freestyle_parts','freestyle_usage','quest_model','quest_parts','abs_model','abs_parts','ed_model','ed_parts'} and not self.model_id:raise ValueError('model_id is required')
         if self.resource in {'freestyle_usage','viper3_usage'} and self.part_id is None:raise ValueError('part_id is required')
         return self
 
@@ -56,6 +56,11 @@ def query(payload: MuseQuery,db: Session=Depends(get_db),actor: Actor=Depends(ge
         if r=='abs_models':return abs_models(actor)
         if r=='abs_model':return abs_model(payload.model_id,actor)
         return abs_parts(payload.model_id,payload.section_id,payload.q,payload.skip,payload.limit,db,actor)
+    if r.startswith('ed'):
+        from app.api.catalog import ed_models,ed_model,ed_parts
+        if r=='ed_models':return ed_models(actor)
+        if r=='ed_model':return ed_model(payload.model_id,actor)
+        return ed_parts(payload.model_id,payload.section_id,payload.q,payload.skip,payload.limit,db,actor)
     if r=='repair_statistics':return repair_statistics(payload.machine_model,payload.symptom_code,payload.skip,payload.limit,db,actor)
     if r=='followup_stats':return followup_stats(payload.scope,db,actor)
     if r=='repair_recurrences':return repair_recurrences(payload.scope,payload.skip,payload.limit,db,actor)
