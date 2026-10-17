@@ -172,3 +172,5 @@ ED目录已加入：Muse query支持ed_models、ed_model、ed_parts，model_id�
 MD目录新增：md_models、md_model、md_parts，model_id=150/200/250。72条独立官网零件（新增45条），精确章节来源与本组织库存隔离；不自动认定适配。
 
 DF目录新增：df_models、df_model、df_parts，model_id=150/200-250。215条独立官网零件（新增21条），按精确机型章节提供来源和本组织库存；200/250为官网合并标签，不推断通用。
+
+DB目录新增：db_models、db_model、db_parts，model_id=150/200-275。61条独立官网零件（新增17条），精确章节来源和本组织库存隔离；200 / 275 Standard为官网合并标签，不推断通用。
