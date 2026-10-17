@@ -212,3 +212,16 @@ GET /api/catalog/crewserve/models、/crewserve/models/{model_id}、/crewserve/mo
 请求需认证，只返回所选机型/章节来源和本组织库存；未知机型及跨机型章节404。授权目录导入仍幂等且不增加库存。不自动认定跨机型适配、创建现场验证或扩展Crew-Serve维修指导/实际用料机型支持。
 
 catalog-bundle/crewserve提供校验后的运行数据，保留官网链接、访问时间、快照哈希。完整本机审核（含待核验）在data/verification/crewserve_20261017。schema0023，前端不变。
+
+
+## 9000／9100 Self-Serve目录查询（2026-10-17）
+
+重新核验32个官网手册页面和547个零件页面，确认547条独立零件，全部复用主目录既有ID，新增零件0条。9000 Self-Serve为356条/16章节，9100 Self-Serve为241条/14章节；50条共享官网引用不代表跨机型适配。缺图4条、缺厂家51条保持空缺，本轮身份未确认链接0条。
+
+GET /api/catalog/selfserve/models、/selfserve/models/{model_id}、/selfserve/models/{model_id}/parts；model_id严格为9000或9100。支持section_id、q、skip、limit（最大100）。Muse query资源为selfserve_models、selfserve_model、selfserve_parts，后两者必填model_id：
+```json
+{"resource":"selfserve_parts","model_id":"9100","limit":25}
+```
+所有接口需认证，返回所选机型/章节官网来源及当前组织库存；未知机型或跨机型章节404。既有授权导入保持幂等，不增加库存。不自动认定适配、创建现场验证或扩展Self-Serve维修指导/实际用料机型支持。
+
+catalog-bundle/selfserve提供校验后的运行数据，保留官网链接、访问时间及快照哈希。本机完整审核在data/verification/selfserve_20261017，schema0023，前端不变。

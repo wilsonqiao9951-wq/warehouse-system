@@ -178,3 +178,5 @@ DB目录新增：db_models、db_model、db_parts，model_id=150/200-275。61条�
 Ice Combo目录新增分机型查询：icecombo_models、icecombo_model、icecombo_parts，model_id=7000/7100。361条均复用既有零件ID；保留精确官网章节与本组织库存，不推断适配。
 
 Crew-Serve目录：crewserve_models、crewserve_model、crewserve_parts，model_id=8000/8100。390条均复用现有ID；3个404引用保留待核验；仅提供官网章节关联与本组织库存，不自动认定适配。
+
+Self-Serve目录：selfserve_models、selfserve_model、selfserve_parts，model_id=9000/9100。547条复用已有ID，按精确官网章节提供来源及本组织库存，不自动认定适配。
