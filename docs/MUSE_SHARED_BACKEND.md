@@ -160,3 +160,16 @@ GET /api/catalog/md/models、/md/models/{model_id}、/md/models/{model_id}/parts
 所有接口需认证；每条仅返回所选机型/章节的官网关联和当前组织库存。未知机型或跨机型章节404。新增ID为official-md-{part_number}，既有授权导入接口保持幂等，不增加库存。不自动创建现场验证或认定适配；本次未扩展MD维修指导或工单用料机型支持。
 
 运行数据通过catalog-bundle/md恢复并校验；链接、访问时间、快照哈希保留。原始快照位于本机data/verification/md_20261016；审核中待接入主目录列表为接入前快照，实际以md_added_manifest.json、md_graph.json为准。schema保持0023，前端未改。
+
+
+## DF 150／DF 200/250 目录查询
+
+重新核验18个官网手册页面和215个零件页面，新增21条主目录记录、复用194条既有记录ID。DF 150为118条/7章节，DF 200/250为164条/8章节；去重215条，67条具有两个官网机型标签的引用。200/250沿用官网合并标签，不自动认定二者通用。缺图16条、缺厂家5条、缺厂家料号1条保持空缺。
+
+GET /api/catalog/df/models、/df/models/{model_id}、/df/models/{model_id}/parts；model_id严格使用150、200-250。零件查询支持section_id、q、skip、limit（最大100）。Muse query支持df_models、df_model、df_parts，后两者必须传model_id。例如：
+```json
+{"resource":"df_parts","model_id":"200-250","limit":25}
+```
+所有接口需认证；每条仅返回所选机型/章节官网关联和当前组织库存，未知机型或跨机型章节404。新增ID为official-df-{part_number}；既有授权导入保持幂等，不增加库存。不自动认定适配或创建现场验证；本次未扩展DF维修指导或工单用料机型支持。
+
+运行数据由catalog-bundle/df恢复并校验，保留官网链接、访问时间和快照哈希。本机原始快照在data/verification/df_20261016；审核清单的待接入列表为接入前快照，实际以df_added_manifest.json及df_graph.json为准。schema仍0023，前端未改。

@@ -1,0 +1,31 @@
+{
+  "archive_sha256": "0b8fb991abae369810c481a5e9404cfeb18da4e0ac0bebb29dbb9cb530853287",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "9969023123a391671a97c43b7e14203c3301ff7f41effbc4b02f77079cc8a561"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/df_added_parts.json",
+      "sha256": "cddc2704f9844382d5c718236a595508039fbf614aad9ffd07b2d91b97682f3c"
+    },
+    {
+      "path": "data/organized/df_added_manifest.json",
+      "sha256": "cbd376f33297105d5ee804df15396f3039f322fcf365380607c6992f4668432f"
+    },
+    {
+      "path": "data/organized/df_graph.json",
+      "sha256": "49d64611c535f1a9b2a875009fc32a317d625913f11ab320e03f0e05f3826c5e"
+    },
+    {
+      "path": "data/organized/df_parts_catalog.json",
+      "sha256": "84b1ca17d0ba77f7f4730dfc3bdc39c9bb1cdd0d026606300637245ac13cb56d"
+    },
+    {
+      "path": "data/verification/df_new_official_parts.json",
+      "sha256": "72d4d60e36f4f528b7cfd2bd8091b11a6e6098b7a3313ab7a28d6c7fa33775dc"
+    }
+  ]
+}
