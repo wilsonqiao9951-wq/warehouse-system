@@ -348,10 +348,17 @@ class WorkOrderPartRead(WorkOrderPartCreate):
 
 class WorkOrderPartRecommendation(BaseModel):
     part: PartRead
-    recommended_quantity: int
+    recommended_quantity: int | None
     usage_count: int
     total_quantity: int
     reason: str
+    source: str = "reviewed_case_report_part_reference"
+    source_case_ids: list[int] = Field(default_factory=list)
+    available_quantity: int = 0
+    needs_more_evidence: bool = True
+    compatibility_confirmed: bool = False
+    quantity_confirmation_required: bool = True
+    reviewed_evidence: dict = Field(default_factory=dict)
 
 
 class InventoryNotificationRead(BaseModel):

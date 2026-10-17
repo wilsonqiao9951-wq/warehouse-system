@@ -1,0 +1,31 @@
+{
+  "archive_sha256": "8578d744b8edda52072cec7039800b96e39a199b561cbb3552adb04fb55e5227",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "298b4230ac131e56d81fbc74d8da815b10730592ca6b7cacaafe5c94d9cf1050"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/db_added_parts.json",
+      "sha256": "fc162530873c7c8a03ed5240eab0d34e69b88a3c739f47afc9e811049f917bf8"
+    },
+    {
+      "path": "data/organized/db_added_manifest.json",
+      "sha256": "005d6ad8340e28ba2b4e625dee100f101d1a1cd64b018daf4d14fe109922d465"
+    },
+    {
+      "path": "data/organized/db_graph.json",
+      "sha256": "0c0d64cc801c99ab783403a7e191a1fc1a4a2744291fec2d3801e2968036e03a"
+    },
+    {
+      "path": "data/organized/db_parts_catalog.json",
+      "sha256": "4aa8784fe493ff0da193d0c3d08d643283fdc60ad1a63f04ff77afcff9eed936"
+    },
+    {
+      "path": "data/verification/db_new_official_parts.json",
+      "sha256": "badb2c8cd481f31fd8d3c46b27fe88f46e0bf02a91ba49962335e8b2f9525fa3"
+    }
+  ]
+}

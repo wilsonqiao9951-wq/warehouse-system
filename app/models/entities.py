@@ -518,3 +518,27 @@ class UserInvitation(Base):
 
     organization = relationship("Organization")
     inviter = relationship("User")
+
+
+class RepairCaseReport(Base):
+    __tablename__ = 'repair_case_reports'
+    __table_args__ = (UniqueConstraint('organization_id', 'idempotency_key', name='uq_repair_report_org_idempotency'),)
+    id: Mapped[int] = mapped_column(Integer,primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey('organizations.id'),nullable=False,index=True)
+    work_order_id: Mapped[int] = mapped_column(ForeignKey('work_orders.id'),nullable=False,index=True)
+    submitted_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'),nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128),nullable=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64),nullable=True)
+    machine_model: Mapped[str | None] = mapped_column(String(255),nullable=True,index=True)
+    symptom_codes: Mapped[list] = mapped_column(JSON,nullable=False)
+    symptom_context: Mapped[dict | None] = mapped_column(JSON,nullable=True)
+    repair_followup: Mapped[dict | None] = mapped_column(JSON,nullable=True)
+    followup_due_at: Mapped[datetime | None] = mapped_column(DateTime,nullable=True,index=True)
+    steps: Mapped[list] = mapped_column(JSON,nullable=False)
+    outcome: Mapped[str] = mapped_column(String(30),nullable=False)
+    part_ids: Mapped[list] = mapped_column(JSON,nullable=False)
+    result_notes: Mapped[str] = mapped_column(Text,nullable=False)
+    review_status: Mapped[str] = mapped_column(String(20),nullable=False,default='pending')
+    reviewed_by: Mapped[int | None] = mapped_column(ForeignKey('users.id'),nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime,nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime,nullable=False,default=datetime.utcnow)

@@ -1,0 +1,31 @@
+{
+  "archive_sha256": "dc2ecd0e5686ce59844b4149c542751c4e220192756f06b697ccb545b8336a63",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "2bbdb541cf15290c6cd0c5d7a00c186faac1f5f767e21dfc437d63637c319d0c"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/icecombo_added_parts.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "data/organized/icecombo_added_manifest.json",
+      "sha256": "bf0484313efb2efc9a988231575ae1e09421b1475cfbad467d56a22e4d2de0e5"
+    },
+    {
+      "path": "data/organized/icecombo_graph.json",
+      "sha256": "cb63370d0f023736c1f031b8f0901fb91ea50e47e3d997cffdc40bca68a3b0e7"
+    },
+    {
+      "path": "data/organized/icecombo_parts_catalog.json",
+      "sha256": "053da156715f0ebd9777e2f0c41392aefb5190fdeaa7f19ddaa315cf21bfc1fb"
+    },
+    {
+      "path": "data/verification/icecombo_new_official_parts.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ]
+}

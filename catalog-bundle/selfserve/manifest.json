@@ -1,0 +1,35 @@
+{
+  "archive_sha256": "34296d01705a3a5846a2a06543dcc6ba11ea7e952a283ae26522c425afa2fe64",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "3a99d5c322608bccd6688de921d8a722e61a1e13a41e75f1cf44608740c24dc9"
+    },
+    {
+      "name": "catalog-001.b64",
+      "sha256": "c6e5ee6cfcb80ea61356b5b6195072321738bf830fcec3dbbf3c774f7ea310ae"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/selfserve_added_parts.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "data/organized/selfserve_added_manifest.json",
+      "sha256": "aef0ed98f978860d112c6875c586b0ab2111ce38389fd6b0fd9707316cfa26a7"
+    },
+    {
+      "path": "data/organized/selfserve_graph.json",
+      "sha256": "d9d7eb1813f663ecd785e16cf0d974a8a163438330cbf45284865b509726c789"
+    },
+    {
+      "path": "data/organized/selfserve_parts_catalog.json",
+      "sha256": "ffd0230125c46029539c29983e6f1d96c9f3130718dbc06636120c724b9930c2"
+    },
+    {
+      "path": "data/verification/selfserve_new_official_parts.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ]
+}

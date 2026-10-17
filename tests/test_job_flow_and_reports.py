@@ -113,7 +113,9 @@ def test_completion_rejects_invalid_signature_data(client):
     assert "PNG data URL" in response.text
 
 
-def test_voice_note_upload_and_listing(client):
+def test_voice_note_upload_and_listing(client, tmp_path, monkeypatch):
+    # Upload verification must not leave fixtures in the running service's uploads.
+    monkeypatch.chdir(tmp_path)
     tech = _mk_user(client, "tech-voice")
     wo = _mk_wo(client, "WOF-VOICE", tech)
     audio = b"\x1aE\xdf\xa3" + b"voice-note-test" * 10
