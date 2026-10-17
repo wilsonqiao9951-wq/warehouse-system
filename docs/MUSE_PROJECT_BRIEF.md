@@ -174,3 +174,5 @@ MD目录新增：md_models、md_model、md_parts，model_id=150/200/250。72条�
 DF目录新增：df_models、df_model、df_parts，model_id=150/200-250。215条独立官网零件（新增21条），按精确机型章节提供来源和本组织库存；200/250为官网合并标签，不推断通用。
 
 DB目录新增：db_models、db_model、db_parts，model_id=150/200-275。61条独立官网零件（新增17条），精确章节来源和本组织库存隔离；200 / 275 Standard为官网合并标签，不推断通用。
+
+Ice Combo目录新增分机型查询：icecombo_models、icecombo_model、icecombo_parts，model_id=7000/7100。361条均复用既有零件ID；保留精确官网章节与本组织库存，不推断适配。

@@ -186,3 +186,16 @@ GET /api/catalog/db/models、/db/models/{model_id}、/db/models/{model_id}/parts
 所有接口需认证；仅返回所选机型/章节官网关联和当前组织库存。未知机型或跨机型章节404。新增ID为official-db-{part_number}；既有授权导入保持幂等且不增加库存。不自动认定适配或创建现场验证；本次未扩展DB维修指导或工单用料机型支持。
 
 运行数据由catalog-bundle/db恢复并校验，保留官网链接、访问时间和快照哈希。本机原始快照为data/verification/db_20261016；审核清单待接入列表是接入前快照，实际以db_added_manifest.json及db_graph.json为准。schema仍0023，前端未改。
+
+
+## 7000／7100 Ice Combo目录查询（2026-10-17）
+
+重新核验24个官网手册页面和361个零件页面。361条独立零件全部复用主目录既有ID，新增零件0条；本轮新增精确机型和章节查询。7000 Ice Combo为254条/9章节，7100 Ice Combo为196条/13章节，89条有两个机型官网引用，不代表跨机型适配。缺图3条、缺厂家27条保持空缺，身份未确认链接0条。
+
+GET /api/catalog/icecombo/models、/icecombo/models/{model_id}、/icecombo/models/{model_id}/parts；model_id严格为7000或7100。支持section_id、q、skip、limit（最大100）。Muse query资源为icecombo_models、icecombo_model、icecombo_parts，后两者必填model_id。例如：
+```json
+{"resource":"icecombo_parts","model_id":"7100","limit":25}
+```
+请求需认证；仅返回当前机型/章节官网关联与本组织库存，未知机型及跨机型章节404。既有授权导入接口保持幂等且不增加库存。不自动创建现场验证或认定适配；本次未扩展Ice Combo维修指导或工单用料机型支持。
+
+运行数据由catalog-bundle/icecombo恢复并校验，包含空的新增清单及完整关联图；官网链接、访问时间、快照哈希保留。本机原始快照位于data/verification/icecombo_20261017，schema仍0023，前端未改。
