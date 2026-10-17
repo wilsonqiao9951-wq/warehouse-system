@@ -15,7 +15,7 @@ def run():
         with SessionLocal() as db:
             org=Organization(name='Temporary Self-Serve check',slug='verify-'+uuid4().hex);db.add(org);db.flush();org_id=org.id
             user=User(organization_id=org_id,name='Temporary check',email=uuid4().hex+'@example.invalid',role=UserRole.ADMIN,is_active=True);db.add(user);db.commit();user_id=user.id
-        token,_=create_access_token(user_id,org_id);headers={'Authorization':'Bearer '+token};base=os.environ.get('MYCOKE_VERIFY_BASE_URL','http://127.0.0.1:9000/api').rstrip('/')+'/catalog';expected=json.loads((ROOT/'data/organized/selfserve_added_parts.json').read_text());ids={cid for m in json.loads((ROOT/'data/organized/selfserve_graph.json').read_text())['models'].values() for cid in m['part_ids']}
+        token,_=create_access_token(user_id,org_id);headers={'Authorization':'Bearer '+token};base=os.environ.get('MYCOKE_VERIFY_BASE_URL','http://127.0.0.1:8000/api').rstrip('/')+'/catalog';expected=json.loads((ROOT/'data/organized/selfserve_added_parts.json').read_text());ids={cid for m in json.loads((ROOT/'data/organized/selfserve_graph.json').read_text())['models'].values() for cid in m['part_ids']}
         with httpx.Client(timeout=30) as client:
             assert client.get(base+'/selfserve/models').status_code==401
             response=client.get(base+'/parts',headers=headers);response.raise_for_status();total=response.json()['total'];found=set()
