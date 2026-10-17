@@ -199,3 +199,16 @@ GET /api/catalog/icecombo/models、/icecombo/models/{model_id}、/icecombo/model
 请求需认证；仅返回当前机型/章节官网关联与本组织库存，未知机型及跨机型章节404。既有授权导入接口保持幂等且不增加库存。不自动创建现场验证或认定适配；本次未扩展Ice Combo维修指导或工单用料机型支持。
 
 运行数据由catalog-bundle/icecombo恢复并校验，包含空的新增清单及完整关联图；官网链接、访问时间、快照哈希保留。本机原始快照位于data/verification/icecombo_20261017，schema仍0023，前端未改。
+
+
+## 8000／8100 Crew-Serve目录查询（2026-10-17）
+
+重新核验29个官网手册页和393个零件链接。确认390条独立零件，全部复用既有主目录ID，新增零件0条。本轮建立8000 Crew-Serve的229条/13章节与8100 Crew-Serve的175条/14章节查询；14条共享官网引用不代表适配。缺图3条、缺厂家18条保持空缺。3个官网链接404（35085-001-524 | PLEXUS CORP、3508088、3507458对应引用），保留待核验及原章节证据，不据此建立已确认关系。
+
+GET /api/catalog/crewserve/models、/crewserve/models/{model_id}、/crewserve/models/{model_id}/parts；model_id为8000或8100。支持section_id、q、skip、limit（最大100）。Muse query资源为crewserve_models、crewserve_model、crewserve_parts，后两者必填model_id：
+```json
+{"resource":"crewserve_parts","model_id":"8100","limit":25}
+```
+请求需认证，只返回所选机型/章节来源和本组织库存；未知机型及跨机型章节404。授权目录导入仍幂等且不增加库存。不自动认定跨机型适配、创建现场验证或扩展Crew-Serve维修指导/实际用料机型支持。
+
+catalog-bundle/crewserve提供校验后的运行数据，保留官网链接、访问时间、快照哈希。完整本机审核（含待核验）在data/verification/crewserve_20261017。schema0023，前端不变。

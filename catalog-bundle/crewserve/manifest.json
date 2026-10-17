@@ -1,0 +1,31 @@
+{
+  "archive_sha256": "074382564bd0aca350a9a1a92b01e322343b9a9dc9dca7a5a0962217142f012d",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "7333eef02f7210ff29ab7722563dbe44c66e4f971beb45919008e13cff597f13"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/crewserve_added_parts.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "path": "data/organized/crewserve_added_manifest.json",
+      "sha256": "6e38bf297e8f63f56dc0384149e99be364a5c24c3bc47440fa0c1b28dc55afbf"
+    },
+    {
+      "path": "data/organized/crewserve_graph.json",
+      "sha256": "a736dc2696c3bf51f329be64ae820feb44ea75f634c40fd2f5bb42317f3ac762"
+    },
+    {
+      "path": "data/organized/crewserve_parts_catalog.json",
+      "sha256": "d1ae5c5ee7bd14e274799c840cd3e86512f7b3e0463b7ace2931b2017c3185fb"
+    },
+    {
+      "path": "data/verification/crewserve_new_official_parts.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    }
+  ]
+}
