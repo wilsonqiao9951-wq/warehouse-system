@@ -398,3 +398,16 @@ GET /api/catalog/cornelius/models、/cornelius/models/{model_id}、/cornelius/mo
 | Quest 2000 | quest-2000 | 51 | 16 |
 | Quest 4000 | quest-4000 | 63 | 15 |
 | SFV - 1 | sfv-1 | 60 | 1 |
+
+
+## McCann 2.5／20 GALLON（2026-10-18）
+
+核验 CokeParts/myCoke 的7个手册URL及38个零件URL，设备页厂家明确为 MCCANN MANUFACTURING。38个独立零件中新增21条、复用17条；2.5 GALLON为29条/1章节，20 GALLON为31条/4章节。共同引用22条，仅记录官网关联，不认定适配。身份待确认链接0条，1条缺图保留空缺，其他已检查字段齐全。未扩展品牌官网目录。
+
+GET /api/catalog/mccann/models、/mccann/models/{model_id}、/mccann/models/{model_id}/parts。Muse资源 mccann_models、mccann_model、mccann_parts；精确ID为2-5-gallon、20-gallon。零件支持section_id、q、skip、limit（最大100）。
+
+示例：{"resource":"mccann_parts","model_id":"2-5-gallon","limit":25}
+
+请求需认证，仅返回所选机型/章节与当前组织库存；未知机型或跨机型章节404。导入幂等且不增加库存，不自动产生现场验证，不扩展维修指导或实际用料的机型支持。
+
+公开catalog-bundle/mccann提供5份可校验运行数据，来源URL、访问时间、快照哈希保留。本机审核在data/verification/mccann_20261018；待接入列表为审核时快照，最终以mccann_added_manifest.json和mccann_graph.json为准。schema0023，无迁移，前端不变。

@@ -198,3 +198,8 @@ Multiplex统一入口：multiplex_models/model/parts/coverage；myCoke明确品�
 ### Cornelius：CokeParts／myCoke 范围
 
 新增cornelius_models、cornelius_model、cornelius_parts资源。先查模型列表取得精确model_id，后两项必填该ID；支持section_id、q、skip、limit（最多100）。38个官网分组保留原名，CI2000两个名称使用不同ID；Viper 2/3/4单独查询。厂家证据注明来自设备页或手册章节，只返回本组织库存，官网关联不代表通用。原有Viper 3专用查询和维修用料行为保持不变。
+
+
+### McCann：CokeParts 2.5／20 GALLON
+
+Muse资源 mccann_models、mccann_model、mccann_parts；model_id 为 2-5-gallon、20-gallon，后两项必须提供机型。零件支持 section_id、q、skip、limit（最多100）。仅返回该机型官网章节来源和本组织库存，官网共同引用不代表跨机型通用。

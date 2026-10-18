@@ -78,6 +78,7 @@ jobs:
           docker exec mycoke-backend-ci python -m scripts.verify_live_multiplex
           docker exec mycoke-backend-ci python -m scripts.verify_live_lancer
           docker exec mycoke-backend-ci python -m scripts.verify_live_cornelius
+          docker exec mycoke-backend-ci python -m scripts.verify_live_mccann
       - name: Container logs
         if: failure()
         run: docker logs mycoke-backend-ci

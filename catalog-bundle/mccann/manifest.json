@@ -1,0 +1,31 @@
+{
+  "archive_sha256": "9b23908ecb58d4f7f84836aee00bad367f18a0631d0e226b46205117262d3c3e",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "7fdbf4bcc849ef54d11d2ff56b9195b06c0c283290c44fa93dd5d3074e21bffd"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/mccann_added_parts.json",
+      "sha256": "f1903e85af9af3b8ba2a7c6421aa95569e1433aa3f8c8116730a291c0111ecf8"
+    },
+    {
+      "path": "data/organized/mccann_added_manifest.json",
+      "sha256": "2237722f7650b9b0e9bf7fd823296e6df055866d58dcaacfe1d2d9a989bf3cb1"
+    },
+    {
+      "path": "data/organized/mccann_graph.json",
+      "sha256": "8194544418a9632c991392eb0bc05dbdce91bdfe1915d7c10a8e9f61dbd836b3"
+    },
+    {
+      "path": "data/organized/mccann_parts_catalog.json",
+      "sha256": "4274784e304dca7ea49b0315b66478ea1e93dc8fa87357dfa89d6f3a1a0655a3"
+    },
+    {
+      "path": "data/verification/mccann_new_official_parts.json",
+      "sha256": "163f626315af67c608ae881e6c5726bd27e880d02f6b610906c1f76aa305bfcd"
+    }
+  ]
+}
