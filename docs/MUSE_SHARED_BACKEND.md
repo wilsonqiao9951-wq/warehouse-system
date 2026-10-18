@@ -238,3 +238,16 @@ GET /api/catalog/tj/models、/tj/models/{model_id}、/tj/models/{model_id}/parts
 请求需认证，仅返回所选机型/章节官网关系与本组织库存；未知机型或跨机型章节404。授权目录导入幂等且不增加库存。不自动认定适配、创建现场验证或扩展TJ维修指导/实际用料机型支持。
 
 catalog-bundle/tj校验恢复运行数据，保留官网链接、访问时间、快照哈希。本机完整审核在data/verification/tj_20261018；审核待接入列表是接入前快照，最终接入以tj_added_manifest.json及tj_graph.json为准。schema0023，前端不变。
+
+
+## WBK8／WBK9／WBK10目录查询（2026-10-18）
+
+重新核验8个官网手册页和39个零件页。39条独立零件中新增19条（official-wbk-{part_number}），复用20条既有ID。WBK8为13条/1章节，WBK9为11条/1章节，WBK10为33条/3章节；11条有多机型官网引用，不自动认定通用。6条缺图保持空缺，其余审核字段齐全，本轮身份未确认链接0条。
+
+GET /api/catalog/wbk/models、/wbk/models/{model_id}、/wbk/models/{model_id}/parts；model_id严格为8、9、10。支持section_id、q、skip、limit（最大100）。Muse query资源wbk_models、wbk_model、wbk_parts，后两者必填model_id：
+```json
+{"resource":"wbk_parts","model_id":"10","limit":25}
+```
+请求需认证，仅返回当前机型/章节官网关系与本组织库存；未知机型及跨机型章节404。授权目录导入幂等且不增加库存。不自动认定适配、创建现场验证或扩展WBK维修指导/实际用料机型支持。
+
+catalog-bundle/wbk校验恢复运行数据，保留官网链接、访问时间、快照哈希。本机完整审核在data/verification/wbk_20261018，审核待接入列表为接入前快照，实际以wbk_added_manifest.json和wbk_graph.json为准。schema0023，前端不变。

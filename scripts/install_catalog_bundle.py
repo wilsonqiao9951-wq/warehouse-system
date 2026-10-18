@@ -58,7 +58,7 @@ def install(root: Path = ROOT, bundle_relative: str = 'catalog-bundle') -> int:
             if not target.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(tar.extractfile(member).read())
-    extra = sum(install(root, 'catalog-bundle/'+family) for family in ('quest','abs','ed','md','df','db','icecombo','crewserve','selfserve','tj') if (root/'catalog-bundle'/family/'manifest.json').exists()) if bundle_relative == 'catalog-bundle' else 0
+    extra = sum(install(root, 'catalog-bundle/'+family) for family in ('quest','abs','ed','md','df','db','icecombo','crewserve','selfserve','tj','wbk') if (root/'catalog-bundle'/family/'manifest.json').exists()) if bundle_relative == 'catalog-bundle' else 0
     return len(expected) + extra
 
 
