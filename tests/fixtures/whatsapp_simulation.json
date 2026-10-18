@@ -1,0 +1,301 @@
+{
+  "version": "simulation-1.0",
+  "simulation_only": true,
+  "provider_id": "simulation",
+  "recipient_id": "simulation-line",
+  "sender_id": "15550000001",
+  "variables": [
+    "tech_id",
+    "own_order_id",
+    "foreign_order_id"
+  ],
+  "cases": [
+    {
+      "id": "01-unbound",
+      "action": "query",
+      "arguments": {
+        "query": {
+          "resource": "identity"
+        }
+      },
+      "status": 403,
+      "expect": {},
+      "extract": {},
+      "event_id": "simulation-01-unbound"
+    },
+    {
+      "id": "02-invite",
+      "admin_invite": {
+        "user_id": "$tech_id",
+        "sender_id": "15550000001"
+      },
+      "status": 200,
+      "expect": {
+        "expires_in": 600
+      },
+      "extract": {
+        "binding_code": "binding_code"
+      }
+    },
+    {
+      "id": "03-wrong-phone",
+      "action": "bind",
+      "arguments": {
+        "binding_code": "$binding_code"
+      },
+      "status": 403,
+      "expect": {},
+      "extract": {},
+      "phone": "15550000002",
+      "event_id": "simulation-03-wrong-phone"
+    },
+    {
+      "id": "04-bind",
+      "action": "bind",
+      "arguments": {
+        "binding_code": "$binding_code"
+      },
+      "status": 200,
+      "expect": {
+        "data.bound": true,
+        "data.user_id": "$tech_id",
+        "data.organization_id": 1,
+        "delivery_status": "not_sent"
+      },
+      "extract": {},
+      "event_id": "simulation-04-bind"
+    },
+    {
+      "id": "05-consumed-code",
+      "action": "bind",
+      "arguments": {
+        "binding_code": "$binding_code"
+      },
+      "status": 403,
+      "expect": {},
+      "extract": {},
+      "event_id": "simulation-05-consumed-code"
+    },
+    {
+      "id": "06-identity",
+      "action": "query",
+      "arguments": {
+        "query": {
+          "resource": "identity"
+        }
+      },
+      "status": 200,
+      "expect": {
+        "data.user_id": "$tech_id",
+        "data.organization_id": 1,
+        "reply_to.recipient_id": "15550000001"
+      },
+      "extract": {},
+      "event_id": "simulation-06-identity"
+    },
+    {
+      "id": "07-own-org-orders",
+      "action": "query",
+      "arguments": {
+        "query": {
+          "resource": "work_orders",
+          "scope": "all"
+        }
+      },
+      "status": 200,
+      "expect": {
+        "data.0.id": "$own_order_id"
+      },
+      "extract": {},
+      "list_length": {
+        "data": 1
+      },
+      "event_id": "simulation-07-own-org-orders"
+    },
+    {
+      "id": "08-foreign-order",
+      "action": "query",
+      "arguments": {
+        "query": {
+          "resource": "repair_guidance",
+          "work_order_id": "$foreign_order_id"
+        }
+      },
+      "status": 404,
+      "expect": {},
+      "extract": {},
+      "event_id": "simulation-08-foreign-order"
+    },
+    {
+      "id": "09-forged-org",
+      "action": "query",
+      "arguments": {
+        "query": {
+          "resource": "identity",
+          "organization_id": 2
+        }
+      },
+      "status": 422,
+      "expect": {},
+      "extract": {},
+      "event_id": "simulation-09-forged-org"
+    },
+    {
+      "id": "10-claim",
+      "action": "claim",
+      "arguments": {
+        "work_order_id": "$own_order_id"
+      },
+      "status": 200,
+      "expect": {},
+      "extract": {
+        "claim_version": "data.claim_version"
+      },
+      "text": "领取工单 $own_order_id",
+      "event_id": "simulation-10-claim"
+    },
+    {
+      "id": "11-draft",
+      "action": "report_draft",
+      "arguments": {
+        "work_order_id": "$own_order_id",
+        "claim_version": "$claim_version",
+        "report": {
+          "symptom_codes": [
+            "low_flow"
+          ],
+          "steps": [
+            "合成联调：未执行真实维修"
+          ],
+          "outcome": "resolved",
+          "result_notes": "仅验证接口，不作为已审核维修证据"
+        }
+      },
+      "status": 200,
+      "expect": {
+        "data.submitted": false,
+        "data.confirmation_required": true,
+        "data.expires_in": 900
+      },
+      "extract": {
+        "draft_id": "data.draft_id",
+        "confirmation_text": "data.confirmation_text"
+      },
+      "reports_count": 0,
+      "event_id": "simulation-11-draft"
+    },
+    {
+      "id": "12-wrong-confirmation",
+      "action": "report_confirm",
+      "arguments": {
+        "draft_id": "$draft_id"
+      },
+      "status": 422,
+      "expect": {},
+      "extract": {},
+      "text": "确认",
+      "reports_count": 0,
+      "event_id": "simulation-12-wrong-confirmation"
+    },
+    {
+      "id": "13-confirm",
+      "action": "report_confirm",
+      "arguments": {
+        "draft_id": "$draft_id"
+      },
+      "status": 200,
+      "expect": {
+        "data.review_status": "pending",
+        "data.guidance_eligible": false,
+        "data.replayed": false,
+        "replayed": false,
+        "delivery_status": "not_sent"
+      },
+      "extract": {
+        "report_id": "data.report_id"
+      },
+      "text": "$confirmation_text",
+      "event_id": "simulation-confirm-001",
+      "reports_count": 1
+    },
+    {
+      "id": "14-same-message-retry",
+      "action": "report_confirm",
+      "arguments": {
+        "draft_id": "$draft_id"
+      },
+      "status": 200,
+      "expect": {
+        "data.report_id": "$report_id",
+        "data.replayed": true,
+        "replayed": true
+      },
+      "extract": {},
+      "text": "$confirmation_text",
+      "event_id": "simulation-confirm-001",
+      "reports_count": 1
+    },
+    {
+      "id": "15-new-message-same-draft",
+      "action": "report_confirm",
+      "arguments": {
+        "draft_id": "$draft_id"
+      },
+      "status": 200,
+      "expect": {
+        "data.report_id": "$report_id",
+        "data.replayed": true,
+        "replayed": false
+      },
+      "extract": {},
+      "text": "$confirmation_text",
+      "reports_count": 1,
+      "event_id": "simulation-15-new-message-same-draft"
+    },
+    {
+      "id": "16-reused-id-changed-body",
+      "action": "query",
+      "arguments": {
+        "query": {
+          "resource": "identity"
+        }
+      },
+      "status": 409,
+      "expect": {},
+      "extract": {},
+      "event_id": "simulation-confirm-001",
+      "reports_count": 1
+    },
+    {
+      "id": "17-pending-not-guidance",
+      "action": "query",
+      "arguments": {
+        "query": {
+          "resource": "repair_guidance",
+          "work_order_id": "$own_order_id",
+          "symptom_code": "low_flow"
+        }
+      },
+      "status": 200,
+      "expect": {
+        "data.reviewed_guidance.reviewed_resolved_case_count": 0
+      },
+      "extract": {},
+      "event_id": "simulation-17-pending-not-guidance"
+    },
+    {
+      "id": "18-bad-signature",
+      "action": "query",
+      "arguments": {
+        "query": {
+          "resource": "identity"
+        }
+      },
+      "status": 401,
+      "expect": {},
+      "extract": {},
+      "invalid_signature": true,
+      "event_id": "simulation-18-bad-signature"
+    }
+  ]
+}
