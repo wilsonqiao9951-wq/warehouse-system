@@ -25,3 +25,8 @@ body:
     attributes:
       label: Synthetic examples or public source references
       description: Do not include passwords, tokens, customer records or private work orders.
+  - type: textarea
+    id: api_trace
+    attributes:
+      label: Contract version and API trace
+      description: Include /api/muse contract_version, response X-Request-ID, HTTP method/path/status, and a synthetic or redacted request. Never include Authorization, passwords, device tokens, or private work-order/customer content.

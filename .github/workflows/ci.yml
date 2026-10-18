@@ -63,6 +63,7 @@ jobs:
       - name: Verify real HTTP technician and review workflow
         run: |
           docker exec mycoke-backend-ci python -m scripts.verify_live_muse
+          docker exec mycoke-backend-ci python -m scripts.verify_live_muse_discovery
           docker exec mycoke-backend-ci python -m scripts.verify_live_quest
           docker exec mycoke-backend-ci python -m scripts.verify_live_abs
           docker exec mycoke-backend-ci python -m scripts.verify_live_ed

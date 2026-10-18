@@ -459,3 +459,12 @@ GET /api/catalog/bargun/models、/bargun/models/{model_id}、/bargun/models/{mod
 | S2.5 10 Button | s2-5-10-button | 99 | 3 |
 | S2.5 12 Button | s2-5-12-button | 88 | 3 |
 | S2.5 14 Button | s2-5-14-button | 96 | 3 |
+
+
+## Muse 合作优化：统一发现与查询（协议1.5，2026-10-18）
+
+GET /api/muse新增guide_path，GET /api/muse/guide提供机器可读协议。认证后的统一查询新增families、models、model、model_parts；models可跨系列搜索或按family_id筛选并分页，返回可直接使用的detail_query/parts_query。model及model_parts必须同时传family_id与model_id，先验证归属再委托已有查询，保留原有库存隔离和来源数据；响应附selection供Muse核对。旧资源与写入流程保持兼容。
+
+当前20个系列入口、134个目录分组，数字只代表查询入口，不是去重后的实物机型数量。相近/重叠机型只作为候选，automatic_model_selection=false。未知family返回422，错误机型归属或跨机型章节404；不自动导入、扣库存、领取或完工。
+
+指南提供分页、各证据类型、维修反馈顺序、401/403/404/409/422及超时处理规则。support_handoff约定接口版本、X-Request-ID、合成/脱敏请求及验收结果；GitHub任务模板增加对应字段。目录描述不产生角色权限；共享介绍不授予联网能力，尚需各Muse配置HTTP工具、可访问的后端地址和个人凭证。本轮不改前端、不配置云服务器或域名。
