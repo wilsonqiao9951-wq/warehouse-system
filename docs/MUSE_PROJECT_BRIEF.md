@@ -208,3 +208,8 @@ Muse资源 mccann_models、mccann_model、mccann_parts；model_id 为 2-5-gallon
 ### Wunder-Bar Variety Tea Tower：CokeParts 范围
 
 Muse资源 wunderbar_models、wunderbar_model、wunderbar_parts。先查列表取得精确model_id，后两项必填该ID；零件支持section_id、q、skip、limit（最多100）。3个官方分组保留原名，两个Space Saver标签不凭相似名称合并。只返回所选机型官网章节来源和本组织库存，不自动认定跨机型适配。
+
+
+### Bar Gun：CokeParts 范围
+
+Muse资源bargun_models、bargun_model、bargun_parts。先查列表取得精确model_id，后两项必填ID；零件支持section_id、q、skip、limit（最多100）。11个分组包括Mark IV 3/10/12/14按钮、S2.5 10/12/14按钮、Rattler、Rattler II、Magnum及Bargun Button Caps。厂家为Wunder-Bar或Taprite，品牌证据来自设备页/手册章节并标记范围，只查询当前机型来源与本组织库存。共同引用不代表通用，CCP候选不凭名称加入机型关联。

@@ -430,3 +430,32 @@ GET /api/catalog/wunderbar/models、/wunderbar/models/{model_id}、/wunderbar/mo
 请求需认证，仅返回所选机型/章节与当前组织库存；未知机型或跨机型章节404。两个Space Saver标签保持官网各自记录，不自行合并。导入幂等且不增加库存，不自动产生现场验证，不扩展维修指导或实际用料的机型支持。
 
 公开catalog-bundle/wunderbar提供5份可校验运行数据，保留官网URL、访问时间及快照哈希。本机审核在data/verification/wunderbar_20261018；待接入列表为审核时快照，最终以wunderbar_added_manifest.json和wunderbar_graph.json为准。schema0023，无迁移，前端不变。
+
+
+## Bar Gun 系列（2026-10-18）
+
+范围为CokeParts/myCoke明确Bargun类别的官网记录。依据已核验零件页里的明确手册引用发现机型，再沿同机型章节链接补全，核验52个手册URL、490个零件URL。确认490个独立零件：292新增、198复用，覆盖11个分组、51章节。设备/章节厂家为WUNDER-BAR或TAPRITE-FASSCO MFG.  INC.，manufacturer_evidence_scope区分设备与章节证据。
+
+公开来源身份待确认链接0条；43条缺图、1条缺零件厂家保持空缺，其余已检查字段齐全。349个零件被多个分组引用，不认定跨枪型或按钮数量适配。244条既有CCP名称候选保留待授权身份和明确关联核验，未加入本链路；本地候选清单为data/verification/bargun_retained_ccp_candidates.json。
+
+GET /api/catalog/bargun/models、/bargun/models/{model_id}、/bargun/models/{model_id}/parts。Muse资源bargun_models、bargun_model、bargun_parts，后两项必填model_id；零件支持section_id、q、skip、limit（最多100）。
+
+示例：{"resource":"bargun_parts","model_id":"mark-iv-10-button","limit":25}
+
+仅返回所选机型/章节官网引用及本组织库存。未知机型或跨机型章节404；授权导入幂等且不加库存，不自动产生现场验证。按钮帽分组为官网目录，不代表独立枪型；不合并Mark IV与S2.5、Rattler与Rattler II，不扩展维修指导/实际用料机型支持。
+
+公开catalog-bundle/bargun提供5份校验运行数据，保留官网URL、时间与快照哈希。原始审核在本机data/verification/bargun_20261018；审核待接入列表为当时快照，实际以bargun_added_manifest.json及bargun_graph.json为准。仅处理CokeParts，前端不变，schema0023无迁移。
+
+| 官方分组 | model_id | 零件 | 章节 |
+|---|---|---:|---:|
+| Bargun Button Caps | bargun-button-caps | 43 | 1 |
+| Magnum | magnum | 155 | 7 |
+| Mark IV 10 Button | mark-iv-10-button | 165 | 6 |
+| Mark IV 12 Button | mark-iv-12-button | 159 | 6 |
+| Mark IV 14 Button | mark-iv-14-button | 149 | 6 |
+| Mark IV 3 Button Energy / Tea | mark-iv-3-button-energy-tea | 69 | 3 |
+| Rattler | rattler | 160 | 6 |
+| Rattler II | rattler-ii | 156 | 7 |
+| S2.5 10 Button | s2-5-10-button | 99 | 3 |
+| S2.5 12 Button | s2-5-12-button | 88 | 3 |
+| S2.5 14 Button | s2-5-14-button | 96 | 3 |

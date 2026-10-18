@@ -1,0 +1,39 @@
+{
+  "archive_sha256": "daa8ce41fa932307b1cbd2fd16b45818a9f7a6fbb7c61ce9e7d387585d84df3d",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "e554c434addff89b4a7abd015f817b338feade57230ec9f8180b32309b3289d3"
+    },
+    {
+      "name": "catalog-001.b64",
+      "sha256": "2743dc4e4a2adb888c381c1b10a6459f7c8488e67a478bea70bcaf4fcf3e1f3c"
+    },
+    {
+      "name": "catalog-002.b64",
+      "sha256": "5467606b52105045a7d8e90a2f17d4310cd5deb66af35a22d6977f28b60dd6d0"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/bargun_added_parts.json",
+      "sha256": "f9ceeae92bdec0942fc9fb93af0ffa6811f1b2712fc52f332c1e6552b3e7562c"
+    },
+    {
+      "path": "data/organized/bargun_added_manifest.json",
+      "sha256": "3813f0422c72c4ff16651b0a06754607dc0364f832998f38de6b13d5b87ea606"
+    },
+    {
+      "path": "data/organized/bargun_graph.json",
+      "sha256": "b1764cfe0cfe3cf32a10545211758159698ff6dd31224a2dda1b6faa4c8b16ed"
+    },
+    {
+      "path": "data/organized/bargun_parts_catalog.json",
+      "sha256": "d92913a0bbf0a2d363ba9cc3b2f7d6e3241155a4a08736310bc7f5f29dcaf3ab"
+    },
+    {
+      "path": "data/verification/bargun_new_official_parts.json",
+      "sha256": "847545d81d3ed2a383f833b152d91febbaff1491126dfafa4b984548355e1b76"
+    }
+  ]
+}
