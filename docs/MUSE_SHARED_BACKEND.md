@@ -305,3 +305,41 @@ GET /api/catalog/multiplex/coverage或Muse resource=multiplex_coverage查询收�
 请求需认证，只返回当前精确机型/章节的关联和本组织库存；未知机型、跨机型章节404。合并标签不拆成已认证互相通用的独立机型，Old Style仍为官网原始标识。授权导入幂等、不增加库存。不会把其他品牌机型（如Viper、TJ、ED）混入；零件可来自供应商，品牌筛选依据设备页而非每个零件的生产厂家。本轮不扩展维修指导或实际用料机型支持。
 
 公开catalog-bundle/multiplex提供数据与覆盖清单，保留访问时间、官网链接与快照哈希。原始myCoke审核在data/verification/multiplex_20261018，品牌官网页面在multiplex_brand_20261018。审核待接入列表是接入前快照，最终以multiplex_added_manifest.json及multiplex_graph.json为准。schema0023，前端不变。
+
+
+## Lancer：CokeParts／myCoke 范围（2026-10-18）
+
+以官方设备页 manufacturer_name_display=LANCER CORPORATION 为准，本轮重新核验 20 个目录分组、95 个手册页、632 个零件链接。确认 628 个独立零件：393 条新增、235 条复用已有主目录 ID。4 个未确认零件链接保留待核验；49 条缺图片、12 条缺厂家、9 条缺厂家料号、2 条缺 CONA 编号。名称和描述无缺失。只覆盖当前 CokeParts／myCoke 索引中的 Lancer，未扩展厂家官网全产品目录。
+
+| 官网机型/分组 | model_id | 零件数 | 章节数 |
+|---|---|---:|---:|
+| 1 and 2 Valve Tower (Model 300) | 1-and-2-valve-tower-model-300 | 22 | 3 |
+| 1500 Prechiller (SONIC) | 1500-prechiller-sonic | 40 | 2 |
+| 1500 | 1500 | 76 | 4 |
+| 1523 Drop-In Series (1523 / 2206) | 1523-drop-in-series-1523-2206 | 30 | 2 |
+| 22 INCH ACIB (Bevariety) | 22-inch-acib-bevariety | 129 | 8 |
+| 2300 Drop-In (Bevariety) | 2300-drop-in-bevariety | 76 | 4 |
+| 2300 Drop-In SERIES (2306-2308-2310) | 2300-drop-in-series-2306-2308-2310 | 62 | 2 |
+| 2300 Drop-In Sabre Plug-In | 2300-drop-in-sabre-plug-in | 32 | 1 |
+| 2300 HP Drop In | 2300-hp-drop-in | 7 | 2 |
+| 2300 Ice Cooled Drop In (Bevariety) | 2300-ice-cooled-drop-in-bevariety | 13 | 4 |
+| 2300 SP Drop In | 2300-sp-drop-in | 3 | 2 |
+| 23308 Drop-In | 23308-drop-in | 25 | 1 |
+| 23308 - Sonic UDM (Bevariety) | 23308-sonic-udm-bevariety | 106 | 11 |
+| 2400 Free Standing, Plug-in | 2400-free-standing-plug-in | 34 | 1 |
+| 2500 | 2500 | 71 | 4 |
+| 30 INCH ACIB (Bevariety) | 30-inch-acib-bevariety | 138 | 8 |
+| Lancer 4500 - 44 | lancer-4500-44 | 84 | 4 |
+| Lancer 4500 IBD22, IBD30 | lancer-4500-ibd22-ibd30 | 186 | 7 |
+| Lancer 4500 IBD44 | lancer-4500-ibd44 | 84 | 4 |
+| Remote Pump Assembly (Bevariety) | remote-pump-assembly-bevariety | 22 | 1 |
+
+GET /api/catalog/lancer/models、/lancer/models/{model_id}、/lancer/models/{model_id}/parts。Muse POST /api/muse/query 资源为 lancer_models、lancer_model、lancer_parts，后两项必须提供 model_id。零件支持 section_id、q、skip、limit（最大 100）。
+
+```json
+{"resource":"lancer_parts","model_id":"lancer-4500-ibd22-ibd30","limit":25}
+```
+
+认证后仅查询当前精确机型/章节的官网引用和本组织库存；未知机型与跨机型章节返回 404。官网合并机型标签不拆分为互相适配的声明；303 条零件在多个分组中被引用，仅表示官网多处关联。授权导入幂等且不增加库存。来源 URL、访问时间和页面哈希保留，字段空缺和身份未确认项不推测。本轮不扩展维修指导或实际用料机型支持。
+
+运行数据通过 catalog-bundle/lancer 校验恢复，原始审核保留于本机 data/verification/lancer_20261018。待接入清单为审核时快照，最终以 lancer_added_manifest.json、lancer_graph.json 为准。数据库 schema 0023，前端不变。

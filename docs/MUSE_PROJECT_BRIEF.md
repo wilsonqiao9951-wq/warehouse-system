@@ -188,3 +188,8 @@ WBK目录：wbk_models、wbk_model、wbk_parts，model_id=8/9/10。39条独立�
 37T/F/K目录：series37_models、series37_model、series37_parts，model_id=37t/37f/37k。119条独立官网零件（新增25条），保留精确章节及本组织库存，不推断适配，不包含MCD 37。
 
 Multiplex统一入口：multiplex_models/model/parts/coverage；myCoke明确品牌的23机型组、376条独立零件（新增130条）。详情含制造商证据；coverage披露品牌官网其他系列待审核，不声称全球所有系列已完成。
+
+
+### Lancer：仅 CokeParts／myCoke 收录范围
+
+新增 Muse 查询资源 `lancer_models`、`lancer_model`、`lancer_parts`。先查询 `lancer_models` 取得精确 `model_id`，后两项必须传入该 ID；零件支持 `section_id`、`q`、`skip`、`limit`（最多 100）。官网合并机型标签保留原样，只表示明确手册关联，不代表各机型相互通用。查询保留出处，只返回本组织库存；不自动产生现场验证或扩展维修建议。范围仅为 CokeParts／myCoke 中的 Lancer，不扩展品牌官网目录。

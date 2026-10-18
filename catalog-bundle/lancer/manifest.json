@@ -1,0 +1,43 @@
+{
+  "archive_sha256": "de8d0c9fea02d261624c751c3ae56b53d030d940879f325b0febe85a896064a1",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "a0aecf1a41b6be9c88a671bccc0762a3e161339a2572a337f4d30921ea0a750a"
+    },
+    {
+      "name": "catalog-001.b64",
+      "sha256": "aa8521b83a6684dc4d972e0d50167abf59a88909cf8af98d836e0d4c7c773377"
+    },
+    {
+      "name": "catalog-002.b64",
+      "sha256": "8f065f4a92bfadb750200266b5ef62f6c9783665adc1a86e550c2afa456d6ae7"
+    },
+    {
+      "name": "catalog-003.b64",
+      "sha256": "14c3868d3d6908c195ba5a99a702afbd0839ff8dbc1ab26dc676f046f46a4265"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/lancer_added_parts.json",
+      "sha256": "6e96d5004890b007e7f74c4a50f472b0319556d4fa8dbe4a4ebea48b7558f612"
+    },
+    {
+      "path": "data/organized/lancer_added_manifest.json",
+      "sha256": "621d46769a6673904bdb5e2200e80342240b51e409f05400c274f03151b7ea93"
+    },
+    {
+      "path": "data/organized/lancer_graph.json",
+      "sha256": "97ff9eebfa277acaffed5764b1403b1d6591ac890a884d7f66a35f31fe518b72"
+    },
+    {
+      "path": "data/organized/lancer_parts_catalog.json",
+      "sha256": "3f45c6ad52387c3feec69576c4bb3fa7c626121a47e108ee3f868f83bd0cf0e2"
+    },
+    {
+      "path": "data/verification/lancer_new_official_parts.json",
+      "sha256": "2354e9489e271200a2c8ff304645ff9d6048a0224876d678394709e3696d24e6"
+    }
+  ]
+}
