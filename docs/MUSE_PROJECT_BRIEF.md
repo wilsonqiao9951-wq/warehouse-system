@@ -180,3 +180,5 @@ Ice Combo目录新增分机型查询：icecombo_models、icecombo_model、icecom
 Crew-Serve目录：crewserve_models、crewserve_model、crewserve_parts，model_id=8000/8100。390条均复用现有ID；3个404引用保留待核验；仅提供官网章节关联与本组织库存，不自动认定适配。
 
 Self-Serve目录：selfserve_models、selfserve_model、selfserve_parts，model_id=9000/9100。547条复用已有ID，按精确官网章节提供来源及本组织库存，不自动认定适配。
+
+TJ目录：tj_models、tj_model、tj_parts，model_id=45-90/150。34条独立官网零件（新增3条），保留精确章节来源及本组织库存；45/90为官网合并标签，不推断适配。

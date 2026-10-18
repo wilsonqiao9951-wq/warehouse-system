@@ -225,3 +225,16 @@ GET /api/catalog/selfserve/models、/selfserve/models/{model_id}、/selfserve/mo
 所有接口需认证，返回所选机型/章节官网来源及当前组织库存；未知机型或跨机型章节404。既有授权导入保持幂等，不增加库存。不自动认定适配、创建现场验证或扩展Self-Serve维修指导/实际用料机型支持。
 
 catalog-bundle/selfserve提供校验后的运行数据，保留官网链接、访问时间及快照哈希。本机完整审核在data/verification/selfserve_20261017，schema0023，前端不变。
+
+
+## TJ 45 / TJ 90、TJ 150目录查询（2026-10-18）
+
+重新核验7个官网手册页面和34个零件页面。34条独立零件中新增3条（official-tj-{part_number}），复用31条既有ID。TJ 45 / TJ 90为33条/2章节，TJ 150为29条/3章节；28条共享官网引用不代表通用。45/90沿用官网合并标签，不认定二者相互适配。本轮身份未确认链接0条，审核字段无缺失，图片可用。
+
+GET /api/catalog/tj/models、/tj/models/{model_id}、/tj/models/{model_id}/parts，model_id严格为45-90、150。支持section_id、q、skip、limit（最大100）。Muse query资源tj_models、tj_model、tj_parts，后两者必填model_id：
+```json
+{"resource":"tj_parts","model_id":"45-90","limit":25}
+```
+请求需认证，仅返回所选机型/章节官网关系与本组织库存；未知机型或跨机型章节404。授权目录导入幂等且不增加库存。不自动认定适配、创建现场验证或扩展TJ维修指导/实际用料机型支持。
+
+catalog-bundle/tj校验恢复运行数据，保留官网链接、访问时间、快照哈希。本机完整审核在data/verification/tj_20261018；审核待接入列表是接入前快照，最终接入以tj_added_manifest.json及tj_graph.json为准。schema0023，前端不变。
