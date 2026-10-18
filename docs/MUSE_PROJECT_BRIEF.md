@@ -193,3 +193,8 @@ Multiplex统一入口：multiplex_models/model/parts/coverage；myCoke明确品�
 ### Lancer：仅 CokeParts／myCoke 收录范围
 
 新增 Muse 查询资源 `lancer_models`、`lancer_model`、`lancer_parts`。先查询 `lancer_models` 取得精确 `model_id`，后两项必须传入该 ID；零件支持 `section_id`、`q`、`skip`、`limit`（最多 100）。官网合并机型标签保留原样，只表示明确手册关联，不代表各机型相互通用。查询保留出处，只返回本组织库存；不自动产生现场验证或扩展维修建议。范围仅为 CokeParts／myCoke 中的 Lancer，不扩展品牌官网目录。
+
+
+### Cornelius：CokeParts／myCoke 范围
+
+新增cornelius_models、cornelius_model、cornelius_parts资源。先查模型列表取得精确model_id，后两项必填该ID；支持section_id、q、skip、limit（最多100）。38个官网分组保留原名，CI2000两个名称使用不同ID；Viper 2/3/4单独查询。厂家证据注明来自设备页或手册章节，只返回本组织库存，官网关联不代表通用。原有Viper 3专用查询和维修用料行为保持不变。

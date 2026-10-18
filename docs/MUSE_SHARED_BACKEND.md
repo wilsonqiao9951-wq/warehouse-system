@@ -343,3 +343,58 @@ GET /api/catalog/lancer/models、/lancer/models/{model_id}、/lancer/models/{mod
 认证后仅查询当前精确机型/章节的官网引用和本组织库存；未知机型与跨机型章节返回 404。官网合并机型标签不拆分为互相适配的声明；303 条零件在多个分组中被引用，仅表示官网多处关联。授权导入幂等且不增加库存。来源 URL、访问时间和页面哈希保留，字段空缺和身份未确认项不推测。本轮不扩展维修指导或实际用料机型支持。
 
 运行数据通过 catalog-bundle/lancer 校验恢复，原始审核保留于本机 data/verification/lancer_20261018。待接入清单为审核时快照，最终以 lancer_added_manifest.json、lancer_graph.json 为准。数据库 schema 0023，前端不变。
+
+## Cornelius：CokeParts／myCoke 范围（2026-10-18）
+
+交叉检查设备页与手册章节，以 manufacturer_name_display=MARMON / CORNELIUS 为品牌证据，核验243个手册URL、1453个零件链接。覆盖38个官方目录分组、247个章节、1449个独立零件：264条新增、1185条复用。32组有设备页品牌证据，6组依赖手册章节品牌证据（manufacturer_evidence_scope=manual_section）。仅覆盖当前CokeParts/myCoke索引，不扩展厂家官网产品。
+
+4个异常链接保留待审：3个官网原始链接含厂家文字并返回404，1条缺少Parts Catalog分类。62条缺图、19条缺厂家、1条缺厂家料号保持空缺；名称和描述无缺失。549个零件被多个分组引用，不代表跨机型适配。
+
+GET /api/catalog/cornelius/models、/cornelius/models/{model_id}、/cornelius/models/{model_id}/parts。Muse POST /api/muse/query资源为cornelius_models、cornelius_model、cornelius_parts，后两项必填model_id。零件支持section_id、q、skip、limit（最多100）。
+
+示例：{"resource":"cornelius_parts","model_id":"idc255-pro-fast-gate","limit":25}
+
+需认证，仅返回所选分组/章节和本组织库存；未知机型与跨机型章节404，导入幂等且不增加库存。CI2000 Plus与CI2000 (Plus)保留不同官网ID，不凭相似名称合并。Viper 2/3/4分开查询，原有Viper 3专用链路保持不变。本轮不扩展维修指导或实际用料的机型支持。
+
+公开catalog-bundle/cornelius含5份可校验运行数据，保留来源URL、时间与哈希；原始审核在本机data/verification/cornelius_20261018。审核脚本默认重新抓取，--resume仅复用一小时内哈希一致的页面及同地址图片检查。待接入清单为审核时快照，实际以cornelius_added_manifest.json及cornelius_graph.json为准。schema0023，无迁移，前端不变。
+
+| 官方分组 | model_id | 零件 | 章节 |
+|---|---|---:|---:|
+| 2 Flavor (3H.P.) - V4 | 2-flavor-3h-p-v4 | 86 | 16 |
+| 3 Valve Tower (Ceramic) | 3-valve-tower-ceramic | 6 | 2 |
+| Appex 6 | appex-6 | 21 | 6 |
+| Automated Beverage System (ABS 1.0) | automated-beverage-system-abs-1-0 | 309 | 20 |
+| Automated Beverage System (ABS 2.0) | automated-beverage-system-abs-2-0 | 216 | 31 |
+| CB2323 / CB1522 / CB3023 (IntelliCarb Units) Golden Corral | cb2323-cb1522-cb3023-golden-corral | 56 | 5 |
+| CI2000 Plus | ci2000-plus | 6 | 2 |
+| DB 150 | db-150 | 46 | 3 |
+| DB 200 / 275 Standard | db-200-275-standard | 48 | 4 |
+| DF 150 | df-150 | 118 | 7 |
+| DF 200/250 | df-200-250 | 164 | 8 |
+| ED 150 | ed-150 | 158 | 9 |
+| ED 200/250 | ed-200-250 | 200 | 10 |
+| ED 300 | ed-300 | 91 | 5 |
+| IDC255 Pro Fast Gate | idc255-pro-fast-gate | 101 | 11 |
+| TJ 150 | tj-150 | 29 | 3 |
+| TJ 45 / TJ 90 | tj-45-tj-90 | 33 | 2 |
+| Viper 2 Flavor | viper-2-flavor | 109 | 8 |
+| Viper 3 Flavor | viper-3-flavor | 143 | 8 |
+| Viper 4 Flavor | viper-4-flavor | 107 | 8 |
+| Viper Carts | viper-carts | 3 | 1 |
+| Backroom Package (McDonald's) | backroom-package-mcdonald-s | 48 | 9 |
+| CB1522 18in SABRE TOWER | cb1522-18in-sabre-tower | 25 | 2 |
+| CB1522D | cb1522d | 25 | 2 |
+| CB2323 SABRE 23in TOWER W/CDD | cb2323-sabre-23in-tower-w-cdd | 34 | 2 |
+| CB2323-8vlv (Wendy's) | cb2323-8vlv-wendy-s | 44 | 4 |
+| CB2323L SELF CLOSING LID | cb2323l-self-closing-lid | 20 | 2 |
+| CB2323L SLIDING LID | cb2323l-sliding-lid | 36 | 2 |
+| CC2323 TOWER W/ SLIDING LID | cc2323-tower-w-sliding-lid | 27 | 2 |
+| CC2323L SELF CLOSING LID | cc2323l-self-closing-lid | 19 | 2 |
+| CI2000 (Plus) | ci2000-plus-parenthesized | 6 | 2 |
+| DB 275 - BCP Pneumatic Ice Gate | db-275-bcp-pneumatic-ice-gate | 27 | 5 |
+| Energize 6 | energize-6 | 29 | 8 |
+| Leopard | leopard | 6 | 3 |
+| Prism | prism | 51 | 1 |
+| Quest 2000 | quest-2000 | 51 | 16 |
+| Quest 4000 | quest-4000 | 63 | 15 |
+| SFV - 1 | sfv-1 | 60 | 1 |

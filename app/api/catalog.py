@@ -504,3 +504,26 @@ def lancer_parts(model_id: str,section_id: str | None = None,q: str = Query('',m
     if not model:raise HTTPException(404,'Lancer model not found')
     if section_id is not None and not any(s['id']==section_id for s in model['sections']):raise HTTPException(404,'Section does not belong to this Lancer model')
     return parts(db,actor.organization_id,model_id,section_id,q,skip,limit)
+
+
+@catalog_router.get('/cornelius/models')
+def cornelius_models(actor: Actor = Depends(get_current_actor)):
+    from app.services.cornelius_chain import graph
+    return {'items':[{'model_id':m['model_id'],'official_model':m['official_model'],'official_part_count':m['official_part_count'],'section_count':len(m['sections'])} for m in graph()['models'].values()],'policy':graph()['policy']}
+
+
+@catalog_router.get('/cornelius/models/{model_id}')
+def cornelius_model(model_id: str,actor: Actor = Depends(get_current_actor)):
+    from app.services.cornelius_chain import graph
+    model=graph()['models'].get(model_id)
+    if not model:raise HTTPException(404,'Cornelius model not found')
+    return {**model,'policy':graph()['policy']}
+
+
+@catalog_router.get('/cornelius/models/{model_id}/parts')
+def cornelius_parts(model_id: str,section_id: str | None = None,q: str = Query('',max_length=200),skip: int = Query(0,ge=0),limit: int = Query(25,ge=1,le=100),db: Session = Depends(get_db),actor: Actor = Depends(get_current_actor)):
+    from app.services.cornelius_chain import graph,parts
+    model=graph()['models'].get(model_id)
+    if not model:raise HTTPException(404,'Cornelius model not found')
+    if section_id is not None and not any(s['id']==section_id for s in model['sections']):raise HTTPException(404,'Section does not belong to this Cornelius model')
+    return parts(db,actor.organization_id,model_id,section_id,q,skip,limit)
