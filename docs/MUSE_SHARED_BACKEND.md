@@ -251,3 +251,16 @@ GET /api/catalog/wbk/models、/wbk/models/{model_id}、/wbk/models/{model_id}/pa
 请求需认证，仅返回当前机型/章节官网关系与本组织库存；未知机型及跨机型章节404。授权目录导入幂等且不增加库存。不自动认定适配、创建现场验证或扩展WBK维修指导/实际用料机型支持。
 
 catalog-bundle/wbk校验恢复运行数据，保留官网链接、访问时间、快照哈希。本机完整审核在data/verification/wbk_20261018，审核待接入列表为接入前快照，实际以wbk_added_manifest.json和wbk_graph.json为准。schema0023，前端不变。
+
+
+## 37T／37F／37K目录查询（2026-10-18）
+
+重新核验23个官网手册页和119个零件页。119条独立零件中新增25条（official-series37-{part_number}），复用94条既有ID。37T为83条/6章节，37F为64条/7章节，37K为80条/5章节；72条有多机型官网引用，不代表通用。缺图1条、缺厂家6条保持空缺，身份未确认链接0条。
+
+GET /api/catalog/series37/models、/series37/models/{model_id}、/series37/models/{model_id}/parts；model_id严格为37t、37f、37k。支持section_id、q、skip、limit（最大100）。Muse query资源series37_models、series37_model、series37_parts，后两者必填model_id：
+```json
+{"resource":"series37_parts","model_id":"37t","limit":25}
+```
+接口需认证，只返回所选机型/章节官网来源及本组织库存。未知机型与跨机型章节404。授权导入幂等、不增加库存。不自动认定适配或创建现场验证；本轮不扩展维修指导与实际用料机型支持，不包含MCD 37等其他机型。
+
+catalog-bundle/series37提供校验恢复数据，保留官网链接、访问时间、快照哈希。本机完整审核在data/verification/series37_20261018；审核待接入清单是接入前快照，实际以series37_added_manifest.json与series37_graph.json为准。schema0023，前端不变。

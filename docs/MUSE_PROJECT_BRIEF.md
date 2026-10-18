@@ -184,3 +184,5 @@ Self-Serve目录：selfserve_models、selfserve_model、selfserve_parts，model_
 TJ目录：tj_models、tj_model、tj_parts，model_id=45-90/150。34条独立官网零件（新增3条），保留精确章节来源及本组织库存；45/90为官网合并标签，不推断适配。
 
 WBK目录：wbk_models、wbk_model、wbk_parts，model_id=8/9/10。39条独立官网零件（新增19条），保留精确章节来源和本组织库存；不自动认定跨机型适配。
+
+37T/F/K目录：series37_models、series37_model、series37_parts，model_id=37t/37f/37k。119条独立官网零件（新增25条），保留精确章节及本组织库存，不推断适配，不包含MCD 37。
