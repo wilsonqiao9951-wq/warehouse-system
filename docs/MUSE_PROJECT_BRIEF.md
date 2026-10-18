@@ -186,3 +186,5 @@ TJ目录：tj_models、tj_model、tj_parts，model_id=45-90/150。34条独立官
 WBK目录：wbk_models、wbk_model、wbk_parts，model_id=8/9/10。39条独立官网零件（新增19条），保留精确章节来源和本组织库存；不自动认定跨机型适配。
 
 37T/F/K目录：series37_models、series37_model、series37_parts，model_id=37t/37f/37k。119条独立官网零件（新增25条），保留精确章节及本组织库存，不推断适配，不包含MCD 37。
+
+Multiplex统一入口：multiplex_models/model/parts/coverage；myCoke明确品牌的23机型组、376条独立零件（新增130条）。详情含制造商证据；coverage披露品牌官网其他系列待审核，不声称全球所有系列已完成。

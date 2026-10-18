@@ -264,3 +264,44 @@ GET /api/catalog/series37/models、/series37/models/{model_id}、/series37/model
 接口需认证，只返回所选机型/章节官网来源及本组织库存。未知机型与跨机型章节404。授权导入幂等、不增加库存。不自动认定适配或创建现场验证；本轮不扩展维修指导与实际用料机型支持，不包含MCD 37等其他机型。
 
 catalog-bundle/series37提供校验恢复数据，保留官网链接、访问时间、快照哈希。本机完整审核在data/verification/series37_20261018；审核待接入清单是接入前快照，实际以series37_added_manifest.json与series37_graph.json为准。schema0023，前端不变。
+
+
+## Multiplex全系列入口：myCoke可确认范围（2026-10-18）
+
+按官网设备页manufacturer_name_display=MULTIPLEX筛选，并在接入时重新检查23个设备页的品牌、身份及快照哈希。共核验107个手册页面、376个零件页面，130条新增、246条复用既有主目录ID。包括本轮37T/F/K已接入的记录，不重复计为新增。21条缺图、14条缺厂家信息保持空缺，零件身份未确认链接0条。跨系列共享227条，仅表示有多个明确官网引用。
+
+| 官网机型/机型组 | model_id | 零件数 | 章节数 |
+|---|---|---:|---:|
+| 138 EDA2 | 138-eda2 | 17 | 1 |
+| 146F | 146f | 8 | 1 |
+| 148 EDP | 148-edp | 9 | 1 |
+| 37F | 37f | 64 | 7 |
+| 37K | 37k | 80 | 5 |
+| 37T | 37t | 83 | 6 |
+| 44G Series | 44g-series | 90 | 8 |
+| 44K04 / 44KX04 | 44k04-44kx04 | 53 | 3 |
+| 44K22 / 44KX22 | 44k22-44kx22 | 48 | 2 |
+| 44MR04 / 44MX04 | 44mr04-44mx04 | 77 | 5 |
+| 50 Series Control Panel | 50-series-control-panel | 18 | 1 |
+| 50ERC / 44ERC | 50erc-44erc | 89 | 6 |
+| 50G Series | 50g-series | 103 | 8 |
+| 50MA04 / 50MAX04 / 50MR04 | 50ma04-50max04-50mr04 | 60 | 3 |
+| 72 | 72 | 51 | 5 |
+| APH3 / APKV3 | aph3-apkv3 | 15 | 1 |
+| MCD 37 | mcd-37 | 70 | 6 |
+| Old Style | old-style | 11 | 1 |
+| S-250M | s-250m | 36 | 5 |
+| SC180 | sc180 | 10 | 2 |
+| WBK10 | wbk10 | 33 | 3 |
+| WBK8 | wbk8 | 13 | 1 |
+| WBK9 | wbk9 | 11 | 1 |
+
+GET /api/catalog/multiplex/models、/multiplex/models/{model_id}、/multiplex/models/{model_id}/parts。零件查询支持section_id、q、skip、limit（最大100）。Muse query资源multiplex_models、multiplex_model、multiplex_parts；后两者必填表中model_id。设备详情包含manufacturer、category和manufacturer_evidence。
+```json
+{"resource":"multiplex_parts","model_id":"44g-series","limit":25}
+```
+GET /api/catalog/multiplex/coverage或Muse resource=multiplex_coverage查询收录边界、已接入23组及品牌官网待审核资料。myCoke完整收录范围与全球品牌全产品范围分别标识，worldwide_all_series_complete=false。品牌官网Fresh Blender、BIC等资料仅发现文件入口，零件表与机型关系尚待审核，不能把它们计为已接入。保留所有发现的来源及抓取异常，不从文件标题推断适配。
+
+请求需认证，只返回当前精确机型/章节的关联和本组织库存；未知机型、跨机型章节404。合并标签不拆成已认证互相通用的独立机型，Old Style仍为官网原始标识。授权导入幂等、不增加库存。不会把其他品牌机型（如Viper、TJ、ED）混入；零件可来自供应商，品牌筛选依据设备页而非每个零件的生产厂家。本轮不扩展维修指导或实际用料机型支持。
+
+公开catalog-bundle/multiplex提供数据与覆盖清单，保留访问时间、官网链接与快照哈希。原始myCoke审核在data/verification/multiplex_20261018，品牌官网页面在multiplex_brand_20261018。审核待接入列表是接入前快照，最终以multiplex_added_manifest.json及multiplex_graph.json为准。schema0023，前端不变。

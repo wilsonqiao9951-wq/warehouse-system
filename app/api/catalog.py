@@ -451,3 +451,33 @@ def series37_parts(model_id: str,section_id: str | None = None,q: str = Query(''
     if not model:raise HTTPException(404,'37T/F/K model not found')
     if section_id is not None and not any(s['id']==section_id for s in model['sections']):raise HTTPException(404,'Section does not belong to this 37T/F/K model')
     return parts(db,actor.organization_id,model_id,section_id,q,skip,limit)
+
+
+@catalog_router.get('/multiplex/models')
+def multiplex_models(actor: Actor = Depends(get_current_actor)):
+    from app.services.multiplex_chain import graph
+    return {'items':[{'model_id':m['model_id'],'official_model':m['official_model'],'official_part_count':m['official_part_count'],'section_count':len(m['sections'])} for m in graph()['models'].values()],'policy':graph()['policy']}
+
+
+@catalog_router.get('/multiplex/models/{model_id}')
+def multiplex_model(model_id: str,actor: Actor = Depends(get_current_actor)):
+    from app.services.multiplex_chain import graph
+    model=graph()['models'].get(model_id)
+    if not model:raise HTTPException(404,'Multiplex model not found')
+    return {**model,'policy':graph()['policy']}
+
+
+@catalog_router.get('/multiplex/models/{model_id}/parts')
+def multiplex_parts(model_id: str,section_id: str | None = None,q: str = Query('',max_length=200),skip: int = Query(0,ge=0),limit: int = Query(25,ge=1,le=100),db: Session = Depends(get_db),actor: Actor = Depends(get_current_actor)):
+    from app.services.multiplex_chain import graph,parts
+    model=graph()['models'].get(model_id)
+    if not model:raise HTTPException(404,'Multiplex model not found')
+    if section_id is not None and not any(s['id']==section_id for s in model['sections']):raise HTTPException(404,'Section does not belong to this Multiplex model')
+    return parts(db,actor.organization_id,model_id,section_id,q,skip,limit)
+
+
+@catalog_router.get('/multiplex/coverage')
+def multiplex_coverage(actor: Actor = Depends(get_current_actor)):
+    import json
+    from app.services.catalog import DATA_ROOT
+    return json.loads((DATA_ROOT/'data/organized/multiplex_coverage.json').read_text())

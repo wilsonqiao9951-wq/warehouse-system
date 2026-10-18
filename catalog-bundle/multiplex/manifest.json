@@ -1,0 +1,43 @@
+{
+  "archive_sha256": "1244c558ab09e19a958dc6b3e15032827977cd05c107bb928144c1fa437d0d4b",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "42c056b53e9bf6688ddb195b5121352e64500fec66bdabdf42959bf7ec2162e6"
+    },
+    {
+      "name": "catalog-001.b64",
+      "sha256": "54e7929973373c42d2a764d419efce234b05e108f0b30e5253434d4ce4a8118f"
+    },
+    {
+      "name": "catalog-002.b64",
+      "sha256": "53c8c03cc7602b2ba00e790a5037b2ab0b7ddad44f3593ff997a5e9f86e1cfc7"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/multiplex_added_parts.json",
+      "sha256": "58903ae386ec72bdd6eb32d516b3728fe0bff8158b3c947b0e64bb7448a48a43"
+    },
+    {
+      "path": "data/organized/multiplex_added_manifest.json",
+      "sha256": "ec76cc8ee9d788d8c3f42f16e7f3618771b902de4095580dab414f1180d977a6"
+    },
+    {
+      "path": "data/organized/multiplex_graph.json",
+      "sha256": "140ec72d1c6d74fd2bdf4f7746d6fc6090967bfc0a6f39da92fe94a9ec1acb8e"
+    },
+    {
+      "path": "data/organized/multiplex_parts_catalog.json",
+      "sha256": "9fbaf093db6908c3948a74d3cf7867b12f0ddb6d70d9b6539fc6e4017171cbc2"
+    },
+    {
+      "path": "data/verification/multiplex_new_official_parts.json",
+      "sha256": "e35b237b72dfb4ac7970d5eeb3f02b6fb2c2a9237dee797b5314d60fa566dec5"
+    },
+    {
+      "path": "data/organized/multiplex_coverage.json",
+      "sha256": "ffe80ff5fb731f212e89cfb40e9eb05ed53c193f8a0f4cc987410d517263cfd6"
+    }
+  ]
+}
