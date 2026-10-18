@@ -1,5 +1,7 @@
 # 给每位技师 Muse 的项目说明
 
+WhatsApp 私有业务接入已准备，默认关闭：请先阅读 [手机号绑定、签名调用与反馈确认 API](WHATSAPP_ADAPTER_API.md) 及 [验证结果](WHATSAPP_VALIDATION.md)。真实通道尚未连接。
+
 首次接入请先阅读 [可直接转发给 Muse 的接入说明](MUSE_START_HERE.md)，再查阅本文的详细证据与历史功能约定。
 
 ## Muse 接入与合作协议 1.5

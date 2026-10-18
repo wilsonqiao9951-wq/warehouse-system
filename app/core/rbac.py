@@ -215,8 +215,10 @@ def require_work_order_scope(db: Session, actor: Actor, work_order_id: int) -> N
 
 
 def require_bound_device(actor: Actor) -> None:
+    # whatsapp_signed is constructed only by the signature-verified channel adapter.
+    # HTTP identity headers never create this authentication method.
     if (
-        actor.auth_method != "bearer"
+        actor.auth_method not in {"bearer", "whatsapp_signed"}
         or not actor.user_id
         or not actor.device_verified
         or not actor.device_record_id
