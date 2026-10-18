@@ -411,3 +411,22 @@ GET /api/catalog/mccann/models、/mccann/models/{model_id}、/mccann/models/{mod
 请求需认证，仅返回所选机型/章节与当前组织库存；未知机型或跨机型章节404。导入幂等且不增加库存，不自动产生现场验证，不扩展维修指导或实际用料的机型支持。
 
 公开catalog-bundle/mccann提供5份可校验运行数据，来源URL、访问时间、快照哈希保留。本机审核在data/verification/mccann_20261018；待接入列表为审核时快照，最终以mccann_added_manifest.json和mccann_graph.json为准。schema0023，无迁移，前端不变。
+
+
+## Wunder-Bar Variety Tea Tower（2026-10-18）
+
+核验CokeParts/myCoke的16个手册URL、129个零件URL；设备页厂家为WUNDER-BAR。确认129个独立零件：99条新增、30条复用，覆盖3个官方分组、13个章节。共同引用70条仅表示官网关联，不认定通用。身份待确认链接0条；14条缺图保持空缺，其余已检查字段齐全。未扩展品牌官网目录。
+
+| 官方分组 | model_id | 零件 | 章节 |
+|---|---|---:|---:|
+| (Crew) Space Saver Variety Tea Tower | crew-space-saver-variety-tea-tower | 70 | 5 |
+| (Crew) Variety Tea Tower (Space Saver) | crew-variety-tea-tower-space-saver | 70 | 5 |
+| (VTT) Variety Tea Tower | vtt-variety-tea-tower | 115 | 3 |
+
+GET /api/catalog/wunderbar/models、/wunderbar/models/{model_id}、/wunderbar/models/{model_id}/parts。Muse资源wunderbar_models、wunderbar_model、wunderbar_parts，后两项必填精确model_id。零件支持section_id、q、skip、limit（最大100）。
+
+示例：{"resource":"wunderbar_parts","model_id":"vtt-variety-tea-tower","limit":25}
+
+请求需认证，仅返回所选机型/章节与当前组织库存；未知机型或跨机型章节404。两个Space Saver标签保持官网各自记录，不自行合并。导入幂等且不增加库存，不自动产生现场验证，不扩展维修指导或实际用料的机型支持。
+
+公开catalog-bundle/wunderbar提供5份可校验运行数据，保留官网URL、访问时间及快照哈希。本机审核在data/verification/wunderbar_20261018；待接入列表为审核时快照，最终以wunderbar_added_manifest.json和wunderbar_graph.json为准。schema0023，无迁移，前端不变。

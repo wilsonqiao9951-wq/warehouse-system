@@ -203,3 +203,8 @@ Multiplex统一入口：multiplex_models/model/parts/coverage；myCoke明确品�
 ### McCann：CokeParts 2.5／20 GALLON
 
 Muse资源 mccann_models、mccann_model、mccann_parts；model_id 为 2-5-gallon、20-gallon，后两项必须提供机型。零件支持 section_id、q、skip、limit（最多100）。仅返回该机型官网章节来源和本组织库存，官网共同引用不代表跨机型通用。
+
+
+### Wunder-Bar Variety Tea Tower：CokeParts 范围
+
+Muse资源 wunderbar_models、wunderbar_model、wunderbar_parts。先查列表取得精确model_id，后两项必填该ID；零件支持section_id、q、skip、limit（最多100）。3个官方分组保留原名，两个Space Saver标签不凭相似名称合并。只返回所选机型官网章节来源和本组织库存，不自动认定跨机型适配。

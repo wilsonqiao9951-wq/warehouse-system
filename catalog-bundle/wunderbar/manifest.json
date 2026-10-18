@@ -1,0 +1,31 @@
+{
+  "archive_sha256": "cb9f54206cefa8a2be3a6fac9dd88b5005de08c4244dd2074ca802f7a926721b",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "97df3c32ebe11fe4c0de22e87099623e90eb18a5162f6c60225c018854868678"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/wunderbar_added_parts.json",
+      "sha256": "2bf32bc5044b3f0d24a0a6b2a1267742381a05b885ccb179d1e97529622a6d5a"
+    },
+    {
+      "path": "data/organized/wunderbar_added_manifest.json",
+      "sha256": "ab9e517002908eb8a312845d4b09e2d84373e1d7b99d67ed054d3ca8ef4aea10"
+    },
+    {
+      "path": "data/organized/wunderbar_graph.json",
+      "sha256": "30d503eb37ac433de6252164258b1a0941a5ef6d9d3d10fbccf064480796e6f4"
+    },
+    {
+      "path": "data/organized/wunderbar_parts_catalog.json",
+      "sha256": "4c797bb8b22815010ec742120f2b02683d872fbf3b02b2ac34c8df48bf286c22"
+    },
+    {
+      "path": "data/verification/wunderbar_new_official_parts.json",
+      "sha256": "eb2871ee8804172c7014644d5075a740cab5eea42f5c4ba304bc3a01d9285d78"
+    }
+  ]
+}
