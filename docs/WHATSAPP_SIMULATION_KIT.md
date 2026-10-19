@@ -8,6 +8,8 @@
 - [API协议](WHATSAPP_ADAPTER_API.md)
 - [OpenAPI](WHATSAPP_ADAPTER_OPENAPI.json)
 
+> 新增：[Meta 转换层模拟接入与验收](META_WHATSAPP_BRIDGE.md)，包含平台验签、持久队列、模拟自动回复及发送去重。真实通道仍关闭。
+
 ## 运行方式与测试身份
 
 本包通过FastAPI TestClient在进程内执行HTTP请求，没有对外监听端口，也不调用Meta/Muse的真实API。`test_whatsapp_adapter.py`的setup创建两个组织、组织A管理员/技师、组织B技师以及各组织一张合成工单。每次运行自动创建和清理测试数据库，绑定/草稿状态也使用临时目录。
