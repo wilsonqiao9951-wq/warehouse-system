@@ -78,7 +78,7 @@ def dispatch(meta, text, **kwargs):
 def test_disabled_and_verification_challenge(meta):
     with TestClient(create_app()) as disabled:
         assert disabled.post('/webhooks/meta/whatsapp', json={}).status_code == 503
-        assert disabled.get('/health').json()['live_transport_implemented'] is False
+        assert disabled.get('/health').json()['live_transport_enabled'] is False
     params = {'hub.mode': 'subscribe', 'hub.verify_token': VERIFY_TOKEN, 'hub.challenge': '123456'}
     response = meta[0].get('/webhooks/meta/whatsapp', params=params)
     assert response.status_code == 200 and response.text == '123456'
@@ -152,7 +152,7 @@ def test_batch_atomicity_status_events_and_media(meta):
     status = envelope('unused')
     value = status['entry'][0]['changes'][0]['value']
     value.pop('messages')
-    value['statuses'] = [{'id': 'wamid.status', 'status': 'delivered'}]
+    value['statuses'] = [{'id': 'wamid.status', 'status': 'delivered', 'recipient_id': PHONE, 'timestamp': str(int(time.time()))}]
     assert post(meta, status).json()['text_messages'] == 0
     p = envelope('x')
     p['entry'][0]['changes'][0]['value']['messages'][0]['type'] = 'image'

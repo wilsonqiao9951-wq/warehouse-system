@@ -1,4 +1,4 @@
-"""Offline-ready Meta bridge. No Graph API client or production startup is provided."""
+"""Meta bridge preparation. No production startup is provided."""
 import hashlib
 import hmac
 import json
@@ -11,27 +11,16 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
+from app.integrations.meta_delivery import DeliveryLifecycle, SCHEMA, SendRejected, extract_statuses
 
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
-class Bridge:
-    """Durable inbox/outbox; dependencies are injected, never discovered from secrets."""
-
-    def __init__(self, *, state_path, adapter, sender, channel_secret,
-                 provider_id='simulation', recipient_id='simulation-line'):
-        if len(channel_secret) < 32:
-            raise ValueError('Dedicated channel secret must have at least 32 characters')
+class StateStore:
+    def __init__(self, state_path):
         self.path = Path(state_path)
-        self.adapter = adapter  # HTTP client interface, tests use TestClient
-        self.sender = sender  # send(payload, key) -> provider message ID
-        self.secret = channel_secret
-        self.provider = provider_id
-        self.recipient = recipient_id
-        with self.transaction():
-            pass
 
     @contextmanager
     def transaction(self):
@@ -52,8 +41,14 @@ class Bridge:
           sender TEXT NOT NULL, phrase TEXT NOT NULL, draft TEXT NOT NULL,
           PRIMARY KEY(sender,phrase));
         ''')
+        db.executescript(SCHEMA)
         db.execute('BEGIN IMMEDIATE')
         try:
+            # Upgrade pre-ledger rows without discarding accepted/uncertain history.
+            db.execute('''INSERT OR IGNORE INTO delivery_attempts
+                SELECT 'legacy-' || o.id, o.id, o.state, o.provider_message_id, 0, NULL
+                FROM outbox o WHERE o.state != 'pending'
+                AND NOT EXISTS (SELECT 1 FROM delivery_attempts a WHERE a.outbox_id=o.id)''')
             yield db
             db.commit()
         except BaseException:
@@ -62,7 +57,24 @@ class Bridge:
         finally:
             db.close()
 
-    def accept(self, messages):
+
+class Bridge(StateStore, DeliveryLifecycle):
+    """Durable inbox/outbox; dependencies are injected, never discovered from secrets."""
+
+    def __init__(self, *, state_path, adapter, sender, channel_secret,
+                 provider_id='simulation', recipient_id='simulation-line'):
+        if len(channel_secret) < 32:
+            raise ValueError('Dedicated channel secret must have at least 32 characters')
+        self.path = Path(state_path)
+        self.adapter = adapter  # HTTP client interface, tests use TestClient
+        self.sender = sender  # send(payload, key) -> provider message ID
+        self.secret = channel_secret
+        self.provider = provider_id
+        self.recipient = recipient_id
+        with self.transaction():
+            pass
+
+    def accept(self, messages, statuses=()):
         # A whole webhook batch is persisted atomically before HTTP 200.
         with self.transaction() as db:
             for message in messages:
@@ -73,6 +85,8 @@ class Bridge:
                     raise HTTPException(409, 'Message ID reused with different content')
                 db.execute('INSERT OR IGNORE INTO inbox(id,fingerprint,payload) VALUES(?,?,?)',
                            (message['id'], fingerprint, encoded))
+
+            self.accept_statuses(db, statuses)
 
     def command(self, message, db):
         text = message['text']
@@ -179,20 +193,20 @@ class Bridge:
             if check.status_code != 200:
                 db.execute("UPDATE outbox SET state='cancelled' WHERE id=?", (row['id'],))
                 return True
-            db.execute("UPDATE outbox SET state='sending' WHERE id=?", (row['id'],))
+            attempt_id = self.begin_attempt(db, row)
         # Commit sending BEFORE external I/O. An interrupted/ambiguous send is never auto-retried.
         # This deliberately does not promise exactly-once delivery over an external API.
         try:
-            provider_id = self.sender.send(json.loads(row['payload']), key=row['id'])
+            provider_id = self.sender.send(json.loads(row['payload']), key=attempt_id)
             if not isinstance(provider_id, str) or not provider_id:
                 raise ValueError('Missing send receipt')
-        except Exception:
-            with self.transaction() as db:
-                db.execute("UPDATE outbox SET state='uncertain' WHERE id=?", (row['id'],))
+        except SendRejected as exc:
+            self.finish_attempt(attempt_id, failure='failed', error=str(exc))
             return True
-        with self.transaction() as db:
-            db.execute("UPDATE outbox SET state='accepted',provider_message_id=? WHERE id=?",
-                       (provider_id, row['id']))
+        except Exception:
+            self.finish_attempt(attempt_id, failure='uncertain', error='transport_or_receipt_unknown')
+            return True
+        self.finish_attempt(attempt_id, provider_id=provider_id)
         return True
 
 
@@ -245,7 +259,8 @@ def create_app(*, enabled=False, bridge=None, app_secret='', verify_token='',
 
     @app.get('/health')
     def health():
-        return {'enabled': enabled, 'live_transport_implemented': False}
+        return {'enabled': enabled, 'live_transport_implemented': True,
+                'live_transport_enabled': bool(bridge and getattr(bridge.sender, 'enabled', False))}
 
     @app.get('/webhooks/meta/whatsapp', response_class=PlainTextResponse)
     def verify(request: Request):
@@ -268,10 +283,12 @@ def create_app(*, enabled=False, bridge=None, app_secret='', verify_token='',
         if not hmac.compare_digest(request.headers.get('x-hub-signature-256', '').encode(), expected.encode()):
             raise HTTPException(401, 'Invalid platform signature')
         try:
-            messages = extract_messages(json.loads(raw), waba_id=waba_id, phone_number_id=phone_number_id)
+            payload = json.loads(raw)
+            messages = extract_messages(payload, waba_id=waba_id, phone_number_id=phone_number_id)
+            statuses = extract_statuses(payload)
         except (ValueError, KeyError, TypeError, AttributeError, OverflowError):
             raise HTTPException(422, 'Invalid platform envelope')
-        bridge.accept(messages)
-        return {'accepted': True, 'text_messages': len(messages)}
+        bridge.accept(messages, statuses)
+        return {'accepted': True, 'text_messages': len(messages), 'status_events': len(statuses)}
 
     return app

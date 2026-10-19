@@ -1,6 +1,6 @@
 # Meta WhatsApp 转换层：模拟接入与验收
 
-状态：仅完成代码准备和隔离模拟；真实通道关闭，无 Graph API 网络发送实现、无部署、无付费服务。前端和原有业务接口不变。
+状态：代码准备和隔离模拟；真实通道关闭，无部署、无付费服务。前端和原有业务接口不变。新增 Graph API 发送器、状态对账和本机人工恢复，见 [发送与对账说明](META_WHATSAPP_DELIVERY.md)。
 
 ## 流程与职责
 
@@ -20,7 +20,7 @@ Meta 原始 webhook → 平台 HMAC 验签 → 校验 WABA / phone_number_id →
 
 Meta app secret、订阅 verify token、内部适配器 channel secret 是三种独立配置，不可复用测试常量。内部协议仍是 `X-Channel-Timestamp` 加 `X-Channel-Signature`，签名输入为 `timestamp + '.' + body`。桥接双方 provider_id / recipient_id 必须一致。
 
-平台请求最大 256 KiB；正文最多 5000 字；整个批次先校验再原子持久化。错误签名 401；错误 WABA/业务号码 403；无效结构 422；超限 413；同一消息 ID 更换内容 409；关闭时 503。状态通知和不支持的媒体类型返回 200，但不会执行业务或回复。
+平台请求最大 256 KiB；正文最多 5000 字；整个批次先校验再原子持久化。错误签名 401；错误 WABA/业务号码 403；无效结构 422；超限 413；同一消息 ID 更换内容 409；关闭时 503。状态通知进行独立送达对账；不支持的媒体类型返回 200，但不会执行业务或回复。
 
 成功 webhook 返回 `{"accepted":true,"text_messages":1}` 仅代表持久接收。业务 403/404/422 等结果保存在 inbox.http_status，不会改变已确认的 webhook HTTP 200，也不会把私有错误详情发送给未授权号码。
 
@@ -52,10 +52,10 @@ SQLite 状态文件权限 0600，父目录新建时为 0700；文件包含手机
 - 业务调用后桥接崩溃：inbox 事务回滚，重试仍使用相同 event_id，由原适配器保证写入幂等。
 - outbox 每个入站消息 ID 最多一条。发送前重新查询 identity，沿用固定事件 ID 检查绑定代次；撤销、停用或重新绑定后取消旧回复。
 - 发送前持久写入 sending；发送器返回消息 ID 后记录 accepted。accepted 只代表发送器受理，不代表 delivered/read。
-- 超时等不确定结果记录 uncertain；进程在发送中崩溃留下 sending。两种状态都不自动重发，须未来运维核对。这优先避免重复，但可能漏发；不能宣称外部网络发送 exactly-once。
-- FakeSender 接收 `send(payload, key=入站消息ID)`；key 是本地关联标识，不宣称 Meta Graph API 支持该幂等键。
+- 超时等不确定结果记录 uncertain；进程在发送中崩溃留下 sending。两种状态都不自动重发，可使用新增的本机人工恢复工具核对。这优先避免重复，但可能漏发；不能宣称外部网络发送 exactly-once。
+- 发送器接收 `send(payload, key=attempt_id)`；key 是本地关联标识，不宣称 Meta Graph API 支持该幂等键。
 - 新的入站消息 ID 确认同一草稿：反馈仍只有一份，但可回复该新消息。这与重复平台投递不同。
-- 本版状态回调仅确认接收，不更新 delivered/read，也不处理发送对账。真实发送器、状态对账和人工恢复工具属于上线前后续工作。
+- 新增版本已处理 sent/delivered/read/failed 和人工恢复；本节旧发送器协议的 key 现为每次尝试的随机 attempt ID。详细状态和人工操作限制以 [发送与对账说明](META_WHATSAPP_DELIVERY.md) 为准。
 
 ## Muse 独立复现
 
@@ -68,7 +68,7 @@ python -m pip install -r requirements.txt
 export DATABASE_URL="sqlite:///./simulation-bootstrap.db"
 export WHATSAPP_ADAPTER_ENABLED=false
 python -m scripts.install_catalog_bundle
-python -m pytest tests/test_meta_whatsapp.py tests/test_whatsapp_adapter.py tests/test_whatsapp_simulation_kit.py -v --disable-warnings --tb=short --junitxml=meta-simulation-results.xml
+python -m pytest tests/test_meta_delivery.py tests/test_meta_whatsapp.py tests/test_whatsapp_adapter.py tests/test_whatsapp_simulation_kit.py -v --disable-warnings --tb=short --junitxml=meta-simulation-results.xml
 ```
 
 执行器通过依赖注入启用临时测试应用，不启动监听端口；关闭的生产适配器不受影响。XML 在执行者本地生成，仅包含合成测试结果，不要上传实际生产日志。
@@ -77,4 +77,4 @@ python -m pytest tests/test_meta_whatsapp.py tests/test_whatsapp_adapter.py test
 
 ## 真实接入前仍缺什么
 
-需要另外准备 Meta 业务账号和号码、所需授权、独立秘密配置、受控 HTTPS 入口、常驻 worker、有限超时/重试/监控、Graph API 发送实现、状态回调对账及运维恢复。当前没有生产启动脚本，设置环境变量不能直接开启真实发送。后续明确启用时再核实平台费用和部署费用，本次不注册、不购买、不启用。
+需要另外准备 Meta 业务账号和号码、所需授权、独立秘密配置、受控 HTTPS 入口、常驻 worker、监控、容量/保留策略及官方沙箱验收；Graph API 发送、状态对账和运维恢复代码已准备并通过模拟。当前没有生产启动脚本，设置环境变量不能直接开启真实发送。后续明确启用时再核实平台费用和部署费用，本次不注册、不购买、不启用。
