@@ -1,5 +1,6 @@
 # Meta WhatsApp 转换层：模拟接入与验收
 
+> 新增：[worker、监控、备份与保留策略](META_WHATSAPP_WORKER.md)。仅提供模拟 CLI 启动，真实通道仍关闭。
 状态：代码准备和隔离模拟；真实通道关闭，无部署、无付费服务。前端和原有业务接口不变。新增 Graph API 发送器、状态对账和本机人工恢复，见 [发送与对账说明](META_WHATSAPP_DELIVERY.md)。
 
 ## 流程与职责

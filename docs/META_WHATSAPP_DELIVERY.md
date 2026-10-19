@@ -1,5 +1,6 @@
 # Graph API 发送、状态对账与人工恢复（模拟验收）
 
+> 新增：[worker、监控、备份与保留策略](META_WHATSAPP_WORKER.md)。仅提供模拟 CLI 启动，真实通道仍关闭。
 本阶段已准备发送器代码和运维工具，真实通道仍关闭；没有创建账号、购买服务、启动 worker 或发出 Meta 网络请求。测试使用 httpx.MockTransport/FakeSender、隔离数据库和合成号码。不能把测试通过称为真实手机收发成功。
 
 ## 发送边界

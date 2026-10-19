@@ -162,7 +162,8 @@ class DeliveryLifecycle:
     def recover(self, oid, *, action, operator, reason, confirmation, accept_duplicate_risk=False):
         if action not in {'cancel', 'retry'} or not operator.strip() or len(reason.strip()) < 10:
             raise ValueError('Action, operator and meaningful evidence/reason required')
-        with self.transaction() as db:
+        from app.integrations.meta_runtime import WorkerLock
+        with WorkerLock(self.path), self.transaction() as db:
             snapshot = self.recovery_snapshot(db, oid)
             if confirmation != snapshot['confirmation']:
                 raise ValueError('State changed; inspect again')
