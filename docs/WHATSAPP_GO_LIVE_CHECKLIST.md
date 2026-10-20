@@ -16,7 +16,7 @@
 
 - [ ] 生产入口明确构造webhook应用、签名适配器、带超时的内部HTTP客户端和GraphSender；核对WABA、phone_number_id、内部provider/recipient及状态路径一致。
 - [ ] 编写生产服务启动/停止配置、健康检查、启动顺序、独立启用开关与秘密注入。当前 `scripts.meta_worker` 只支持模拟标记库，不能改标记后冒充生产运行。
-- [ ] 扩展Compose或系统服务和Caddy路由。当前 `docker-compose.production.yml` 只有主API、PostgreSQL和Caddy；现有Caddy把请求交给主API，尚未把webhook交给Meta桥接层。
+- [x] 准备默认关闭的 Compose 覆盖文件、webhook/adapter/worker 入口及 Caddy webhook 路由；见 [部署接线与回滚](WHATSAPP_DEPLOYMENT_WIRING.md)。模拟进程验证启停、内网调用及配置回滚。真实 secret 加载与 live factory 尚待上线阶段实现，不能仅替换占位就启用。
 - [ ] 落地管理员可达的绑定入口、试点发送者限制、监控通知接线与协调备份。当前monitor仅输出本机JSON，没有外部告警通知。
 - [ ] 使用选定Graph API版本及Meta测试资产验收真实签名、message ID、callback关联和状态通知；模拟样例版本不自动成为生产版本。
 

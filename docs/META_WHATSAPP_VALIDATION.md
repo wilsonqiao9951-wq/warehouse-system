@@ -1,3 +1,17 @@
+# 部署接线与配置回滚验证（2026-10-19）
+
+基线 15b63b7461a20ddfafbd1c16e7ee65f02cb761c1。隔离发布副本完整后端 **250 passed**，其中 WhatsApp/Meta 相关 **69 项**（新增部署测试 11 项）。
+
+新增实际子进程验证：默认禁用、危险配置拒绝、原始体签名 webhook、真实内网 HTTP 适配器绑定、模拟回复、并发 worker 拒绝、SIGTERM 停止、备份校验、回滚到 disabled 后 503、保留状态重启与重复事件不新增发送。测试使用临时独立数据库和 SyntheticSender，无 Meta 网络调用。
+
+本机未安装 Docker/Caddy；新增容器工作流独立检验 Compose 配置、Caddy 语法和实际反向代理路由，结果须以该提交 GitHub Actions 为准。公网 TLS、真实凭证加载、live factory 和官方沙箱仍未启用/验收。生产模板固定 disabled，不能仅填占位就发送。
+
+入口：[部署接线、配置占位和回滚步骤](WHATSAPP_DEPLOYMENT_WIRING.md)。前端和现有本机服务未修改，未开通付费服务。
+
+---
+
+## 前阶段运行保障记录
+
 # Worker、监控、备份及保留策略验证（2026-10-19）
 
 本阶段基线：6e59d7549a40f13ae2f165a7f99dae026f0c3184。最终发布副本完整后端 **239 passed**；WhatsApp/Meta 专项 **58 passed**，其中运行保障新增 **14 项**。
