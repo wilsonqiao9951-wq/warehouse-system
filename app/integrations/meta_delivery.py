@@ -26,7 +26,7 @@ class GraphSender:
             raise SendRejected('Graph token missing')
         # No redirects or HTTP auto-retries. A timeout/5xx may follow actual acceptance.
         with httpx.Client(transport=self.transport, timeout=httpx.Timeout(10, connect=3),
-                          follow_redirects=False) as client:
+                          follow_redirects=False, trust_env=False) as client:
             response = client.post(self.url, headers={'Authorization': 'Bearer '+self.token},
                                    json={**payload, 'biz_opaque_callback_data': key})
         if 400 <= response.status_code < 500:

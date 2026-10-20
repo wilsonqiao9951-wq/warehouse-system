@@ -1,3 +1,5 @@
+> 更新：production factory 与安全秘密加载已实现，仍默认关闭。本文保留上一阶段部署演练说明；关于“未实现 live factory/不读取秘密”的描述以 [生产入口说明](WHATSAPP_PRODUCTION_ENTRY.md) 为准。
+
 # WhatsApp 部署接线与回滚演练
 
 本阶段准备生产部署结构，真实通道保持关闭。`scripts.meta_deployment` 仅接受

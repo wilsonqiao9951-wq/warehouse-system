@@ -16,6 +16,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate composed configuration
         run: docker compose -f docker-compose.production.yml -f docker-compose.whatsapp.yml config --quiet
+      - name: Validate disabled production secret mounts (no service starts)
+        env:
+          WHATSAPP_SIGNING_SECRET_FILE: /tmp/placeholder-signing
+          META_APP_SECRET_FILE: /tmp/placeholder-app
+          META_VERIFY_TOKEN_FILE: /tmp/placeholder-verify
+          META_ACCESS_TOKEN_FILE: /tmp/placeholder-token
+        run: docker compose -f docker-compose.production.yml -f docker-compose.whatsapp.yml -f deploy/whatsapp.production.override.yml config --quiet
       - name: Validate Caddy routing syntax without certificate issuance
         run: >-
           docker run --rm -e API_DOMAIN -e WHATSAPP_DOMAIN

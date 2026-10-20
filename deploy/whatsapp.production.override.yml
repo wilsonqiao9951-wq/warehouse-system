@@ -1,0 +1,30 @@
+# Optional production preparation overlay; NOT used by the current deployment/CI.
+# Both switches remain hard-disabled. Loading placeholders does not activate a channel.
+services:
+  webhook:
+    environment: &production_channel
+      META_DEPLOYMENT_MODE: production
+      META_CHANNEL_ENABLED: 'false'
+      META_LIVE_SEND_ENABLED: 'false'
+      META_WABA_ID: ${META_WABA_ID:-REPLACE_BEFORE_ACTIVATION}
+      META_PHONE_NUMBER_ID: ${META_PHONE_NUMBER_ID:-REPLACE_BEFORE_ACTIVATION}
+      META_GRAPH_VERSION: ${META_GRAPH_VERSION:-REPLACE_BEFORE_ACTIVATION}
+      META_BRIDGE_STATE: /state/bridge.sqlite3
+      WHATSAPP_ADAPTER_STATE: /adapter-state/channel.sqlite3
+      WHATSAPP_SIGNING_SECRET_FILE: /run/secrets/whatsapp_signing_secret
+      META_APP_SECRET_FILE: /run/secrets/meta_app_secret
+      META_VERIFY_TOKEN_FILE: /run/secrets/meta_verify_token
+      META_ACCESS_TOKEN_FILE: /run/secrets/meta_access_token
+    volumes:
+      - ${WHATSAPP_SIGNING_SECRET_FILE:?Absolute private signing file}:/run/secrets/whatsapp_signing_secret:ro
+      - ${META_APP_SECRET_FILE:?Absolute private app secret file}:/run/secrets/meta_app_secret:ro
+      - ${META_VERIFY_TOKEN_FILE:?Absolute private verify token file}:/run/secrets/meta_verify_token:ro
+  adapter:
+    environment: *production_channel
+    volumes:
+      - ${WHATSAPP_SIGNING_SECRET_FILE:?Absolute private signing file}:/run/secrets/whatsapp_signing_secret:ro
+  worker:
+    environment: *production_channel
+    volumes:
+      - ${WHATSAPP_SIGNING_SECRET_FILE:?Absolute private signing file}:/run/secrets/whatsapp_signing_secret:ro
+      - ${META_ACCESS_TOKEN_FILE:?Absolute private access token file}:/run/secrets/meta_access_token:ro
