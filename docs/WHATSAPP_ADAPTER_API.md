@@ -1,3 +1,5 @@
+> 新增：生产适配器强制试点白名单，见 [试点授权与上线预检](WHATSAPP_PILOT_PREFLIGHT.md)。接收/发送继续默认关闭。
+
 # WhatsApp 个人身份与自动调用 API（待平台接入）
 
 配套文件：[OpenAPI接口定义](WHATSAPP_ADAPTER_OPENAPI.json) · [验证结果与复现步骤](WHATSAPP_VALIDATION.md)。

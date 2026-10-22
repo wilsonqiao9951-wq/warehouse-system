@@ -23,6 +23,10 @@ class Invitation(BaseModel):
     user_id:int=Field(gt=0)
     sender_id:str=Field(pattern=r'^[1-9][0-9]{5,19}$')
 
+class PilotInvitation(Invitation):
+    reason:str=Field(min_length=10,max_length=500)
+    expires_in:int=Field(default=604800,ge=60,le=2592000)
+
 class Message(BaseModel):
     model_config=ConfigDict(extra='forbid')
     provider_id:str=Field(min_length=1,max_length=100)
@@ -42,6 +46,8 @@ class Store:
         fd=os.open(self.path,os.O_CREAT|os.O_RDWR,0o600);os.close(fd);self.path.chmod(0o600)
         c=sqlite3.connect(self.path,timeout=30);c.row_factory=sqlite3.Row
         c.executescript('''
+        CREATE TABLE IF NOT EXISTS pilot_members(sender TEXT PRIMARY KEY,user_id INTEGER NOT NULL,org_id INTEGER NOT NULL,expires REAL NOT NULL,active INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS pilot_audit(id INTEGER PRIMARY KEY,org_id INTEGER NOT NULL,operator_id INTEGER NOT NULL,user_id INTEGER NOT NULL,action TEXT NOT NULL,reason TEXT NOT NULL,created REAL NOT NULL);
         CREATE TABLE IF NOT EXISTS bindings(sender TEXT PRIMARY KEY,user_id INTEGER NOT NULL,org_id INTEGER NOT NULL,device_id INTEGER NOT NULL,token_hash TEXT NOT NULL,expires REAL NOT NULL,active INTEGER NOT NULL DEFAULT 0,revoked INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS events(event_id TEXT PRIMARY KEY,sender TEXT NOT NULL,fingerprint TEXT NOT NULL,result TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS drafts(id TEXT PRIMARY KEY,sender TEXT NOT NULL,user_id INTEGER NOT NULL,org_id INTEGER NOT NULL,work_order_id INTEGER NOT NULL,claim_version INTEGER NOT NULL,payload TEXT NOT NULL,confirmation TEXT NOT NULL,expires REAL NOT NULL);
@@ -51,7 +57,7 @@ class Store:
         except Exception:c.rollback();raise
         finally:c.close()
 
-def create_app(*,enabled=False,signing_secret='',provider_id='simulation',recipient_id='simulation-line',state_path='artifacts/whatsapp/channel.sqlite3'):
+def create_app(*,enabled=False,signing_secret='',provider_id='simulation',recipient_id='simulation-line',state_path='artifacts/whatsapp/channel.sqlite3',pilot_required=False):
     if enabled and len(signing_secret)<32:raise ValueError('A dedicated random signing secret of at least 32 characters is required')
     app=FastAPI(title='WhatsApp channel adapter (provider-neutral)',version='0.1',docs_url=None,redoc_url=None)
     store=Store(state_path)
@@ -65,6 +71,45 @@ def create_app(*,enabled=False,signing_secret='',provider_id='simulation',recipi
     def audit(db,actor,action,entity_id):
         db.add(AuditLog(organization_id=actor.organization_id,user_id=actor.user_id,action=action,entity_type='whatsapp_binding',entity_id=entity_id,metadata_json='{}'));db.commit()
 
+    def pilot_check(c,sender,user_id,org_id):
+        if not pilot_required:return
+        row=c.execute('SELECT * FROM pilot_members WHERE sender=?',(sender,)).fetchone()
+        if not row or not row['active'] or row['expires']<=time.time() or row['user_id']!=user_id or row['org_id']!=org_id:
+            raise HTTPException(403,'Pilot authorization required')
+
+    @app.put('/api/channels/whatsapp/pilots')
+    def grant_pilot(payload:PilotInvitation,db=Depends(get_db),actor=Depends(get_current_actor)):
+        require_roles(actor,UserRole.ADMIN)
+        if actor.auth_method!='bearer':raise HTTPException(401,'Personal administrator login required')
+        user=db.scalar(select(User).where(User.id==payload.user_id,User.organization_id==actor.organization_id,User.is_active.is_(True)))
+        if not user or user.role!=UserRole.ENGINEER:raise HTTPException(404,'Active organization engineer not found')
+        with store.transaction() as c:
+            old=c.execute('SELECT * FROM pilot_members WHERE sender=?',(payload.sender_id,)).fetchone()
+            binding=c.execute('SELECT * FROM bindings WHERE sender=?',(payload.sender_id,)).fetchone()
+            if any(r and (r['org_id']!=actor.organization_id or r['user_id']!=user.id) for r in (old,binding)):
+                raise HTTPException(409,'Sender already reserved')
+            if old is None or not old['active'] or old['expires']<=time.time():
+                c.execute('UPDATE bindings SET active=0,revoked=1 WHERE sender=?',(payload.sender_id,))
+            expires=time.time()+payload.expires_in
+            c.execute('INSERT OR REPLACE INTO pilot_members VALUES(?,?,?,?,1)',(payload.sender_id,user.id,actor.organization_id,expires))
+            c.execute('INSERT INTO pilot_audit(org_id,operator_id,user_id,action,reason,created) VALUES(?,?,?,?,?,?)',
+                      (actor.organization_id,actor.user_id,user.id,'grant',payload.reason,time.time()))
+        return {'approved':True,'expires_at':expires,'binding_required':True}
+
+    @app.delete('/api/channels/whatsapp/pilots/{sender_id}')
+    def revoke_pilot(sender_id:str,reason:str,db=Depends(get_db),actor=Depends(get_current_actor)):
+        require_roles(actor,UserRole.ADMIN)
+        if actor.auth_method!='bearer':raise HTTPException(401,'Personal administrator login required')
+        if not 10<=len(reason.strip())<=500:raise HTTPException(422,'A reason of 10–500 characters is required')
+        with store.transaction() as c:
+            row=c.execute('SELECT * FROM pilot_members WHERE sender=? AND org_id=?',(sender_id,actor.organization_id)).fetchone()
+            if not row:raise HTTPException(404,'Pilot authorization not found')
+            c.execute('UPDATE pilot_members SET active=0 WHERE sender=?',(sender_id,))
+            c.execute('UPDATE bindings SET active=0,revoked=1 WHERE sender=? AND org_id=?',(sender_id,actor.organization_id))
+            c.execute('INSERT INTO pilot_audit(org_id,operator_id,user_id,action,reason,created) VALUES(?,?,?,?,?,?)',
+                      (actor.organization_id,actor.user_id,row['user_id'],'revoke',reason,time.time()))
+        return {'revoked':True,'new_binding_required':True}
+
     @app.post('/api/channels/whatsapp/bindings')
     def invite(payload:Invitation,db=Depends(get_db),actor=Depends(get_current_actor)):
         require_roles(actor,UserRole.ADMIN)
@@ -72,6 +117,7 @@ def create_app(*,enabled=False,signing_secret='',provider_id='simulation',recipi
         user=db.scalar(select(User).where(User.id==payload.user_id,User.organization_id==actor.organization_id,User.is_active.is_(True)))
         if not user or user.role!=UserRole.ENGINEER:raise HTTPException(404,'Active organization engineer not found')
         with store.transaction() as c:
+            pilot_check(c,payload.sender_id,user.id,actor.organization_id)
             existing=c.execute('SELECT * FROM bindings WHERE sender=?',(payload.sender_id,)).fetchone()
             if existing and (existing['org_id']!=actor.organization_id or (not existing['revoked'] and (existing['active'] or existing['expires']>=time.time()))):raise HTTPException(409,'Sender already reserved')
             if existing:c.execute('DELETE FROM bindings WHERE sender=?',(payload.sender_id,))
@@ -97,6 +143,7 @@ def create_app(*,enabled=False,signing_secret='',provider_id='simulation',recipi
     def bound_actor(c,db,sender,allow_pending=False):
         b=c.execute('SELECT * FROM bindings WHERE sender=?',(sender,)).fetchone()
         if not b or b['revoked'] or (not allow_pending and not b['active']):raise HTTPException(403,'Sender not bound')
+        pilot_check(c,sender,b['user_id'],b['org_id'])
         user=db.get(User,b['user_id']);org=db.get(Organization,b['org_id']);device=db.get(UserDevice,b['device_id'])
         if not user or not user.is_active or user.role!=UserRole.ENGINEER or user.organization_id!=b['org_id'] or not org or not org.is_active or not device or not device.is_active or device.revoked_at is not None or device.user_id!=user.id or device.organization_id!=org.id:raise HTTPException(403,'Binding no longer authorized')
         db.info['organization_id']=org.id

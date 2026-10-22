@@ -1,3 +1,5 @@
+> 新增：生产适配器强制试点白名单，见 [试点授权与上线预检](WHATSAPP_PILOT_PREFLIGHT.md)。接收/发送继续默认关闭。
+
 # 生产入口与安全密钥加载
 
 本阶段实现 production factory，但没有启用任何真实通道。默认仍为 disabled；可选择

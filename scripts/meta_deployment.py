@@ -47,7 +47,7 @@ def adapter_app():
         return adapter_factory()
     if config['mode'] == 'production':
         return adapter_factory(enabled=True, signing_secret=config['secret'], provider_id=config['provider'],
-                               recipient_id=config['recipient'], state_path=config['adapter_state'])
+                               recipient_id=config['recipient'], state_path=config['adapter_state'], pilot_required=True)
     return adapter_factory(enabled=True, signing_secret=config['secret'],
                            state_path=config['root'] / 'adapter.sqlite3')
 

@@ -104,6 +104,7 @@ def test_production_factories_signed_binding_and_graph_mock(production,monkeypat
         assert request.url.path=='/v99.0/654321/messages'
         return httpx.Response(200,json={'messages':[{'id':'fake-'+str(len(calls))}]})
     with TestClient(app) as adapter,TestClient(deploy.webhook_app()) as webhook:
+        assert adapter.put('/api/channels/whatsapp/pilots',headers=setup[1],json={'user_id':setup[2][1],'sender_id':'15550000001','reason':'Isolated pilot verification'}).status_code==200
         code=adapter.post('/api/channels/whatsapp/bindings',headers=setup[1],json={'user_id':setup[2][1],'sender_id':'15550000001'}).json()['binding_code']
         payload={'object':'whatsapp_business_account','entry':[{'id':'123456','changes':[{'field':'messages','value':{'messaging_product':'whatsapp','metadata':{'phone_number_id':'654321'},'messages':[{'id':'production-mock-binding','from':'15550000001','timestamp':str(int(time.time())),'type':'text','text':{'body':'绑定 '+code}}]}}]}]}
         raw=json.dumps(payload).encode();sig='sha256='+hmac.new(production['META_APP_SECRET'].read_bytes(),raw,hashlib.sha256).hexdigest()
