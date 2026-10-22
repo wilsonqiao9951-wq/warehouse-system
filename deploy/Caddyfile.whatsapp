@@ -1,0 +1,18 @@
+{$API_DOMAIN} {
+    encode gzip
+    @private_channel path /api/channels/* /webhooks/*
+    respond @private_channel 404
+    reverse_proxy api:8000
+}
+{$WHATSAPP_DOMAIN} {
+    @meta path /webhooks/meta/whatsapp
+    handle @meta {
+        request_body {
+            max_size 256KB
+        }
+        reverse_proxy webhook:8012
+    }
+    handle {
+        respond 404
+    }
+}

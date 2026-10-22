@@ -1,0 +1,32 @@
+name: Muse backend task
+description: Specify a backend change and its acceptance criteria
+title: '[Muse] '
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem and expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: API inputs, outputs, roles and model/organization scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance examples and tests
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Synthetic examples or public source references
+      description: Do not include passwords, tokens, customer records or private work orders.
+  - type: textarea
+    id: api_trace
+    attributes:
+      label: Contract version and API trace
+      description: Include /api/muse contract_version, response X-Request-ID, HTTP method/path/status, and a synthetic or redacted request. Never include Authorization, passwords, device tokens, or private work-order/customer content.

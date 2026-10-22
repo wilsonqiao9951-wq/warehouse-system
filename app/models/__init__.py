@@ -27,6 +27,7 @@ from app.models.entities import (
 )
 
 __all__ = [
+    "RepairCaseReport",
     "InventoryTransaction",
     "ImportBatch",
     "AuditLog",
@@ -53,3 +54,4 @@ __all__ = [
     "WorkOrderPartMemory",
     "WorkOrderVoiceNote",
 ]
+from app.models.entities import RepairCaseReport

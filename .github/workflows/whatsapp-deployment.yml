@@ -1,0 +1,49 @@
+name: WhatsApp deployment simulation
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  disabled-container-wiring:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API_DOMAIN: http://api.localhost
+      WHATSAPP_DOMAIN: http://wa.localhost
+      FRONTEND_PUBLIC_URL: https://frontend.example.invalid
+      JWT_SECRET_KEY: ci-only-disabled-deployment-secret-at-least-32-characters
+      POSTGRES_PASSWORD: ci-only-disabled-password
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate composed configuration
+        run: docker compose -f docker-compose.production.yml -f docker-compose.whatsapp.yml config --quiet
+      - name: Validate disabled production secret mounts (no service starts)
+        env:
+          WHATSAPP_SIGNING_SECRET_FILE: /tmp/placeholder-signing
+          META_APP_SECRET_FILE: /tmp/placeholder-app
+          META_VERIFY_TOKEN_FILE: /tmp/placeholder-verify
+          META_ACCESS_TOKEN_FILE: /tmp/placeholder-token
+        run: docker compose -f docker-compose.production.yml -f docker-compose.whatsapp.yml -f deploy/whatsapp.production.override.yml config --quiet
+      - name: Validate Caddy routing syntax without certificate issuance
+        run: >-
+          docker run --rm -e API_DOMAIN -e WHATSAPP_DOMAIN
+          -v "$PWD/deploy/Caddyfile.whatsapp:/etc/caddy/Caddyfile:ro"
+          caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Start disabled deployment on ephemeral CI host
+        run: docker compose -f docker-compose.production.yml -f docker-compose.whatsapp.yml up -d --build
+      - name: Verify private routes and disabled webhook through proxy
+        run: |
+          for attempt in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: wa.localhost' http://127.0.0.1/webhooks/meta/whatsapp || true)
+            if [ "$code" = 503 ]; then break; fi
+            sleep 2
+          done
+          test "$code" = 503
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: wa.localhost' http://127.0.0.1/health)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: wa.localhost' http://127.0.0.1/api/channels/whatsapp/bindings)" = 404
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: api.localhost' http://127.0.0.1/api/channels/whatsapp/bindings)" = 404
+          docker compose -f docker-compose.production.yml -f docker-compose.whatsapp.yml exec -T webhook python -c "import urllib.request,json; assert json.load(urllib.request.urlopen('http://127.0.0.1:8012/health'))['enabled'] is False"
+      - name: Stop without deleting persistent state
+        run: docker compose -f docker-compose.production.yml -f docker-compose.whatsapp.yml stop -t 90
+      - name: Clean only ephemeral CI resources
+        if: always()
+        run: docker compose -f docker-compose.production.yml -f docker-compose.whatsapp.yml down -v

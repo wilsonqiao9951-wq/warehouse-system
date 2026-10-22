@@ -1,0 +1,35 @@
+{
+  "archive_sha256": "52de999465e662ee17fd0cca8112afa3be202a099d722c44bf551549f474a732",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "52a035fce0dc4fea118b166bfe1c19ca95321419692db76db0d603d3c400d87e"
+    },
+    {
+      "name": "catalog-001.b64",
+      "sha256": "e1b3d90e2bfeb0582d8ddf617897d41696465409f662c7fe759431ee7d8519a6"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/ed_added_parts.json",
+      "sha256": "d2d7a413886cb76eef78660c75099b637d2e39ed7edd3a9a29b909b232894a8b"
+    },
+    {
+      "path": "data/organized/ed_added_manifest.json",
+      "sha256": "49b4071e086fa6f79c25c35c44f3cf16319bfa822b04586bc0e7f06b63dcb969"
+    },
+    {
+      "path": "data/organized/ed_graph.json",
+      "sha256": "9e670dd1f560205ca5d40f6b8a84e6583c86981dee67ccb75bdc72d1dc48ffba"
+    },
+    {
+      "path": "data/organized/ed_parts_catalog.json",
+      "sha256": "c39539e45c9fd30c695bac77241b451ce4b864f75dca762189f0eea1082b43ef"
+    },
+    {
+      "path": "data/verification/ed_new_official_parts.json",
+      "sha256": "a8e74bd52c652fca8f759bc92354f1d9bce5e16ea76fc76f7e4058f6abb0c3a1"
+    }
+  ]
+}

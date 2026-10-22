@@ -1,0 +1,31 @@
+{
+  "archive_sha256": "ae7b7f585a995bd5c385bb24a0e8eb6bca38a60cf1d58ed4aea7c260ae3ce27a",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "c4c7e557b8bb8aa9cdf8a4003b1acff5e54901531703edf3beb994f7b13bb8a8"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/quest_added_parts.json",
+      "sha256": "743dc9028ee2edac9aba14a24a7bfc0e1ef2b7235d0819bc4d6ce1f52fa28fba"
+    },
+    {
+      "path": "data/organized/quest_added_manifest.json",
+      "sha256": "01e8640cb46f4ddc32478d8e743717b320c7e7d616f8099f41c8a781ad50ce4b"
+    },
+    {
+      "path": "data/organized/quest_graph.json",
+      "sha256": "86cd0b7119a7f46396b2417bde6cad174235e5331ff62965331dfb171b276298"
+    },
+    {
+      "path": "data/organized/quest_parts_catalog.json",
+      "sha256": "a818fdb16c8b4f7e3528ce8638977230efbc1f449c41f91be76c07416fd39169"
+    },
+    {
+      "path": "data/verification/quest_new_official_parts.json",
+      "sha256": "8dba5d1379b8390bd3027bb21eecbf76e45a6130edc0966d70a2b25dd1b20d6a"
+    }
+  ]
+}

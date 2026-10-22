@@ -51,9 +51,15 @@ def upgrade() -> None:
         bind.execute(
             sa.text(
                 "INSERT INTO organizations (id, name, slug, is_active) "
-                "VALUES (1, 'Default Organization', 'default', 1)"
+                "VALUES (1, 'Default Organization', 'default', TRUE)"
             )
         )
+        # Explicit seed IDs do not advance PostgreSQL's SERIAL sequence.
+        if bind.dialect.name == 'postgresql':
+            bind.execute(sa.text(
+                "SELECT setval(pg_get_serial_sequence('organizations', 'id'), "
+                "(SELECT MAX(id) FROM organizations), true)"
+            ))
 
     tables = set(sa.inspect(bind).get_table_names())
     for table_name in TENANT_TABLES:

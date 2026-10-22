@@ -31,3 +31,16 @@ settings = Settings()
 if settings.app_env.lower() != "test":
     settings.rbac_enforce = True
     settings.legacy_header_auth = False
+
+
+def validate_production_settings() -> None:
+    if settings.app_env.lower() not in {"production", "staging"}:
+        return
+    secret=settings.jwt_secret_key
+    if len(secret)<32 or secret=="development-only-change-me-32-bytes-minimum" or secret.startswith(("replace-","generate-")):
+        raise RuntimeError("Configure a unique random JWT_SECRET_KEY before deploying")
+    if settings.app_debug:
+        raise RuntimeError("APP_DEBUG must be false outside development")
+
+
+validate_production_settings()

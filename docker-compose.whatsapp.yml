@@ -1,0 +1,57 @@
+# Overlay: docker compose --env-file <private-env> -f docker-compose.production.yml -f docker-compose.whatsapp.yml ...
+# All channel services disabled. No live secrets are loaded by this release.
+services:
+  webhook:
+    build: .
+    command: [uvicorn, scripts.meta_deployment:webhook_app, --factory, --host, 0.0.0.0, --port, '8012', --no-access-log]
+    environment: &channel_env
+      META_DEPLOYMENT_MODE: disabled
+      META_LIVE_SEND_ENABLED: 'false'
+      WHATSAPP_ADAPTER_ENABLED: 'false'
+      META_ADAPTER_URL: http://adapter:8011
+      DATABASE_URL: postgresql+psycopg://mycoke:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/mycoke
+      APP_ENV: production
+      APP_DEBUG: 'false'
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY}
+    volumes: [whatsapp_state:/state]
+    expose: ['8012']
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+  adapter:
+    build: .
+    command: [uvicorn, scripts.meta_deployment:adapter_app, --factory, --host, 0.0.0.0, --port, '8011', --no-access-log]
+    environment: *channel_env
+    volumes: [whatsapp_adapter_state:/adapter-state]
+    expose: ['8011']
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+      api: {condition: service_started}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+  worker:
+    build: .
+    command: [python, -m, scripts.meta_deployment, worker]
+    environment: *channel_env
+    volumes: [whatsapp_state:/state]
+    restart: 'no'
+    stop_grace_period: 90s
+    depends_on:
+      webhook: {condition: service_healthy}
+      adapter: {condition: service_healthy}
+  https:
+    environment:
+      WHATSAPP_DOMAIN: ${WHATSAPP_DOMAIN:?Set placeholder or approved WhatsApp domain}
+    volumes:
+      - ./deploy/Caddyfile.whatsapp:/etc/caddy/Caddyfile:ro
+    depends_on: [api, webhook]
+volumes:
+  whatsapp_state:
+  whatsapp_adapter_state:

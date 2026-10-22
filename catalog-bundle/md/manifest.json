@@ -1,0 +1,31 @@
+{
+  "archive_sha256": "299a18ac995d7394d431220efebccd7d4c5ef107662a18d4515eb31bb4b16604",
+  "chunks": [
+    {
+      "name": "catalog-000.b64",
+      "sha256": "7544baa26d806b52c0e2a4dca155d688ae5a4bb369ca1590c97eae2bd8775328"
+    }
+  ],
+  "files": [
+    {
+      "path": "data/organized/md_added_parts.json",
+      "sha256": "0a2e1cb37f8ed0f90d4888e267da7cc8c4e39451ff3a532ca45d2c0536b2e3f2"
+    },
+    {
+      "path": "data/organized/md_added_manifest.json",
+      "sha256": "a90c8b9cd388bd28ccd557b11718599fc9df53f2f2d7f423f220da0d20738c70"
+    },
+    {
+      "path": "data/organized/md_graph.json",
+      "sha256": "35a9d045dc02ce55c71442b1ddc655cf4005fab2bbd393669ca4e0bfa4d51356"
+    },
+    {
+      "path": "data/organized/md_parts_catalog.json",
+      "sha256": "f3e50ba0b0ae1bbdcf798aa628e69fa8fb15b5ef5046f79647da807c3c44e6f9"
+    },
+    {
+      "path": "data/verification/md_new_official_parts.json",
+      "sha256": "507a8a882c2d64d1a314a047ea9af55118b22c2f68faed531f347b68085ee2da"
+    }
+  ]
+}

@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.pages import pages_router
 from app.api.routes import router
+from app.api.catalog import catalog_router
+from app.api.muse import muse_router
 from app.core.config import settings
 from app.core.database import Base, engine, ensure_schema_compatibility
 from app.core.logging import setup_logging
@@ -36,6 +38,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(router, prefix="/api")
+app.include_router(catalog_router, prefix="/api")
+app.include_router(muse_router, prefix="/api")
 app.include_router(pages_router)
 uploads_dir = Path("uploads")
 uploads_dir.mkdir(parents=True, exist_ok=True)

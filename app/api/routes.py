@@ -750,8 +750,9 @@ async def record_part_observation(
         PartMachineAssociation.machine_model == machine_model.strip(), PartMachineAssociation.part_id == part.id
     ))
     if association:
-        association.confirmed_count += 1
-        association.last_confirmed_at = datetime.utcnow()
+        if association.recognition_source != "field_verified":
+            association.confirmed_count += 1
+            association.last_confirmed_at = datetime.utcnow()
         association.photo_url = photo_url or association.photo_url
     else:
         association = PartMachineAssociation(machine_model=machine_model.strip(), part_id=part.id, photo_url=photo_url)
@@ -1741,6 +1742,7 @@ def update_replenishment_request(
 @router.get("/work-orders/{work_order_id}/part-recommendations", response_model=list[WorkOrderPartRecommendation])
 def work_order_part_recommendations(
     work_order_id: int,
+    symptom_code: str = Query(default='', max_length=80),
     db: Session = Depends(get_db),
     actor: Actor = Depends(get_current_actor),
 ):
@@ -1748,26 +1750,20 @@ def work_order_part_recommendations(
     work_order = db.get(WorkOrder, work_order_id)
     if not work_order:
         raise HTTPException(status_code=404, detail="Work order not found")
-    memories = db.scalars(select(WorkOrderPartMemory).where(
-        or_(
-            and_(WorkOrderPartMemory.machine_type == work_order.machine_type, WorkOrderPartMemory.job_type == work_order.job_type),
-            WorkOrderPartMemory.machine_type == work_order.machine_type,
-            WorkOrderPartMemory.job_type == work_order.job_type,
-        )
-    ).order_by(WorkOrderPartMemory.usage_count.desc(), WorkOrderPartMemory.total_quantity.desc()).limit(20)).all()
-    recommendations = []
-    for memory in memories:
-        part = db.get(Part, memory.part_id)
-        if part:
-            average = max(1, round(memory.total_quantity / memory.usage_count))
-            exact = memory.machine_type == work_order.machine_type and memory.job_type == work_order.job_type
-            basis = "相同机型和工单类型" if exact else ("相同机型" if memory.machine_type == work_order.machine_type else "相同工单类型")
-            recommendations.append(WorkOrderPartRecommendation(
-                part=PartRead.model_validate(part), recommended_quantity=average,
-                usage_count=memory.usage_count, total_quantity=memory.total_quantity,
-                reason=f"基于{basis}：历史上 {memory.usage_count} 个类似工单使用过，平均每单 {average} 件。",
-            ))
-    return recommendations
+    from app.services.repair_guidance import guidance
+    evidence = guidance(db, actor.organization_id, work_order, [symptom_code])
+    parts = {p.id: p for p in db.scalars(select(Part).where(
+        Part.organization_id == actor.organization_id,
+        Part.id.in_([r['part_id'] for r in evidence['part_candidates']])))}
+    return [WorkOrderPartRecommendation(
+        part=PartRead.model_validate(parts[row['part_id']]),
+        recommended_quantity=None, usage_count=0, total_quantity=0,
+        reason=row['recommendation_reason'], source='reviewed_case_report_part_reference',
+        source_case_ids=row['source_case_ids'], available_quantity=row['available_quantity'],
+        needs_more_evidence=row['needs_more_evidence'], compatibility_confirmed=False,
+        quantity_confirmation_required=True, reviewed_evidence=row,
+    ) for row in evidence['part_candidates'] if row['is_active']]
+
 
 
 @router.get("/work-order-parts", response_model=list[WorkOrderPartRead])

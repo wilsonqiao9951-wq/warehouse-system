@@ -1,3 +1,14 @@
+> **Shared myCoke backend / Muse integration**
+>
+> This repository now includes the reviewed myCoke catalog, Viper 3 and Freestyle model queries, tenant-scoped inventory/work orders, and the Muse gateway. Existing frontend source is unchanged. This is deployment preparation, not a live public API.
+>
+> - [Muse 项目介绍及接入协议](docs/MUSE_PROJECT_BRIEF.md)
+> - [共享后端与反馈审核机制](docs/MUSE_SHARED_BACKEND.md)
+> - [DigitalOcean 开通步骤与费用](docs/DIGITALOCEAN_SETUP.md)
+> - [生产部署与数据恢复](docs/SHARED_BACKEND_DEPLOYMENT.md)
+>
+> Before local backend tests/startup: `python -m scripts.install_catalog_bundle`. Docker builds restore and verify the same public catalog automatically. Never initialize production using demo accounts.
+
 # OpenPartsFlow
 
 OpenPartsFlow is an open-source parts inventory and work-order usage tracking system for field service teams.
